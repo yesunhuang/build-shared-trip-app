@@ -1,8 +1,18 @@
 # Input schema
 
+This file describes trip content in two forms:
+
+- the **self-hosted canonical trip**, which the server stores, the browser and MCP edit, and import/export carries; and
+- the **legacy authoring envelope** read by `validate-trip.mjs` and `init-trip.mjs`. The service can import it.
+
+The two forms share field shapes for days, plans, reminders, localization, maps, photos, weather, and resources. They differ in how strictly they are validated.
+
 ## Contents
 
-- [Authoring envelope](#authoring-envelope)
+- [Self-hosted canonical trip](#self-hosted-canonical-trip)
+- [Draft validation](#draft-validation)
+- [Import mapping](#import-mapping)
+- [Authoring envelope](#authoring-envelope) (legacy)
 - [Trip and localization](#trip-and-localization)
 - [Reminders](#reminders)
 - [Days and plans](#days-and-plans)
@@ -10,12 +20,76 @@
 - [Recommendations](#recommendations)
 - [Weather](#weather)
 - [Resources](#resources)
-- [Synchronization](#synchronization)
-- [Validation](#validation)
+- [Synchronization](#synchronization) (legacy)
+- [Legacy generator authoring checks](#legacy-generator-authoring-checks)
+
+## Self-hosted canonical trip
+
+The server owns `id`, `version`, and `updatedAt`. Clients never choose a new trip's `id`, and they cannot change it later.
+
+```json
+{
+  "id": "server-assigned",
+  "version": 3,
+  "archived": false,
+  "updatedAt": "2030-05-01T12:00:00.000Z",
+  "title": "Coastal trip",
+  "timezone": "Europe/Lisbon",
+  "country": "Portugal",
+  "dateRange": { "start": "2030-06-01", "end": "2030-06-09" },
+  "route": "Lisbon · Sintra · Porto",
+  "days": [
+    { "id": "day-2030-06-01", "date": "2030-06-01", "label": "Arrive", "area": "Lisbon", "slots": [] }
+  ],
+  "reminders": [],
+  "participantGroups": [],
+  "tips": [],
+  "i18n": {}
+}
+```
+
+- `days[].slots` holds plans, using the [plan shape](#days-and-plans) below. Reminders, participant groups, and `i18n` patches use the same shapes as the legacy input.
+- Optional compatibility content, such as `resources`, `weather`, recommendations, and day-level `i18n`, is kept when present. It never needs to be invented.
+- Responses also include the read-only aliases `slug` (= `id`), `startDate`, `endDate`, and `routeDecoration` (= `route`) for the shared template. Treat them as read-only; edit `dateRange` and `route` through canonical fields; the ID cannot change.
+- Other optional top-level fields: `shortName`, `metaDescription`, `theme` (`ink`/`accent`/`background` hex colors), `disclaimer`, and `content`. Plans, days, reminders, and groups may carry a `compat` object. Import preserves unmapped nested fields in `compat.unmapped` and unmapped root fields in `content.importExtras`, with warnings.
+
+To change a trip, send operations (`update_trip`, `upsert_day`, `upsert_plan`, `upsert_reminder`, the matching `delete_*` operations, `archive_trip`, and `replace_content`) with `expectedVersion` and `requestId`. See [self-hosted.md](self-hosted.md#http-interface).
+
+## Draft validation
+
+Saving a trip on the service checks the **structure** only. A new trip can start as `{ "title": "…" }`, and the following are all optional while you edit:
+
+- dates and days, which may be added later, up to 31 days per trip (`dateRange` start/end may be empty strings until dates are known);
+- plan times, Maps URLs, photos, and booking details;
+- `zh-Hans`, `zh-Hant`, and `ja` translations, which fall back to the source text;
+- recommendations (no minimum count), weather locations, and resources.
+
+The server still rejects a whole batch, with nothing saved, if it contains any of the following:
+
+- unknown fields or fields that are not allowed;
+- wrong types or oversized strings and arrays (for example, more than 80 plans per day, 80 reminders, or 100 operations per batch);
+- impossible calendar dates, or time zones that are not IANA zones;
+- field names that look like booking codes or identity secrets (the same rule the generator applies);
+- duplicate or missing nested IDs;
+- references to a day or plan that does not exist;
+- `javascript:`, `data:`, or other dangerous URL schemes;
+- prototype-pollution keys (`__proto__`, `constructor`, `prototype`).
+
+Editing a source field removes the `i18n` values that depend on it, unless the same request also updates those translations. Editing a plan's time recomputes or clears stale `sortTime`/`sortOrder`.
+
+## Import mapping
+
+`POST /api/import` and the home-page import control accept either this file's legacy authoring envelope or a self-hosted export.
+
+- `trip.*` content, `days[].plans`, reminders, participant groups, localizations, resources, and weather are mapped to the canonical trip. Nested IDs are kept.
+- `app.name`, `app.shortName`, `app.metaDescription`, and `app.theme` map to corresponding trip content. The original authoring envelope is retained in `content.authoringEnvelope`; icons and `sync.*` are inert and do not select a backend.
+- Every field that is not mapped is listed in the response `warnings`.
+- An available incoming trip ID is preserved. A duplicate import creates a different trip ID and reports that choice; an identical requestId retry returns the original result. Existing trips are never overwritten.
+- Imports use draft validation, not the stricter legacy checks.
 
 ## Authoring envelope
 
-Use JSON with this top-level shape:
+*Legacy generator input.* The self-hosted service can import it. Use JSON with this top-level shape:
 
 ```json
 {
@@ -58,7 +132,7 @@ Optional custom icons are paths relative to the input JSON:
 
 ## Trip and localization
 
-Required trip fields:
+Required trip fields for legacy generator input (the service needs only a title):
 
 ```json
 {
@@ -104,7 +178,7 @@ English is the base value. Add `i18n` patches on each traveler-facing object:
 }
 ```
 
-Do not put `title` in a locale patch. The app name is a literal brand. Do not localize IDs, dates, time zones, plan types, coordinates, URLs, sort fields, or participant group IDs.
+Do not put `title` in a locale patch. The app name is a literal brand. When a source value changes, remove its now-stale patches; the self-hosted server does this automatically. Do not localize IDs, dates, time zones, plan types, coordinates, URLs, sort fields, or participant group IDs.
 
 Participant groups describe people who always move together:
 
@@ -221,13 +295,13 @@ For a plan that should appear on the map, use the full browser address-bar URL f
 
 Share links such as `maps.app.goo.gl/...` are intentionally rejected. The generator uses the final `!3d`/`!4d` coordinates even when the earlier `@lat,lng` viewport differs. Omit the field entirely for a timeline-only placeholder; if a non-empty URL is supplied, it must still meet every rule above. Recommendation `mapsUrl` values remain required.
 
-Each plan and recommendation needs `photo.url`, `photo.sourceUrl`, and `photo.credit`. Use an image you are licensed to reuse. Prefer official tourism media, Wikimedia Commons, or a user-supplied image. Record the creator and license. Do not scrape Google Maps, Tabelog, or commercial review photos.
+Legacy generator input requires `photo.url`, `photo.sourceUrl`, and `photo.credit` on every plan and recommendation. Self-hosted drafts may omit photos. When a photo is present, it needs all three fields. Use an image you are licensed to reuse. Prefer official tourism media, Wikimedia Commons, or a user-supplied image. Record the creator and license. Do not scrape Google Maps, Tabelog, or commercial review photos.
 
 Keep the original photo/source/credit fields in the authoring JSON. The runtime selects bounded remote thumbnails; `scripts/optimize-photos.mjs` can additionally build local WebP previews and a URL-to-asset manifest after generation. See [responsive-performance.md](responsive-performance.md) for budgets, cache invalidation, and testing.
 
 ## Recommendations
 
-Each day requires at least:
+Recommendations are optional for self-hosted drafts. When you add them, use this shape. **Legacy generator input** requires each day to have at least:
 
 - five `eat` places;
 - five `seeGo` places;
@@ -313,15 +387,17 @@ Use direct Apple App Store links. Do not recommend Maps, Weather, or Translate w
 
 ## Synchronization
 
+*Legacy generator only.* The self-hosted service ignores `sync` and synchronizes through its own server. Firebase is optional even for the generator: with `firebaseConfig: null`, the generated app uses local-only preview storage.
+
 `firebaseConfig` is the public Firebase web-app configuration, not a service account. Only these keys are allowed: `apiKey`, `authDomain`, `projectId`, `storageBucket`, `messagingSenderId`, `appId`, and optional `measurementId`.
 
 Set `sync.firestoreRegion` to the location selected when creating the project's default Firestore database. The generator's fallback is `nam5`; it does not discover an existing database's region. See [firebase-deployment.md](firebase-deployment.md) before configuring or deploying a backend.
 
 Use an unguessable two-segment `documentPath`. Preserve it when regenerating the same trip. A missing path is generated randomly and written into the generated `trip-input.json` build record.
 
-## Validation
+## Legacy generator authoring checks
 
-Run:
+These complete-content checks apply only to the legacy generator. They are separate from the service's [draft validation](#draft-validation), and their tests and requirements are unchanged. Run:
 
 ```bash
 node scripts/validate-trip.mjs trip.json

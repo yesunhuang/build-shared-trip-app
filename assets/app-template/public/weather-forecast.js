@@ -1,19 +1,26 @@
 const seedTrip = readSeedTrip();
-const WEATHER_CONFIG = seedTrip.weather || {};
+const WEATHER_CONFIG = seedTrip.weather && typeof seedTrip.weather === "object" ? seedTrip.weather : {};
 const CACHE_KEY = `${seedTrip.slug || "shared-trip"}-weather-v1`;
+// Self-hosted trip locations are protected data: keep forecasts in memory only.
+const PERSIST_FORECAST = typeof window === "undefined" || window.SHARED_TRIP_HOSTED !== true;
 const TRIP_TIMEZONE = seedTrip.timezone || "UTC";
 
 export const FORECAST_LOCATIONS = Object.freeze(
-  (WEATHER_CONFIG.locations || []).map((location) => Object.freeze(location))
+  (Array.isArray(WEATHER_CONFIG.locations) ? WEATHER_CONFIG.locations : [])
+    .filter((location) => location && typeof location === "object" && location.id
+      && Number.isFinite(Number(location.lat)) && Number.isFinite(Number(location.lng)))
+    .map((location) => Object.freeze(location))
 );
 
+const KNOWN_LOCATION_IDS = new Set(FORECAST_LOCATIONS.map((location) => location.id));
+
 export const DAY_FORECAST_LOCATIONS = Object.freeze(Object.fromEntries(
-  (seedTrip.days || []).map((day) => [
+  (Array.isArray(seedTrip.days) ? seedTrip.days : []).filter((day) => day && day.id).map((day) => [
     day.id,
     Object.freeze(
-      WEATHER_CONFIG.dayLocations?.[day.id]
+      [].concat(WEATHER_CONFIG.dayLocations?.[day.id]
         || day.weatherLocationIds
-        || []
+        || []).filter((id) => KNOWN_LOCATION_IDS.has(id))
     )
   ])
 ));
@@ -91,15 +98,18 @@ export async function fetchTripForecast() {
     }
   });
   const forecast = { fetchedAt: new Date().toISOString(), locations };
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(forecast));
-  } catch {
-    // The fresh in-memory forecast is still available when local storage is blocked.
+  if (PERSIST_FORECAST) {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(forecast));
+    } catch {
+      // The fresh in-memory forecast is still available when local storage is blocked.
+    }
   }
   return forecast;
 }
 
 export function loadCachedTripForecast() {
+  if (!PERSIST_FORECAST) return null;
   try {
     const value = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
     return value?.locations ? value : null;

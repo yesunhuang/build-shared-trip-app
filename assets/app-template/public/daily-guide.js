@@ -1,4 +1,9 @@
-const seedTrip = readSeedTrip();
+let guideTrip = readSeedTrip();
+
+// The app passes its current trip so edited or newly added dates use live data.
+export function setGuideTrip(trip) {
+  if (trip && typeof trip === "object" && !Array.isArray(trip)) guideTrip = trip;
+}
 
 function readSeedTrip() {
   try {
@@ -22,11 +27,11 @@ function localized(value, language) {
 }
 
 function dayFor(dayId) {
-  return (seedTrip.days || []).find((day) => day.id === dayId);
+  return (Array.isArray(guideTrip.days) ? guideTrip.days : []).find((day) => day && day.id === dayId);
 }
 
 function withCategory(items, category) {
-  return (items || []).map((item) => ({
+  return (Array.isArray(items) ? items : []).filter((item) => item && typeof item === "object").map((item) => ({
     ...item,
     categories: Array.isArray(item.categories) && item.categories.length ? item.categories : [category]
   }));
@@ -39,8 +44,11 @@ export function getDayArea(dayId, language = "en") {
 
 export function getDayGuide(dayId, language = "en") {
   const day = localized(dayFor(dayId) || {}, language);
-  const recommendations = day.recommendations || day.guide || {};
-  const restaurants = recommendations.restaurants || recommendations.eat || [];
+  const rawRecommendations = day.recommendations || day.guide || {};
+  const recommendations = rawRecommendations && typeof rawRecommendations === "object" ? rawRecommendations : {};
+  const restaurants = (Array.isArray(recommendations.restaurants) ? recommendations.restaurants
+    : Array.isArray(recommendations.eat) ? recommendations.eat : [])
+    .filter((item) => item && typeof item === "object");
   const extras = [
     ...withCategory(recommendations.seeGo || recommendations.see || [], "see"),
     ...withCategory(recommendations.buy || [], "buy"),
@@ -48,16 +56,16 @@ export function getDayGuide(dayId, language = "en") {
     ...withCategory(recommendations.snack || [], "snack")
   ];
   return {
-    note: recommendations.note || "",
+    note: typeof recommendations.note === "string" ? recommendations.note : "",
     restaurants,
     extras
   };
 }
 
 export function getPlacePhoto(slotId) {
-  const slot = (seedTrip.days || [])
-    .flatMap((day) => day.slots || day.plans || [])
-    .find((candidate) => candidate.id === slotId);
+  const slot = (Array.isArray(guideTrip.days) ? guideTrip.days : [])
+    .flatMap((day) => (Array.isArray(day?.slots) ? day.slots : Array.isArray(day?.plans) ? day.plans : []))
+    .find((candidate) => candidate && candidate.id === slotId);
   if (!slot?.photo) return null;
   return typeof slot.photo === "string" ? { url: slot.photo } : slot.photo;
 }

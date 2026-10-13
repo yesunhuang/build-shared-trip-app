@@ -18,3 +18,9 @@ application_default_credentials.json
 *.pfx
 .privacy-denylist*
 *.bundle
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+data/
+backups/

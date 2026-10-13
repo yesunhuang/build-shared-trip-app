@@ -3,7 +3,10 @@ import { UI_ZH_HANS } from "./translations-zh-hans.js?v=__CACHE_VERSION__";
 import { UI_JA } from "./translations-ja.js?v=__CACHE_VERSION__";
 
 const seedTrip = readSeedTrip();
-const LANGUAGE_STORAGE_KEY = `${seedTrip.slug || "shared-trip"}-language`;
+// Self-hosted pages share one non-sensitive language preference across trips.
+const LANGUAGE_STORAGE_KEY = typeof window !== "undefined" && window.SHARED_TRIP_HOSTED === true
+  ? "shared-trips-language"
+  : `${seedTrip.slug || "shared-trip"}-language`;
 
 function readSeedTrip() {
   try {
@@ -278,6 +281,13 @@ export const UI_EN = {
   segmentCount: "{count} segments"
 };
 
+const EXTRA_KEYS = ["allTrips","editTrip","exportTrip","retrySync","signOut","noDatesYet","addDate","editDate","date","dayLabel","title","timezone","country","route","versionConflict","tripUnavailable","noResourcesYet"];
+const EXTRA_WORDS = {
+  en: ["All trips","Edit trip","Export","Reconnect","Sign out","Add a date to start your itinerary.","Add date","Edit date","Date","Day title","Title","Time zone","Country","Route","The trip changed. Close this form, refresh and apply your edit again.","This trip is unavailable.","No resources added yet."],
+  "zh-Hans": ["全部旅行","编辑旅行","导出","重新连接","退出","添加日期以开始行程。","添加日期","编辑日期","日期","当天标题","标题","时区","国家/地区","路线","行程已更改。请关闭表单，刷新后重新编辑。","此旅行不可用。","尚未添加资源。"],
+  "zh-Hant": ["全部旅行","編輯旅行","匯出","重新連線","登出","新增日期以開始行程。","新增日期","編輯日期","日期","當天標題","標題","時區","國家/地區","路線","行程已變更。請關閉表單，重新整理後再編輯。","此旅行無法使用。","尚未新增資源。"],
+  ja: ["すべての旅行","旅行を編集","エクスポート","再接続","サインアウト","日付を追加して旅程を始めましょう。","日付を追加","日付を編集","日付","日のタイトル","タイトル","タイムゾーン","国・地域","ルート","旅程が変更されました。フォームを閉じ、更新してから再編集してください。","この旅行は利用できません。","資料はまだありません。"]
+};
 const UI_BY_LANGUAGE = {
   en: UI_EN,
   "zh-Hans": UI_ZH_HANS,
@@ -329,7 +339,8 @@ export function ui(language, key, variables = {}) {
     return [localizedTrip.country, variables.dateRange].filter(Boolean).join(" · ");
   }
   const dictionary = UI_BY_LANGUAGE[language] || UI_EN;
-  const template = dictionary[key] || UI_EN[key] || key;
+  const extraIndex = EXTRA_KEYS.indexOf(key);
+  const template = extraIndex >= 0 ? (EXTRA_WORDS[language] || EXTRA_WORDS.en)[extraIndex] : dictionary[key] || UI_EN[key] || key;
   return String(template).replace(/\{(\w+)\}/g, (_, name) => String(variables[name] ?? ""));
 }
 

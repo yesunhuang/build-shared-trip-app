@@ -36,8 +36,11 @@ export function auditPrivacy(target, { mode = "framework", denylist = [] } = {})
     if (bytes.includes(0)) continue; // Binary assets, including the approved showcase images.
     const content = bytes.toString("utf8");
     for (const { label, pattern } of rules) if (pattern.test(content)) record(label);
-    for (const [, , quotedKey, bareKey] of content.matchAll(objectField)) {
-      if (isSensitiveKey(quotedKey || bareKey)) { record("booking or identity secret field"); break; }
+    for (const match of content.matchAll(objectField)) {
+      const key = match[2] || match[3];
+      // Fetch's credentials option selects a browser mode; it contains no secret.
+      if (key === "credentials" && /^\s*["'](?:same-origin|omit|include)["']\s*[,}]/.test(content.slice(match.index + match[0].length))) continue;
+      if (isSensitiveKey(key)) { record("booking or identity secret field"); break; }
     }
     if (mode === "framework") {
       for (const [, , value] of content.matchAll(configField)) {

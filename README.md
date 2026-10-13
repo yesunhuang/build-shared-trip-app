@@ -1,38 +1,40 @@
 # Build Shared Trip App
 
-**An agent-ready framework for turning a trip itinerary into a shared, multilingual travel app.**
+**A self-hosted, multilingual travel planner for you and a few companions. One small server holds every trip, and an MCP endpoint lets an AI read and edit the same itineraries.**
 
-Provide the itinerary. Your agent researches the missing details, adapts the visual theme, and builds a responsive PWA with the same desktop and phone interactions shown below. The application runs independently of the agent that created it.
+Run one Node.js service on your own machine or a small VPS. From the home page you can create or import trips. Each trip opens at a stable `/trips/<trip-id>` link with the desktop map and timeline, the phone swipe-sheet planner, reminders, weather, and four languages. You install the PWA once and switch between trips inside it. No Firebase account and no separate deployment per trip are needed.
 
-**[Agent entry point → SKILL.md](SKILL.md)** · [Setup for Codex & Claude](references/agent-setup.md) · [Interface showcase](showcase/README.md) · [Input contract](references/input-schema.md)
+**[Agent entry point → SKILL.md](SKILL.md)** · [Self-hosted guide](references/self-hosted.md) · [MCP](references/mcp.md) · [Agent setup](references/agent-setup.md) · [Interface showcase](showcase/README.md)
 
-## Start here, agents
+Public repository: `https://github.com/yesunhuang/build-shared-trip-app.git`. The source code is public. The trips you store on your server are not: they stay in your own data directory behind sign-in. Publishing the code does not authorize hosting or sharing anyone's trips.
 
-Read [`SKILL.md`](SKILL.md) first. It defines the workflow, required reference files, privacy boundaries, and verification gates. Do not infer a real trip from the showcase screenshots or deploy without the user's approval.
+## Quick start (self-hosted, local)
 
-Give your agent this task, together with the itinerary or trip documents:
+Requires **Node.js 24** (built-in `node:sqlite`).
 
-```text
-Read SKILL.md and follow build-shared-trip-app for the attached itinerary.
-Preserve the framework's desktop map and swipe-only phone planner.
-Adapt the colors, icon, and literal app name to our trip's theme.
-Prepare English, Simplified Chinese, Traditional Chinese, and Japanese.
-Keep uncertain details visibly pending; do not invent bookings or place IDs.
-Show desktop and phone-width previews, and report the checks performed.
-Prepare a separate Firebase project, but ask before deploying.
+```bash
+git clone https://github.com/yesunhuang/build-shared-trip-app.git
+cd build-shared-trip-app
+npm ci
+export SHARED_TRIP_ADMIN_TOKEN='<choose-a-long-random-local-token>'
+export SHARED_TRIP_DATA_DIR="$HOME/.local/share/shared-trip-dev"   # must be outside the repo
+npm start
 ```
 
-| Stage | Agent reference | Result |
-| --- | --- | --- |
-| 1 · Understand | [Research & content](references/research-and-content.md) | Verified itinerary; explicit unknowns |
-| 2 · Structure | [Input schema](references/input-schema.md) · [Fictional example](assets/trip.example.json) | Complete multilingual trip JSON |
-| 3 · Generate | [Agent workflow](SKILL.md) · [Feature contract](references/feature-contract.md) | Self-contained application folder |
-| 4 · Verify | [Responsive & performance checks](references/responsive-performance.md) | Tested desktop and phone previews |
-| 5 · Deploy | [Firebase setup](references/firebase-deployment.md) | User-owned hosting and synchronization |
+Open `http://127.0.0.1:4173/` and sign in with your token. Create a trip, or import the fictional `assets/trip.example.json`. The service listens only on `127.0.0.1:4173` by default; set `SHARED_TRIP_HOST` or `SHARED_TRIP_PORT` to change that. For remote use, put it behind an HTTPS reverse proxy and set `SHARED_TRIP_ORIGIN`. The [self-hosted guide](references/self-hosted.md) covers configuration, VPS deployment alongside other services, backups, restores, upgrades, and rollback.
+
+| What | How |
+| --- | --- |
+| Storage | One SQLite database in `SHARED_TRIP_DATA_DIR`, kept apart from code, config, and backups |
+| Access | One admin token. The browser signs in once and receives an HttpOnly session cookie; API and MCP clients send a bearer token. Every trip link requires sign-in, and there is no anonymous sharing. |
+| Editing | Versioned, atomic change batches. A stale edit is rejected with 409. A retry with the same `requestId` is never applied twice. |
+| Sync | Open pages poll the server and reconnect after network loss. Writes need a connection. Protected trips are never kept in a persistent offline cache. |
+| AI | Remote MCP over Streamable HTTP (protocol `2025-11-25`) with `list_trips`, `get_trip`, `create_trip`, and `apply_trip_changes`. See [mcp.md](references/mcp.md). |
+| Portability | Import legacy trip JSON or exports, with IDs and translations kept. Export any trip as recoverable JSON. |
 
 ## The interface
 
-The desktop workspace balances an ordered itinerary with a substantial, sticky map. The phone planner uses that same itinerary inside a swipeable sheet: pull it down to explore the map, or up to read the plan.
+On desktop, an ordered itinerary sits beside a large sticky map. On phones, the same itinerary lives in a swipeable sheet: pull it down to see the map, or up to read the plan.
 
 ![Desktop itinerary and large map](showcase/desktop-itinerary.jpg)
 
@@ -42,42 +44,40 @@ The desktop workspace balances an ordered itinerary with a substantial, sticky m
   <img src="showcase/phone-map-expanded.jpg" width="250" alt="Phone planner with its sheet lowered to reveal more map">
 </p>
 
-These are real rendered views of the winter-trip implementation. Phone images were captured at **390 × 844 in a responsive browser**, not on a physical iPhone. The screenshots are visual references; their itinerary and backend are not the generator's sample data.
+These are rendered views of an earlier single-trip implementation. The phone images were captured at **390 × 844 in a responsive browser**, not on a physical iPhone. They are visual references only; their itinerary is not sample data.
 
-**[Full gallery & verification notes](showcase/README.md)** · [Showcase page source](showcase/index.html)
+**[Full gallery & verification notes](showcase/README.md)**
 
-### Included in every trip
+### In every trip
 
-- **One coordinated plan:** flights, stays, transport, restaurants, and sights in a single editable timeline, with optional Maps links and placeholder plans.
-- **Useful trip context:** date-flexible to-dos, an all-date forecast strip with hourly detail dialogs, and nearby eat / see / buy ideas.
-- **Four languages:** English, Simplified Chinese, Traditional Chinese, and Japanese, with a literal, untranslated app name.
-- **A shared, installable app:** Firebase-backed edits, a PWA home-screen experience, and an offline-readable itinerary shell. Maps, weather, and remote photos may still require a connection.
+- **One timeline** for flights, stays, transport, restaurants, and sights, with optional exact Maps links and placeholder plans.
+- **Trip context:** to-dos with flexible due dates, an all-dates forecast strip with hourly details, optional nearby ideas, and a payments & apps page.
+- **Four languages:** English, Simplified Chinese, Traditional Chinese, and Japanese. When you edit source text, its outdated translations are cleared and the source text is shown until you translate it again.
+- **Drafts welcome:** start with only a title, then add dates, plans, and reminders. Photos, translations, and recommendations are optional while you edit.
 
-## Explore the fictional demo
+## Agents
 
-[`docs/`](docs/) contains **Tide Lines**, a fictional two-day trip generated from [`assets/trip.example.json`](assets/trip.example.json). It uses **local-only preview storage**, not a Firebase backend. Edits in this demo do not synchronize between devices.
+Read [`SKILL.md`](SKILL.md) first. It defines the self-hosted workflow, privacy boundaries, and verification gates. Do not infer a real trip from the screenshots, and do not deploy without the user's approval and a concrete target.
 
-With Python 3 installed, run this from the repository root:
-
-```bash
-python3 -m http.server 4173 --bind 127.0.0.1
+```text
+Read SKILL.md and follow build-shared-trip-app for the attached itinerary.
+Use the self-hosted service: create or import the trip through the API or MCP.
+Keep uncertain details visibly pending; do not invent bookings or place IDs.
+Report which checks actually ran; do not deploy without my approval.
 ```
 
-Open **[the showcase](http://localhost:4173/showcase/)** or **[the interactive demo](http://localhost:4173/docs/)**. To preview the phone planner, narrow the browser and choose **Open interactive plan**.
+## Legacy: static generator and fictional demo
 
-No hosted demo is implied by these links. GitHub Pages is not enabled by this guide; publication requires a separate visibility decision.
+The earlier route generated a separate static app for each trip, optionally backed by Firebase. It is kept as an **opt-in transition tool** and to build the fictional demo. It is no longer the default and does not need Firebase. See [SKILL.md § Legacy generator](SKILL.md#legacy-static-generator-opt-in) and the [Firebase guide](references/firebase-deployment.md), which applies only to that legacy route.
 
-## Generate your own app
-
-The generator requires **Node.js 18+** and uses built-in modules. Copy the fictional input to a private working location, replace its content, and remove `sampleData`. Follow the [input contract](references/input-schema.md), then run:
+[`docs/`](docs/) contains **Tide Lines**, a fictional two-day trip generated from [`assets/trip.example.json`](assets/trip.example.json). It uses local-only browser storage, so its edits do not sync. To preview it:
 
 ```bash
-node scripts/validate-trip.mjs /absolute/path/to/trip.json
-node scripts/init-trip.mjs /absolute/path/to/trip.json /absolute/path/to/output
-node scripts/qa-static.mjs /absolute/path/to/output
+python3 -m http.server 8000 --bind 127.0.0.1
+# open http://127.0.0.1:8000/docs/  or  http://127.0.0.1:8000/showcase/
 ```
 
-For a no-account-setup trial, use the included fixture and a fresh output folder:
+No hosted demo is implied. Publishing GitHub Pages is a separate decision.
 
 ```bash
 node scripts/validate-trip.mjs assets/trip.example.json --allow-example
@@ -85,32 +85,24 @@ node scripts/init-trip.mjs assets/trip.example.json /tmp/tide-lines-demo --allow
 node scripts/qa-static.mjs /tmp/tide-lines-demo
 ```
 
-The [agent setup guide](references/agent-setup.md) covers installation and handoff. The [Firebase guide](references/firebase-deployment.md) covers the separate CLI requirements, project setup, region, authentication, rules, and deployment. Colleagues must use **their own account, project, and trip data**.
-
-For photo-heavy trips, the optional [photo optimizer](references/responsive-performance.md) produces small local previews. It needs Sharp and preserves source/credit records; it does not grant image reuse rights.
-
-## Sharing & access boundaries
-
-The reusable template and fictional demo must not contain live backend configuration, source-document links, reservation codes, or credentials. Approved showcase images may show trip branding, dates, and destinations. Never copy private source documents into a generated public app.
-
-A deployed app's anonymous synchronization is **link-based trust, not private membership control**. Anyone who can access that app may be able to edit it. Do not use the default model for sensitive travel records without adding appropriate access controls. See the [deployment guide](references/firebase-deployment.md) and [sharing & privacy checklist](references/sharing-and-privacy.md).
-
 ## Maintain the framework
 
 ```bash
-npm test
+npm test                  # existing generator/template/privacy regression suite
+npm run test:server       # self-hosted HTTP, SQLite, and MCP tests (see self-hosted guide)
 node scripts/build-docs-demo.mjs
-node scripts/qa-static.mjs /absolute/path/to/fresh-generated-output
+node scripts/audit-privacy.mjs . --mode framework
 ```
 
-Run generation against a fresh folder before the final command. Rebuild the checked-in demo whenever its input or application template changes. Static tests do not replace desktop/phone interaction checks, physical-iPhone installation tests, or two-device Firebase verification.
+Rebuild the demo whenever the template or the fictional input changes. Automated tests do not replace desktop and phone browser checks, real-device installation, or connections from third-party AI clients. Report those separately and honestly.
 
 | Location | Purpose |
 | --- | --- |
 | [`SKILL.md`](SKILL.md) · [`agents/`](agents/) | Agent instructions and discovery metadata |
-| [`references/`](references/) | Setup, input, content, UI, performance, and deployment contracts |
-| [`assets/app-template/`](assets/app-template/) | Reusable application source |
-| [`assets/trip.example.json`](assets/trip.example.json) | Fictional multilingual input fixture |
-| [`scripts/`](scripts/) | Generation, validation, tests, privacy, photo, and cache tools |
-| [`docs/`](docs/) | Reproducible fictional app |
-| [`showcase/`](showcase/) | Professional gallery and approved implementation screenshots |
+| [`references/`](references/) | Self-hosting, MCP, setup, input, UI, performance, privacy, and legacy deployment guides |
+| `server/` | Self-hosted Node service, SQLite storage, API, and MCP |
+| `assets/selfhosted/` | Home page, manifest, and service worker for the single installed app |
+| [`assets/app-template/`](assets/app-template/) | Shared trip-page UI (also used by the legacy generator) |
+| [`assets/trip.example.json`](assets/trip.example.json) | Fictional multilingual fixture |
+| [`scripts/`](scripts/) | Tests, MCP smoke test, legacy generation, privacy, photo, and cache tools |
+| [`docs/`](docs/) · [`showcase/`](showcase/) | Fictional generated demo and approved screenshots |

@@ -1,0 +1,13 @@
+:root { color-scheme:light; font-family:system-ui,sans-serif; color:#17362f; background:#f3ede3; }
+* { box-sizing:border-box; } body { margin:0; } header { display:flex; align-items:center; gap:12px; padding:18px max(20px,calc((100vw - 1080px)/2)); border-bottom:1px solid #17362f20; }
+.brand { display:flex; align-items:center; gap:12px; font-size:23px; font-weight:750; text-decoration:none; color:inherit; margin-right:auto; }
+main { max-width:1080px; margin:auto; padding:28px 20px; } h1 { font-size:32px; margin:0 0 22px; } h2 { font-size:23px; margin:0 0 12px; }
+.heading { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }.heading h1 {margin:0;}
+button,.import { font:inherit; border:0; border-radius:10px; background:#17362f; color:white; padding:11px 16px; cursor:pointer; } button:disabled {opacity:.55;cursor:wait;} a {color:inherit;}
+select,input { font:inherit; max-width:100%; padding:10px; border:1px solid #17362f40; border-radius:8px; background:white; } input[type=checkbox] {width:auto;}
+label {display:flex; gap:8px; align-items:center;} form label {display:grid; gap:7px; margin:15px 0;} form input {width:100%;}
+#login {max-width:440px;padding:28px;background:#fffaf3;border-radius:20px;margin:40px auto;} .tools {display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:22px 0;}
+.import {position:relative;background:#e5dbcc;color:#17362f;overflow:hidden;} .import input {position:absolute;inset:0;opacity:0;width:100%;cursor:pointer;}
+.trip-list {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr));gap:18px;} .trip-card {background:#fffaf3;border:1px solid #17362f20;border-radius:18px;padding:24px;box-shadow:0 4px 20px #17362f06;} .trip-card h2 a {text-decoration:none;} .trip-card p {color:#637267;font-size:14px;} .card-actions {display:flex;gap:8px;flex-wrap:wrap;} .card-actions button {padding:8px 11px;background:#e5dbcc;color:#17362f;font-size:14px;}
+#status {min-height:24px;} #status[data-error=true] {color:#a53325;} dialog {border:0;border-radius:18px;padding:25px;width:min(460px,calc(100vw - 28px));max-height:calc(100dvh - 48px);overflow:auto;background:#fffaf3;color:#17362f;} dialog::backdrop {background:#17362f70;} .actions {display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:20px;}
+[hidden] {display:none!important;} @media(max-width:500px) {header {padding:12px;gap:6px;flex-wrap:wrap;}.brand {font-size:20px;} .brand img {width:38px;height:38px;} header button,header select {padding:8px;font-size:13px;}main {padding:24px 16px;}}

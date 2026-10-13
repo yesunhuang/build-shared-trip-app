@@ -1,5 +1,6 @@
 # Firebase synchronization and deployment
 
+This guide applies only to the legacy per-trip generator. The default multi-trip service uses its own authenticated SQLite backend; see [self-hosted.md](self-hosted.md).
 ## Security model
 
 This app intentionally has no account screen. It signs each device into Firebase anonymously and shares one Firestore document. The model is link-based trust, not privacy: anyone who can load the deployed app may be able to read and edit the shared trip.

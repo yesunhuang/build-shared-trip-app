@@ -1,6 +1,23 @@
 # Feature contract
 
-Preserve these behaviors unless the user explicitly requests a design change.
+Preserve these behaviors unless the user explicitly requests a design change. The trip-page UI is shared by two modes:
+
+| | **Self-hosted (default)** | **Legacy generator (opt-in)** |
+| --- | --- | --- |
+| Apps | One service and one PWA for all trips | One generated static app per trip |
+| Data | Server SQLite, authoritative | Embedded seed, plus local preview storage or optional Firebase |
+| Access | Admin sign-in for every page and API | Link-based trust (Firebase) or none (local) |
+| Sync | Bounded polling and reconnect | Firestore listener, or none |
+| Offline | Generic shell only; protected data stays in page memory | Cached itinerary shell |
+| Validation | Draft structure | Complete authoring checks |
+
+## Self-hosted home and trip switching
+
+- `/` shows a sign-in form when signed out. When signed in, it lists trips (archived trips separately or behind a filter) with controls to create, import, edit metadata, archive or restore, export, and open each trip.
+- Each trip opens at `/trips/<trip-id>`, which stays the same through renames and upgrades. The trip page has controls for *All trips*, editing the trip, adding a date, exporting, and signing out.
+- An unknown trip ID shows a not-found state, and a signed-out visit shows a sign-in state. It never falls back to another trip or to demo data.
+- The manifest `id`, `start_url`, and `scope` are `/` with a generic stable name, so switching trips never needs reinstalling. The service worker caches only generic static assets. It never caches `/api`, `/mcp`, protected trip navigations, or trip payloads.
+- The trip page shows honest status labels: saved, saving, failed, conflict (reload required), offline/reconnecting, and signed out. A failed write is never shown as saved. After a 401, the page clears its data and returns to sign-in.
 
 ## Header and main page
 
@@ -69,8 +86,8 @@ When a full place URL is supplied, parse and save place name, address, final POI
 
 ## Recommendations
 
-- Keep Nearby ideas collapsed by default.
-- Provide at least five eat, five see/go, and five buy cards for every day.
+- Keep Nearby ideas collapsed by default. Hide the section, without placeholder content, when a day has no recommendations.
+- Legacy generator builds provide at least five eat, five see/go, and five buy cards for every day. Self-hosted drafts may have none.
 - Show a preview photo, short reason, exact Google Maps link, and current rating when available.
 - Use three cards per row on wide desktop and two per row on iPhone.
 - Keep cards compact and aligned across languages.
@@ -83,15 +100,28 @@ When a full place URL is supplied, parse and save place name, address, final POI
 - Use official sources for facility payment support and direct Apple App Store links.
 - Keep the app page traveler-focused; no implementation notes or account explanations.
 
-## Synchronization and install
+## Drafts, translations and ordering
 
-- Use Firebase anonymous authentication with one shared Firestore document.
-- Allow the first authenticated client to create a missing document.
-- Synchronize checklist completion, checklist edits, and itinerary add/edit/delete changes.
+- A trip with no dates, plans, photos, weather, recommendations, or translations renders without errors. Empty sections show nothing, or a short neutral prompt for adding content. They never show invented travel facts.
+- Editing a plan's name or notes, a day's text, or a reminder's item invalidates the dependent translations. The other three languages then show the new source text instead of the stale translation.
+- Changing a plan's time updates `sortTime`/`sortOrder`, so the saved order matches the displayed order after reload, in every language, and for every client.
+
+## Synchronization and install: self-hosted
+
+- The server is authoritative. The browser and MCP use the same service and see the same data.
+- Browser edits send versioned, idempotent change batches. A 409 conflict reloads the trip and shows an explicit message. The UI applies a change only after the server confirms it.
+- Open pages poll at a bounded interval with backoff. They reconnect after an initial connection failure or after a later disconnect, on the `online` event or a manual retry.
+- During a transient network loss, an open page keeps its last trip in memory, clearly marked as not current. Writes are disabled or fail visibly. There is no offline edit queue and no persistent protected cache. Signing out clears page memory.
+- The resources page (`/resources.html?tripId=<id>`) authenticates and loads only that trip's resources.
+- Install: one app identity. Show the native install prompt where supported and Add to Home Screen guidance on iOS.
+
+## Synchronization and install: legacy generator
+
+- Optional Firebase anonymous authentication with one shared Firestore document; without Firebase, local-only preview storage.
+- The first authenticated client may create a missing document. Checklist and itinerary edits synchronize.
 - Treat this as link-based trust: anyone who can access the app may be able to edit. It is not private account-based access control.
 - Keep the Firebase web config and document path out of prose, but do not mislabel them as secrets.
 - Cache the written shell and core assets with a service worker. Online maps, weather, and remote photos may need connectivity.
-- Show the native install prompt where supported and clear Add to Home Screen instructions on iOS.
 - The iOS home-screen name may truncate because the operating system controls its font and layout; use a concise `shortName`.
 
 ## Regression checklist
@@ -102,7 +132,9 @@ When a full place URL is supplied, parse and save place name, address, final POI
 - All plan photos and credits render; missing photos fail gracefully.
 - Tap-only handle interaction does not move the sheet.
 - Add/edit close controls remain reachable on iPhone.
-- First Firestore create and two-client live updates work.
+- Self-hosted: two independent signed-in browsers, plus an MCP client, see each other's edits. A stale edit is rejected without loss. A signed-out browser cannot open any `/trips/<id>`.
+- Self-hosted: stopping and restarting the service keeps trips, IDs, and URLs. Taking the server offline shows reconnecting or failed states, never false saves.
+- Legacy Firebase builds only: the first Firestore create and two-client live updates work.
 - Weather freshness and plan update timestamps are current.
 - Long trips expose every equal-height compact weather date card through horizontal scrolling. Each card has one aggregate day row, and the per-date timetable icon opens a contained, scrollable details dialog on desktop and iPhone without shifting the page. Location chips switch one semantic hourly table at a time while preserving dialog scroll and returning focus to the opener.
 - Native date inputs never widen a dialog or extend beyond the iPhone viewport.
@@ -111,3 +143,17 @@ When a full place URL is supplied, parse and save place name, address, final POI
 - A metadata-only synchronization event updates status without rebuilding the page.
 - Checklist items can be created before, during, or after the trip, and trip-date items appear in the matching itinerary day.
 - No developer-facing sentences, personal booking references, or citations clutter traveler content.
+
+## Verification status
+
+Record each check as one of: **specified** (a test or procedure exists), **run** (executed, with recorded evidence), or **not verified**. This document specifies behavior. It is not evidence that any check passed. Pass/fail results belong in the coordinator's recorded run evidence or a progress report.
+
+| Area | How it is checked | Initial status |
+| --- | --- | --- |
+| API, SQLite, auth, conflicts, retries, migrations, backup/restore, import/export | `npm run test:server` (fictional temporary storage) | Specified; see run evidence |
+| MCP protocol round trip | Official SDK client in server tests and `scripts/mcp-smoke.mjs`, local HTTP | Specified; see run evidence |
+| Legacy generator and template | `npm test`, demo rebuild, fresh-folder generation and `qa-static` | Specified; see run evidence |
+| Desktop and phone-width UI | Manual or automated browser at the widths in [responsive-performance.md](responsive-performance.md) | Not verified until recorded |
+| Physical iPhone install and gestures | Real device | **Not verified** |
+| Third-party AI clients and hosted connectors | Real account connection | **Not verified** |
+| VPS deployment behind HTTPS | Authorized host | **Not verified** (no deployment authorized) |

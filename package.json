@@ -3,9 +3,23 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   },
   "scripts": {
-    "test": "node scripts/test-google-maps-place-url.mjs && node scripts/test-generator-safety.mjs && node scripts/test-trip-contract.mjs && node scripts/test-reminder-dates.mjs && node scripts/test-generator-isolation.mjs && node scripts/test-map-links.mjs && node scripts/test-map-rendering.mjs && node scripts/test-photo-assets.mjs && node scripts/test-service-worker.mjs && node scripts/test-privacy-audit.mjs && node scripts/audit-privacy.mjs ."
+    "test": "npm run test:legacy && npm run test:server && npm run test:ui",
+    "start": "node server/index.mjs",
+    "test:server": "node scripts/test-selfhosted.mjs",
+    "mcp:smoke": "node scripts/mcp-smoke.mjs",
+    "backup": "node server/cli/backup.mjs",
+    "restore": "node server/cli/restore.mjs",
+    "test:legacy": "node scripts/test-google-maps-place-url.mjs && node scripts/test-generator-safety.mjs && node scripts/test-trip-contract.mjs && node scripts/test-reminder-dates.mjs && node scripts/test-generator-isolation.mjs && node scripts/test-map-links.mjs && node scripts/test-map-rendering.mjs && node scripts/test-photo-assets.mjs && node scripts/test-service-worker.mjs && node scripts/test-privacy-audit.mjs && node scripts/audit-privacy.mjs .",
+    "test:ui": "node scripts/test-selfhosted-ui.mjs && node scripts/test-selfhosted-home.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "jsdom": "30.1.2"
   }
 }

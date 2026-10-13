@@ -9,6 +9,7 @@ const LOCAL_SHELL = [
   VERSIONED_RESOURCES_URL,
   "/styles.css?v=__CACHE_VERSION__",
   "/app.js?v=__CACHE_VERSION__",
+  "/hosted-client.js?v=__CACHE_VERSION__",
   "/photo-assets.js?v=__CACHE_VERSION__",
   "/photos/manifest.js?v=__CACHE_VERSION__",
   "/resources.js?v=__CACHE_VERSION__",

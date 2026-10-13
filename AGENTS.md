@@ -17,7 +17,7 @@ The agreed development direction is:
 - A remote MCP interface for AI-assisted trip discovery, creation, reading, and editing. The web API and MCP tools must use the same application logic, validation, and storage.
 - Preserve the useful map, timeline, reminders, multilingual content, and phone planner where compatible with these changes.
 
-These are development requirements, not a claim that the features already exist. The current implementation is a per-trip generator with Firebase or local-preview storage. Read the actual code before describing capabilities. Database choice, detailed APIs, deployment layout, and optional features remain implementation decisions unless separately settled by the user.
+The default implementation is a self-hosted Node service with SQLite, administrator authentication, shared web/MCP editing, and stable trip pages. The per-trip generator with Firebase or local-preview storage remains a transition tool. Read the actual code and progress reports before describing validation or deployment; browser installation and external-client compatibility require separate evidence.
 
 Repository preparation is complete. The user-approved implementation assignment is [initial command.md](initial%20command.md); an assigned implementation worker should execute it, not stop at another proposal. It authorizes scoped development and local validation, not purchasing infrastructure, publishing a live deployment, connecting a live travel account, or migrating real trip data without applicable authorization. A committed command file alone does not prove that a worker has started.
 

@@ -1,5 +1,20 @@
-import { firebaseConfig, tripDocumentPath } from "./firebase-config.js?v=__CACHE_VERSION__";
 import { getGooglePlaceLinks } from "./google-place-links.js?v=__CACHE_VERSION__";
+import {
+  createTripPoller,
+  downloadJSON,
+  expectTrip,
+  exportFilename,
+  getBootTrip,
+  hostedApi,
+  isISODate,
+  isValidTimeZone,
+  logoutAndLeave,
+  newRequestId,
+  redirectToLogin,
+  resourcesPath,
+  toRenderTrip,
+  tripIdFromPath
+} from "./hosted-client.js?v=__CACHE_VERSION__";
 import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=__CACHE_VERSION__";
 import { optimizedPhotoUrl } from "./photo-assets.js?v=__CACHE_VERSION__";
 import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=__CACHE_VERSION__";
@@ -21,9 +36,33 @@ import {
   weatherCodeKey
 } from "./weather-forecast.js?v=__CACHE_VERSION__";
 import { getFlightBookings } from "./flight-bookings.js?v=__CACHE_VERSION__";
-import { getDayArea, getDayGuide, getPlacePhoto } from "./daily-guide.js?v=__CACHE_VERSION__";
+import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=__CACHE_VERSION__";
 
 const FIREBASE_SDK_VERSION = "12.15.0";
+// Self-hosted mode is decided before any Firebase code path. It never loads the
+// Firebase SDK or its configuration and keeps protected trip data in memory only.
+const HOSTED = window.SHARED_TRIP_HOSTED === true;
+const HOSTED_TRIP_ID = HOSTED ? tripIdFromPath(window.location.pathname) : "";
+const HOSTED_POLL_INTERVAL_MS = 20000;
+let firebaseConfig = {};
+let tripDocumentPath = "";
+const firebaseConfigPromise = HOSTED
+  ? Promise.resolve()
+  : import("./firebase-config.js?v=__CACHE_VERSION__")
+    .then((module) => {
+      firebaseConfig = module.firebaseConfig || {};
+      tripDocumentPath = module.tripDocumentPath || "";
+    })
+    .catch((error) => {
+      console.warn("Firebase configuration unavailable", error);
+    });
+let hostedServerTrip = HOSTED ? getBootTrip() : null;
+if (HOSTED && (!hostedServerTrip || hostedServerTrip.id !== HOSTED_TRIP_ID)) {
+  // Never render a demo seed or a different trip in self-hosted mode.
+  hostedServerTrip = null;
+  redirectToLogin();
+  throw new Error("Self-hosted trip data is unavailable");
+}
 const seedTrip = JSON.parse(document.getElementById("trip-data").textContent);
 const APP_NAME = seedTrip.title || "Shared trip";
 const APP_NAMESPACE = seedTrip.slug || "shared-trip";
@@ -91,8 +130,12 @@ const els = {
   routeDecoration: document.getElementById("trip-route-decoration")
 };
 
-let currentTrip = loadLocalTrip() || seedTrip;
+let currentTrip = HOSTED ? toRenderTrip(hostedServerTrip) : (loadLocalTrip() || seedTrip);
 let displayTrip = currentTrip;
+let hostedPoller = null;
+let hostedReady = HOSTED;
+let hostedWriteInFlight = false;
+let hostedConflictTimer = null;
 let currentLanguage = getInitialLanguage();
 let mapInstance = null;
 let deferredInstallPrompt = null;
@@ -163,11 +206,13 @@ function uid(prefix = "item") {
 }
 
 function isFirebaseConfigured() {
-  return firebaseConfig.projectId
+  if (HOSTED) return false;
+  return Boolean(firebaseConfig?.projectId)
     && !Object.values(firebaseConfig).some((value) => String(value).startsWith("REPLACE_"));
 }
 
 function loadLocalTrip() {
+  if (HOSTED) return null;
   try {
     const raw = localStorage.getItem(APP_STORAGE_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -177,6 +222,7 @@ function loadLocalTrip() {
 }
 
 function persistLocalTrip() {
+  if (HOSTED) return;
   try {
     localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(currentTrip));
   } catch {
@@ -186,9 +232,11 @@ function persistLocalTrip() {
 
 function renderAll() {
   normalizeTrip(currentTrip);
+  setGuideTrip(currentTrip);
   if (!currentTrip.days.some((day) => day.id === activeDayId)) activeDayId = initialDayId(currentTrip.days);
   displayTrip = localizeTrip(currentTrip, currentLanguage);
   applyStaticTranslations();
+  renderHostedControls();
   renderHeader();
   renderReminders();
   renderEssentials();
@@ -201,7 +249,7 @@ function renderAll() {
 }
 
 function normalizeTrip(trip) {
-  trip.title = APP_NAME;
+  if (!HOSTED) trip.title = APP_NAME;
   trip.days = Array.isArray(trip.days)
     ? trip.days.filter((day) => day && typeof day === "object" && !Array.isArray(day)).slice(0, 31)
     : [];
@@ -210,6 +258,7 @@ function normalizeTrip(trip) {
     : [];
   trip.days.forEach((day, dayIndex) => {
     day.id ||= `day-${day.date || dayIndex}`;
+    if (HOSTED && !day.theme && typeof day.label === "string" && day.label.trim()) day.theme = day.label;
     day.slots = Array.isArray(day.slots)
       ? day.slots.filter((slot) => slot && typeof slot === "object" && !Array.isArray(slot)).slice(0, 80)
       : [];
@@ -233,7 +282,7 @@ function normalizeTrip(trip) {
 }
 
 function renderHeader() {
-  els.title.textContent = APP_NAME;
+  els.title.textContent = HOSTED ? currentTrip.title : APP_NAME;
   if (els.routeDecoration) {
     els.routeDecoration.textContent = displayTrip.routeDecoration || displayTrip.country || "";
   }
@@ -248,6 +297,23 @@ function renderHeader() {
   planUrl.searchParams.set("view", "plan");
   if (activeDay?.date) planUrl.searchParams.set("day", activeDay.date);
   els.openPlanView.href = `${planUrl.pathname}${planUrl.search}${planUrl.hash}`;
+  if (HOSTED) {
+    const resourceLink = document.querySelector(".header-resource-link");
+    if (resourceLink) {
+      resourceLink.href = resourcesPath(HOSTED_TRIP_ID);
+      resourceLink.hidden = !hasTripResources(currentTrip);
+    }
+  }
+}
+
+function hasTripResources(trip) {
+  const resources = trip?.resources;
+  if (!resources || typeof resources !== "object") return false;
+  return Object.values(resources).some((entry) => entry && typeof entry === "object" && (
+    (Array.isArray(entry.payment?.facilities) && entry.payment.facilities.length)
+    || (Array.isArray(entry.apps?.items) && entry.apps.items.length)
+    || entry.payment?.summary
+  ));
 }
 
 function applyTripTheme(theme = {}) {
@@ -763,6 +829,12 @@ function renderDayNavigation() {
     button.addEventListener("click", () => selectActiveDay(day.id));
     return button;
   }));
+  if (HOSTED) {
+    const addDate = textElement("button", "day-link day-link--add", ui(currentLanguage, "addDate"));
+    addDate.type = "button";
+    addDate.addEventListener("click", () => openDayDialog());
+    els.daysNav.append(addDate);
+  }
 
   requestAnimationFrame(() => {
     const active = els.daysNav.querySelector(".day-link.is-active");
@@ -959,7 +1031,7 @@ function renderItinerary() {
   const diningOpen = preserveDisclosureState && Boolean(els.days.querySelector(".dining-disclosure[open]"));
   const guideOpen = preserveDisclosureState && Boolean(els.days.querySelector(".day-guide[open]"));
 
-  els.days.replaceChildren(day ? renderDay(day, Math.max(0, index)) : textElement("p", "empty-state", ui(currentLanguage, "emptyDay")));
+  els.days.replaceChildren(day ? renderDay(day, Math.max(0, index)) : renderNoDays());
 
   if (!preserveDisclosureState) return;
   els.days.querySelectorAll(".timeline-item").forEach((item) => {
@@ -972,23 +1044,50 @@ function renderItinerary() {
   if (guide) guide.open = guideOpen;
 }
 
+function renderNoDays() {
+  const empty = element("div", "empty-state empty-state--dates");
+  empty.append(textElement("p", "", ui(currentLanguage, HOSTED ? "noDatesYet" : "emptyDay")));
+  if (HOSTED) {
+    const add = textElement("button", "button", ui(currentLanguage, "addDate"));
+    add.type = "button";
+    add.addEventListener("click", () => openDayDialog());
+    empty.append(add);
+  }
+  return empty;
+}
+
 function renderDay(day, index) {
   const section = element("section", "day-section");
   section.id = day.id;
 
   const heading = element("header", "day-heading");
   const headingCopy = element("div", "day-heading__copy");
+  const dayArea = getDayArea(day.id, currentLanguage);
+  const dayTitle = day.theme || formatDate(day.date, { month: "long", day: "numeric" });
   headingCopy.append(
     textElement("p", "eyebrow", ui(currentLanguage, "dayNumber", { number: index + 1, weekday: day.weekday || formatDate(day.date, { weekday: "long" }) })),
-    textElement("h2", "day-heading__title", day.theme || formatDate(day.date, { month: "long", day: "numeric" })),
-    textElement("p", "active-day-area", `${formatDate(day.date, { month: "long", day: "numeric" })} · ${getDayArea(day.id, currentLanguage)}`)
+    textElement("h2", "day-heading__title", dayTitle),
+    textElement("p", "active-day-area", [
+      formatDate(day.date, { month: "long", day: "numeric" }),
+      dayArea && dayArea !== dayTitle ? dayArea : ""
+    ].filter(Boolean).join(" · "))
   );
   if (day.date === todayInTripISO()) headingCopy.append(textElement("span", "today-chip", ui(currentLanguage, "today")));
   const add = textElement("button", "button button--quiet", ui(currentLanguage, "addPlanButton"));
   add.type = "button";
   add.setAttribute("aria-label", ui(currentLanguage, "addToDate", { date: formatDate(day.date, { dateStyle: "full" }) }));
   add.addEventListener("click", () => openItemDialog(day.id));
-  heading.append(headingCopy, add);
+  if (HOSTED) {
+    const actions = element("div", "day-heading__actions");
+    const editDate = textElement("button", "button button--quiet", ui(currentLanguage, "editDate"));
+    editDate.type = "button";
+    editDate.setAttribute("aria-label", `${ui(currentLanguage, "editDate")}: ${formatDate(day.date, { dateStyle: "full" })}`);
+    editDate.addEventListener("click", () => openDayDialog(day.id));
+    actions.append(add, editDate);
+    heading.append(headingCopy, actions);
+  } else {
+    heading.append(headingCopy, add);
+  }
   section.append(heading);
 
   if (day.summary) section.append(textElement("p", "day-summary", day.summary));
@@ -1870,11 +1969,13 @@ function setupInteractionHandlers() {
     els.mapOffline.hidden = true;
     setSyncStatus(syncReady && !currentSourceIsCache ? "online" : "syncing", "working");
     refreshWeatherForecast({ force: false });
+    if (HOSTED) hostedPoller?.retryNow();
   });
   window.addEventListener("offline", () => {
     syncReady = false;
     els.mapOffline.hidden = false;
-    setSyncStatus("savedOffline", "offline");
+    if (HOSTED) { hostedReady = false; setSyncStatus("offlineCopy", "offline"); }
+    else setSyncStatus("savedOffline", "offline");
   });
   const refreshWeatherOnResume = () => {
     if (document.visibilityState === "visible" && navigator.onLine) {
@@ -2013,6 +2114,7 @@ function syncStandaloneCanvasMetrics() {
 }
 
 function openTodoDialog(reminderId = "") {
+  if (HOSTED) els.todoForm.dataset.hostedVersion = String(hostedServerTrip.version);
   const reminder = currentTrip.reminders.find((candidate) => candidate.id === reminderId);
   const displayReminder = displayTrip.reminders.find((candidate) => candidate.id === reminderId);
   const itemInput = els.todoForm.elements.namedItem("item");
@@ -2042,14 +2144,15 @@ async function handleTodoSubmit(event) {
   if (!submittedItem || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return;
   const canonicalExisting = currentTrip.reminders.find((candidate) => candidate.id === reminderId);
   const displayExisting = displayTrip.reminders.find((candidate) => candidate.id === reminderId);
-  const item = canonicalExisting && submittedItem === displayExisting?.item
-    ? canonicalExisting.item
-    : submittedItem;
+  const itemUnchanged = Boolean(canonicalExisting) && submittedItem === String(displayExisting?.item ?? "").trim();
+  const item = itemUnchanged ? canonicalExisting.item : submittedItem;
+  const newReminderId = reminderId || uid("reminder");
 
   const saved = await mutateTrip((trip) => {
+    if (!Array.isArray(trip.reminders)) trip.reminders = [];
     const existing = trip.reminders.find((candidate) => candidate.id === reminderId);
     const next = {
-      id: reminderId || uid("reminder"),
+      id: newReminderId,
       item,
       dueDate,
       done: existing?.done || false
@@ -2057,6 +2160,8 @@ async function handleTodoSubmit(event) {
     if (existing) {
       Object.assign(existing, next);
       delete existing.leadDays;
+      // An edited to-do must not keep showing its old translation.
+      if (!itemUnchanged) invalidateTranslations(existing, ["item"]);
     } else {
       trip.reminders.push(next);
     }
@@ -2069,7 +2174,7 @@ async function handleTodoDelete() {
   const reminder = displayTrip.reminders.find((candidate) => candidate.id === reminderId);
   if (!reminderId || !window.confirm(ui(currentLanguage, "deleteConfirm", { item: reminder?.item || ui(currentLanguage, "todoItem") }))) return;
   const saved = await mutateTrip((trip) => {
-    trip.reminders = trip.reminders.filter((candidate) => candidate.id !== reminderId);
+    trip.reminders = (Array.isArray(trip.reminders) ? trip.reminders : []).filter((candidate) => candidate.id !== reminderId);
   }, "todoDeleted");
   if (saved) els.todoDialog.close();
 }
@@ -2082,6 +2187,7 @@ function reminderDeadline(reminder) {
 }
 
 function openItemDialog(dayId, slotId = "") {
+  if (HOSTED) els.form.dataset.hostedVersion = String(hostedServerTrip.version);
   const day = currentTrip.days.find((candidate) => candidate.id === dayId);
   const slot = day?.slots.find((candidate) => candidate.id === slotId);
   if (!day) return;
@@ -2108,11 +2214,21 @@ function openItemDialog(dayId, slotId = "") {
   googleMapsInput.dataset.preserveLegacyLocation = String(canPreserveLegacyLocation);
   googleMapsInput.value = storedMapsPlace.ok ? storedMapsPlace.url : "";
 
+  // Show the text in the language being viewed. Unchanged fields keep their
+  // source value and translations; edited fields replace the source and drop
+  // the now-stale translations so every language falls back to the new text.
+  const displaySlot = slot
+    ? displayTrip.days.find((candidate) => candidate.id === dayId)?.slots?.find((candidate) => candidate.id === slotId)
+    : null;
+  const initialName = String(displaySlot?.name ?? slot?.name ?? "");
+  const initialReview = String(displaySlot?.review ?? slot?.review ?? "");
+  els.form.dataset.initialName = initialName;
+  els.form.dataset.initialReview = initialReview;
   if (slot) {
-    els.form.elements.name.value = slot.name || "";
+    els.form.elements.name.value = initialName;
     els.form.elements.period.value = slot.period || "morning";
     els.form.elements.time.value = slot.time || "";
-    els.form.elements.review.value = slot.review || "";
+    els.form.elements.review.value = initialReview;
   }
 
   updateGoogleMapsLinkState();
@@ -2213,14 +2329,26 @@ async function handleItemSubmit(event) {
   const existingMapsPlace = parseFullGoogleMapsPlaceUrl(existingSlot?.googleMapsUrl || existingSlot?.mapsUrl || "");
   const clearingMappedLocation = Boolean(existingSlot && !submittedMapsUrl && existingMapsPlace.ok);
 
+  const submittedName = String(data.get("name") || "").trim();
+  const submittedReview = String(data.get("review") || "").trim();
+  if (!submittedName) return;
+  const nameChanged = !existingSlot || submittedName !== String(els.form.dataset.initialName || "").trim();
+  const reviewChanged = !existingSlot || submittedReview !== String(els.form.dataset.initialReview || "").trim();
   const slotPatch = {
-    period: data.get("period"),
+    period: ["morning", "noon", "evening"].includes(data.get("period")) ? data.get("period") : "morning",
     planType: normalizePlanType(data.get("planType")),
     booked: data.get("booked") === "true",
-    name: String(data.get("name")).trim(),
+    name: nameChanged ? submittedName : (existingSlot.name || submittedName),
     time: String(data.get("time") || "").trim(),
-    review: String(data.get("review") || "").trim()
+    review: reviewChanged ? submittedReview : (existingSlot.review || "")
   };
+  const scheduleChanged = !existingSlot
+    || String(existingSlot.time || "").trim() !== slotPatch.time
+    || String(existingSlot.period || "") !== slotPatch.period;
+  const staleTranslationFields = [
+    ...(nameChanged ? ["name"] : []),
+    ...(reviewChanged ? ["review"] : [])
+  ];
   if (parsedMapsPlace.ok) {
     Object.assign(slotPatch, {
       googleMapsUrl: parsedMapsPlace.url,
@@ -2237,21 +2365,81 @@ async function handleItemSubmit(event) {
   const saved = await mutateTrip((trip) => {
     const day = trip.days.find((candidate) => candidate.id === dayId);
     if (!day) return;
+    if (!Array.isArray(day.slots)) day.slots = [];
     const existingIndex = day.slots.findIndex((candidate) => candidate.id === slotId);
+    let next;
     if (existingIndex >= 0) {
-      const next = { ...day.slots[existingIndex], ...slotPatch };
+      next = { ...day.slots[existingIndex], ...slotPatch };
       if (clearingMappedLocation && !preservingLegacyLocation) {
         [
           "googleMapsUrl", "mapsUrl", "googleMapsPlaceName", "googleMapsPlaceLabel",
           "googleMapsFeatureId", "address", "lat", "lng", "approximateLocation"
         ].forEach((key) => delete next[key]);
       }
+      if (next.i18n) next.i18n = clone(next.i18n);
+      invalidateTranslations(next, staleTranslationFields);
       day.slots[existingIndex] = next;
     } else {
-      day.slots.push({ id: nextSlotId, ...slotPatch });
+      next = { id: nextSlotId, ...slotPatch };
+      day.slots.push(next);
     }
+    if (scheduleChanged) resequenceDaySlots(day, next.id);
   }, slotId ? "planUpdated" : "planAdded");
   if (saved) els.dialog.close();
+}
+
+// Removes translations that depended on edited source fields. Languages then
+// fall back to the new source text instead of showing an outdated translation.
+function invalidateTranslations(target, fields) {
+  if (!target || !fields.length || !target.i18n || typeof target.i18n !== "object") return;
+  Object.keys(target.i18n).forEach((language) => {
+    const patch = target.i18n[language];
+    if (!patch || typeof patch !== "object") return;
+    fields.forEach((field) => delete patch[field]);
+    if (!Object.keys(patch).length) delete target.i18n[language];
+  });
+  if (!Object.keys(target.i18n).length) delete target.i18n;
+}
+
+function scheduleSortTime(time) {
+  const match = String(time || "").match(/(\d{1,2}):(\d{2})/);
+  if (!match) return "";
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return "";
+  return `${String(hours).padStart(2, "0")}:${match[2]}`;
+}
+
+function compareByPeriodAndTime(first, second) {
+  const periodRank = (slot) => ({ morning: 0, noon: 1, evening: 2 })[slot?.period] ?? 3;
+  const periodDifference = periodRank(first) - periodRank(second);
+  if (periodDifference) return periodDifference;
+  const firstMinutes = slotStartMinutes(first?.sortTime || first?.time);
+  const secondMinutes = slotStartMinutes(second?.sortTime || second?.time);
+  if (firstMinutes === secondMinutes) return 0;
+  return firstMinutes < secondMinutes ? -1 : 1;
+}
+
+// After a time/period change, the edited plan's sort metadata is recomputed
+// from its new schedule and the day's stored order is rewritten so that the
+// stored order, sortOrder values and the displayed timeline all agree.
+function resequenceDaySlots(day, changedSlotId) {
+  const slots = Array.isArray(day?.slots) ? day.slots : [];
+  const changed = slots.find((slot) => slot.id === changedSlotId);
+  if (!changed) return;
+  const usedSortOrder = slots.some((slot) => Number.isFinite(Number(slot.sortOrder)) && slot.sortOrder !== "" && slot.sortOrder !== null);
+  delete changed.sortOrder;
+  const sortTime = scheduleSortTime(changed.time);
+  if (sortTime) changed.sortTime = sortTime;
+  else delete changed.sortTime;
+
+  const others = orderedDaySlots({ ...day, slots: slots.filter((slot) => slot.id !== changedSlotId) })
+    .filter((slot) => slots.includes(slot));
+  const insertAt = others.findIndex((slot) => compareByPeriodAndTime(slot, changed) > 0);
+  const ordered = [...others];
+  ordered.splice(insertAt < 0 ? ordered.length : insertAt, 0, changed);
+  if (usedSortOrder) ordered.forEach((slot, index) => { slot.sortOrder = (index + 1) * 10; });
+  day.slots = ordered;
 }
 
 async function handleItemDelete() {
@@ -2264,12 +2452,14 @@ async function handleItemDelete() {
 
   const saved = await mutateTrip((trip) => {
     const day = trip.days.find((candidate) => candidate.id === dayId);
-    if (day) day.slots = day.slots.filter((candidate) => candidate.id !== slotId);
+    if (day) day.slots = (Array.isArray(day.slots) ? day.slots : []).filter((candidate) => candidate.id !== slotId);
   }, "planDeleted");
   if (saved) els.dialog.close();
 }
 
 async function connectRealtimeSync() {
+  if (HOSTED) { connectHostedSync(); return; }
+  await firebaseConfigPromise;
   if (!isFirebaseConfigured()) {
     setupLocalPreviewSync();
     setSyncStatus("localPreview", "offline");
@@ -2377,6 +2567,8 @@ function setupLocalPreviewSync() {
 }
 
 async function mutateTrip(mutator, successMessage) {
+  if (HOSTED) return mutateHostedTrip(mutator, successMessage);
+  await firebaseConfigPromise;
   setSyncStatus("saving", "working");
   try {
     if (!syncRuntime && isFirebaseConfigured() && syncStartupPromise) {
@@ -2422,6 +2614,142 @@ async function mutateTrip(mutator, successMessage) {
     showToast("saveError", true);
     return false;
   }
+}
+
+function connectHostedSync() {
+  syncReady = true;
+  lastUpdatedDate = new Date(hostedServerTrip.updatedAt);
+  setSyncStatus("synced", "synced");
+  renderUpdatedAt();
+  hostedPoller = createTripPoller({
+    load: () => hostedApi.getTrip(HOSTED_TRIP_ID),
+    onData: (payload) => {
+      hostedReady = true; syncReady = true;
+      if (!hostedWriteInFlight) acceptHostedTrip(expectTrip(payload, HOSTED_TRIP_ID));
+      setSyncStatus("synced", "synced");
+    },
+    onError: (error, { final }) => {
+      hostedReady = false; syncReady = false;
+      if (error.status === 401) { hostedPoller.stop(); redirectToLogin(); return; }
+      if (final) {
+        hostedPoller.stop(); hostedServerTrip = null; currentTrip = {days:[],reminders:[]};
+        document.querySelector("main").replaceChildren(textElement("p","empty-state",ui(currentLanguage,"tripUnavailable")));
+      }
+      setSyncStatus("offlineCopy", "offline");
+    }
+  });
+  hostedPoller.start();
+}
+
+function acceptHostedTrip(trip) {
+  if (trip.version === hostedServerTrip?.version) return;
+  const metadataChanged = ["title","timezone","weather","resources"].some((key) =>
+    JSON.stringify(trip[key]) !== JSON.stringify(hostedServerTrip?.[key]));
+  hostedServerTrip = trip;
+  currentTrip = toRenderTrip(trip);
+  lastUpdatedDate = new Date(trip.updatedAt);
+  if (metadataChanged && !document.querySelector("dialog[open]")) { location.reload(); return; }
+  renderAll();
+}
+
+async function mutateHostedTrip(mutator, successMessage) {
+  if (hostedWriteInFlight || !hostedReady || !navigator.onLine || hostedServerTrip?.archived) {
+    showToast("editRequiresConnection", true); return false;
+  }
+  const openedVersion = els.dialog.open ? els.form.dataset.hostedVersion
+    : els.todoDialog.open ? els.todoForm.dataset.hostedVersion : "";
+  if (openedVersion && Number(openedVersion) !== hostedServerTrip.version) {
+    showToast("versionConflict",true); return false;
+  }
+  hostedWriteInFlight = true; setSyncStatus("saving","working");
+  const base = clone(hostedServerTrip);
+  try {
+    mutator(base);
+    const result = await hostedApi.applyChanges(HOSTED_TRIP_ID,hostedServerTrip.version,
+      [{type:"replace_content",trip:base}],newRequestId("edit"));
+    acceptHostedTrip(expectTrip(result,HOSTED_TRIP_ID));
+    setSyncStatus("synced","synced");showToast(successMessage);return true;
+  } catch(error) {
+    if(error.status===401)redirectToLogin();
+    if(error.status===409) {
+      try {acceptHostedTrip(expectTrip(await hostedApi.getTrip(HOSTED_TRIP_ID),HOSTED_TRIP_ID));}catch{}
+      showToast("versionConflict",true);
+    } else showToast("saveError",true);
+    setSyncStatus("saveFailed","error");return false;
+  } finally {hostedWriteInFlight=false;}
+}
+
+function renderHostedControls() {
+  if (!HOSTED) return;
+  let controls = document.getElementById("hosted-controls");
+  if (!controls) { controls = element("div","hosted-controls"); controls.id="hosted-controls"; els.headerActions.prepend(controls); }
+  const button = (label,action) => {
+    const node=textElement("button","button button--quiet",ui(currentLanguage,label));node.type="button";node.addEventListener("click",action);return node;
+  };
+  const home=textElement("a","button button--light",ui(currentLanguage,"allTrips"));home.href="/";
+  controls.replaceChildren(home,
+    button("editTrip",()=>openMetadataDialog()),
+    button("exportTrip",async()=> {
+      try {downloadJSON(await hostedApi.exportTrip(HOSTED_TRIP_ID),exportFilename(hostedServerTrip));}
+      catch(error){if(error.status===401)redirectToLogin();else showToast("saveError",true);}
+    }),
+    button("retrySync",()=>hostedPoller?.retryNow()),
+    button("signOut",logoutAndLeave));
+  els.addReminder.disabled=Boolean(hostedServerTrip.archived);
+}
+
+function hostedEditor(title,fields,onSave,onDelete) {
+  const dialog=element("dialog","hosted-editor"); const form=document.createElement("form");
+  form.append(textElement("h2","",ui(currentLanguage,title)));
+  for(const [key,definition] of Object.entries(fields)){
+    const label=element("label","field");label.append(textElement("span","",ui(currentLanguage,definition.label||key)));
+    const input=document.createElement("input");input.name=key;input.type=definition.type||"text";input.value=definition.value||"";
+    input.required=Boolean(definition.required);input.maxLength=definition.maxLength||300;label.append(input);form.append(label);
+  }
+  const error=textElement("p","hosted-form-error","");error.setAttribute("role","alert");form.append(error);
+  const actions=element("div","hosted-form-actions");
+  const cancel=textElement("button","button button--quiet",ui(currentLanguage,"cancel"));cancel.type="button";cancel.addEventListener("click",()=>dialog.close());
+  const save=textElement("button","button",ui(currentLanguage,"saveForEveryone"));actions.append(cancel,save);
+  if(onDelete){const remove=textElement("button","button button--quiet",ui(currentLanguage,"delete"));remove.type="button";remove.addEventListener("click",()=>perform(onDelete));actions.prepend(remove);}
+  form.append(actions);dialog.append(form);document.body.append(dialog);
+  async function perform(action) {
+    form.querySelectorAll("button").forEach((b)=>b.disabled=true);
+    try {await action(Object.fromEntries(new FormData(form)));dialog.close();}
+    catch(problem){error.textContent=problem.status===409?ui(currentLanguage,"versionConflict"):problem.message;if(problem.status===401)redirectToLogin();}
+    finally {form.querySelectorAll("button").forEach((b)=>b.disabled=false);}
+  }
+  form.addEventListener("submit",(event)=>{event.preventDefault();perform(onSave);});
+  dialog.addEventListener("close",()=>dialog.remove());dialog.showModal();
+}
+
+function openDayDialog(dayId="") {
+  const day=hostedServerTrip.days.find((d)=>d.id===dayId);
+  const version=hostedServerTrip.version;const requestId=newRequestId("day");
+  const targetId=dayId||uid("day");
+  const save=async(fields)=> {
+    const result=await hostedApi.applyChanges(HOSTED_TRIP_ID,version,[{type:"upsert_day",day:{id:targetId,date:fields.date,theme:fields.theme}}],requestId);
+    acceptHostedTrip(expectTrip(result,HOSTED_TRIP_ID));
+  };
+  hostedEditor(day?"editDate":"addDate",{
+    date:{type:"date",value:day?.date||"",required:true,label:"date"},
+    theme:{value:day?.theme||"",label:"dayLabel",maxLength:200}
+  },save,day?async()=> {
+    const result=await hostedApi.applyChanges(HOSTED_TRIP_ID,version,[{type:"delete_day",dayId}],newRequestId("delete-day"));
+    acceptHostedTrip(expectTrip(result,HOSTED_TRIP_ID));
+  }:null);
+}
+
+function openMetadataDialog() {
+  const version=hostedServerTrip.version;const requestId=newRequestId("metadata");
+  hostedEditor("editTrip",{
+    title:{value:hostedServerTrip.title,required:true,maxLength:200},
+    timezone:{value:hostedServerTrip.timezone,required:true},
+    country:{value:hostedServerTrip.country},
+    route:{value:hostedServerTrip.route}
+  },async(fields)=> {
+    await hostedApi.applyChanges(HOSTED_TRIP_ID,version,[{type:"update_trip",fields}],requestId);
+    location.reload();
+  });
 }
 
 function setSyncStatus(key, state, variables = {}) {
@@ -2654,11 +2982,13 @@ function googleMapsDestinations(location = {}, { allowSearchFallback = true } = 
 
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  window.addEventListener("load", () => {
+  const register = () => {
     navigator.serviceWorker.register("/service-worker.js").catch((error) => {
       console.warn("Service worker registration failed", error);
     });
-  });
+  };
+  if (document.readyState === "complete") register();
+  else window.addEventListener("load", register);
 }
 
 function externalAnchor(label, url, className = "resource-link") {

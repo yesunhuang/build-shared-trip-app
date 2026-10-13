@@ -4600,3 +4600,15 @@ details[open] > summary .summary-chevron,
     gap: 1.5rem;
   }
 }
+.hosted-controls { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.hosted-editor { color:var(--ink,#17362f); background:#fffaf3; border:0; border-radius:20px; padding:24px; width:min(480px,calc(100vw - 28px)); max-height:calc(100dvh - 48px); overflow:auto; }
+.hosted-editor::backdrop { background:#17362f70; }
+.hosted-editor label { display:grid; gap:8px; margin:16px 0; min-width:0; }
+.hosted-editor input { width:100%; min-width:0; max-width:100%; box-sizing:border-box; padding:10px; font:inherit; border:1px solid #17362f40; border-radius:8px; }
+.hosted-form-actions { display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-end; margin-top:20px; }
+.hosted-form-error { color:#a53325; }
+.hosted-booting body > :not(.hosted-boot):not(script) { visibility:hidden; }
+.hosted-boot { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; padding:24px; background:#f3ede3; color:#17362f; }
+.hosted-boot__card { max-width:420px; text-align:center; }
+.hosted-boot__title { font-size:24px; font-weight:700; }
+.hosted-boot__actions { display:flex; flex-wrap:wrap; justify-content:center; gap:12px; }
