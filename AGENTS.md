@@ -19,7 +19,7 @@ The agreed development direction is:
 
 These are development requirements, not a claim that the features already exist. The current implementation is a per-trip generator with Firebase or local-preview storage. Read the actual code before describing capabilities. Database choice, detailed APIs, deployment layout, and optional features remain implementation decisions unless separately settled by the user.
 
-The current preparation task establishes development instructions only. It does not launch a full rewrite, provision a server, connect a live account, publish a deployment, or migrate a real trip.
+Repository preparation is complete. The user-approved implementation assignment is [initial command.md](initial%20command.md); an assigned implementation worker should execute it, not stop at another proposal. It authorizes scoped development and local validation, not purchasing infrastructure, publishing a live deployment, connecting a live travel account, or migrating real trip data without applicable authorization. A committed command file alone does not prove that a worker has started.
 
 ## 2. Read the existing workflow before changing it
 
