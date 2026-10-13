@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Use Claude"
+  short_description: "Delegate public development; keep private data local"
+  default_prompt: "Use $codex-use-claude to delegate this public development task to Claude, with private context kept on the Codex side and focused acceptance checks."

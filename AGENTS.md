@@ -24,6 +24,7 @@ The current preparation task establishes development instructions only. It does 
 ## 2. Read the existing workflow before changing it
 
 - Read `SKILL.md` before trip builds or framework changes. For a fresh environment, also read `references/agent-setup.md`.
+- Before substantial development, read the repository-local [codex-use-claude skill](.agents/skills/codex-use-claude/SKILL.md). Its delegation and privacy rules apply even when the runtime does not automatically discover repository skills.
 - Use the relevant contracts in `references/input-schema.md`, `references/feature-contract.md`, `references/responsive-performance.md`, and `references/sharing-and-privacy.md`.
 - Existing single-trip/Firebase instructions describe the current implementation. The project direction above governs the planned self-hosted work; update affected contracts alongside implementation instead of leaving contradictory guidance.
 - Reusable application changes belong in `assets/app-template/` or explicitly introduced shared backend/frontend modules. `docs/` is generated fictional demo output; do not fix only that copy.
@@ -36,7 +37,7 @@ The current preparation task establishes development instructions only. It does 
 - Preserve unrelated edits, other agents' branches/worktrees, valid evidence, and healthy authorized processes. Do not reset, clean, kill, or overwrite them to simplify the task.
 - Buying infrastructure, increasing paid usage beyond an authorized budget, changing access/security settings or repository visibility, deploying, and modifying live travel data require applicable user authorization. Reuse authorization already present; ask only for a genuinely new decision.
 - The Manager is the user or the explicitly designated coordinator. Interactive coordination and repository preparation by the Manager do not claim a worker slot. A worker must claim its identity before implementation work.
-- A multi-agent registry supports coordination when workers are assigned; it is not an instruction to spawn additional agents automatically.
+- The registry coordinates assigned Codex workers; it does not require additional Codex sessions. Claude helpers are encouraged under the delegation policy below and work under their coordinating worker's ownership without claiming a Codex identity.
 
 ## 4. Worker identity and startup preflight
 
@@ -115,13 +116,16 @@ Preserve existing comments; do not silently delete or rewrite instructions. On r
 - If an external relay is configured, use its verified existing recipient/session mapping. A message being posted or queued does not prove receipt or execution. Do not replay uncertain historical commands or create replacement sessions to force delivery.
 - If a platform control blocks an otherwise authorized action, state both facts accurately, preserve the work, and use a permitted alternative if available. Never disable controls or demand duplicate user approval as though the original authorization did not exist.
 
-### Auxiliary AI work
+### Claude delegation is the default
 
-- When helper/model use is already authorized, delegate bounded implementation or mechanical work with explicit inputs, outputs, ownership, and acceptance criteria. The coordinating agent retains design, integration, and acceptance responsibility.
-- Verify delegated work by inspecting the diff and running focused checks. Do not independently recreate the entire task merely to verify it; broaden review only for a concrete defect or uncertainty.
-- For authorized Claude assistance, prefer the latest available Opus through the existing approved account/tooling. Verify actual availability and the executed model; do not invent model IDs or silently downgrade. This is not a requirement to call a helper for every task.
-- Keep provider/account details and raw receipts private. Public reports may record the delegated scope, public model name/version, outcome, and focused verification without account, quota, or machine identifiers.
-- Helper use does not authorize new accounts, credentials, paid capacity, installations, or expanded project scope. An unavailable helper is a specific dependency issue, not a reason to stop independent authorized work.
+- Use [codex-use-claude](.agents/skills/codex-use-claude/SKILL.md) for substantial development. Claude assistance is authorized for this project's public-safe work through existing approved tooling and capacity; do not ask again for each task. Delegate as much useful work as possible instead of making Codex the primary implementer.
+- Delegate public code investigation, architecture proposals, detailed design, implementation, refactors, debugging, test authoring/execution, and documentation. Do not retain a whole workstream merely by calling it design or judgment. Codex should mainly prepare minimal task contracts, handle private context, perform lightweight acceptance checks, and integrate accepted work.
+- Give helpers cohesive tasks with explicit scope, outputs, ownership, and acceptance criteria. Run independent tasks concurrently when the available tooling, authorized capacity, and separate write ownership support it. Serialize tasks that share files or depend on each other's output; never launch duplicate implementations just to occupy helpers.
+- Prefer returning focused failures to Claude for correction. Codex may make a tiny cheaper fix, but must not routinely reimplement, exhaustively re-review, or independently repeat the full test effort. Broaden verification only for a concrete defect, required gate, or unresolved risk.
+- Keep private data with Codex. Delegate against public repository content and fictional examples only; sanitize inputs before delegation and outputs before publication. A clean prompt or changed working directory does not isolate accessible files, history, logs, environment, automatically loaded instructions, or connected tools. Use an enforced public-only workspace or a verified tool-free text route; otherwise keep that task with Codex.
+- Use the latest actually available Opus within the existing authorization. Verify availability and the executed model; do not invent model IDs, silently downgrade, or repeatedly probe a failing route. Keep account details and raw receipts private.
+- Missing tooling, authentication, permitted capacity, or a safe context boundary is a concrete delegation blocker. Record it once, continue independent authorized work, and keep any Codex fallback proportionate. Do not silently turn an unavailable helper into a claim of Claude execution or a reason to stop the whole task.
+- Delegation does not authorize new accounts, paid capacity, installations, credential changes, live-data access, deployments, or expanded scope. Apply existing authorization where present. Codex retains responsibility for privacy, permissions, final acceptance, and publication; Claude may assist with public security design using fictional inputs.
 
 ## 8. Application invariants for upcoming implementation
 
