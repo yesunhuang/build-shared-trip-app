@@ -21,7 +21,7 @@ export SHARED_TRIP_DATA_DIR="$HOME/.local/share/shared-trip-dev"   # must be out
 npm start
 ```
 
-Open `http://127.0.0.1:4173/` and use **Owner sign-in** with your token. Create a trip, or import the fictional `assets/trip.example.json`. The service listens only on `127.0.0.1:4173` by default; set `SHARED_TRIP_HOST` or `SHARED_TRIP_PORT` to change that. For remote use, put it behind an HTTPS reverse proxy and set `SHARED_TRIP_ORIGIN`. The [self-hosted guide](references/self-hosted.md) covers configuration, viewer accounts, VPS deployment alongside other services, backups, restores, upgrades, and rollback. A [Docker Compose + Caddy template](deploy/README.md) is included as untested source preparation.
+Open `http://127.0.0.1:4173/` and use **Owner sign-in** with your token. Create a trip, or import the fictional `assets/trip.example.json`. The service listens only on `127.0.0.1:4173` by default; set `SHARED_TRIP_HOST` or `SHARED_TRIP_PORT` to change that. For remote use, put it behind an HTTPS reverse proxy and set `SHARED_TRIP_ORIGIN`. The [self-hosted guide](references/self-hosted.md) covers configuration, viewer accounts, VPS deployment alongside other services, backups, restores, upgrades, and rollback. A [Docker Compose + Caddy template](deploy/README.md) is included; static Compose validation passed, while container and HTTPS runtime checks remain pending.
 
 | What | How |
 | --- | --- |
@@ -102,7 +102,7 @@ Rebuild the demo whenever the template or the fictional input changes. Automated
 | [`SKILL.md`](SKILL.md) · [`agents/`](agents/) | Agent instructions and discovery metadata |
 | [`references/`](references/) | Self-hosting, MCP, setup, input, UI, performance, privacy, and legacy deployment guides |
 | `server/` | Self-hosted Node service, SQLite storage, accounts, API, and MCP |
-| [`deploy/`](deploy/README.md) | Docker Compose + Caddy HTTPS template (not yet executed) |
+| [`deploy/`](deploy/README.md) | Docker Compose + Caddy HTTPS template (runtime checks pending) |
 | `assets/selfhosted/` | Home page, manifest, and service worker for the single installed app |
 | [`assets/app-template/`](assets/app-template/) | Shared trip-page UI (also used by the legacy generator) |
 | [`assets/trip.example.json`](assets/trip.example.json) | Fictional multilingual fixture |

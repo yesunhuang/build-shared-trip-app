@@ -255,7 +255,7 @@ The app sends `Referrer-Policy: strict-origin-when-cross-origin`, so external ma
 
 ## Limitations
 
-- Nothing here has been executed: no image build, Compose or Caddyfile validation, certificate issuance, healthcheck, crash recovery under Linux or containers, or backup/restore run.
+- Compose `config --quiet` passed using public placeholders. Image build, Caddyfile runtime validation, certificate issuance, container healthcheck, Linux/container crash recovery and the container backup/restore recipe remain unverified. See the [local acceptance report](../doc/Progress/progress_2026_10_14_cpx002_codex_b.md).
 - First certificate issuance behind a CDN that redirects HTTP or proxies TLS is not verified. Watch the Caddy logs.
 - Rate limits for sign-in (10 failures per minute) and invitations (10 invalid codes per 15 minutes) are keyed by connection address. Behind Caddy, all clients share Caddy's address, so failures by one client briefly block everyone.
 - The running app can write to the backup mount, so off-site copies are the real protection.
