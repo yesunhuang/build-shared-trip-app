@@ -1,6 +1,6 @@
 # Build Shared Trip App
 
-**A self-hosted, multilingual travel planner for you and a few companions. One small server holds every trip, and an MCP endpoint lets an AI read and edit the same itineraries.**
+**A self-hosted, multilingual travel planner for you and a few companions. One small server holds every trip, invited companions you approve can view them, and an owner-only MCP endpoint lets an AI read and edit the same itineraries.**
 
 Run one Node.js service on your own machine or a small VPS. From the home page you can create or import trips. Each trip opens at a stable `/trips/<trip-id>` link with the desktop map and timeline, the phone swipe-sheet planner, reminders, weather, and four languages. You install the PWA once and switch between trips inside it. No Firebase account and no separate deployment per trip are needed.
 
@@ -21,15 +21,16 @@ export SHARED_TRIP_DATA_DIR="$HOME/.local/share/shared-trip-dev"   # must be out
 npm start
 ```
 
-Open `http://127.0.0.1:4173/` and sign in with your token. Create a trip, or import the fictional `assets/trip.example.json`. The service listens only on `127.0.0.1:4173` by default; set `SHARED_TRIP_HOST` or `SHARED_TRIP_PORT` to change that. For remote use, put it behind an HTTPS reverse proxy and set `SHARED_TRIP_ORIGIN`. The [self-hosted guide](references/self-hosted.md) covers configuration, VPS deployment alongside other services, backups, restores, upgrades, and rollback.
+Open `http://127.0.0.1:4173/` and use **Owner sign-in** with your token. Create a trip, or import the fictional `assets/trip.example.json`. The service listens only on `127.0.0.1:4173` by default; set `SHARED_TRIP_HOST` or `SHARED_TRIP_PORT` to change that. For remote use, put it behind an HTTPS reverse proxy and set `SHARED_TRIP_ORIGIN`. The [self-hosted guide](references/self-hosted.md) covers configuration, viewer accounts, VPS deployment alongside other services, backups, restores, upgrades, and rollback. A [Docker Compose + Caddy template](deploy/README.md) is included as untested source preparation.
 
 | What | How |
 | --- | --- |
-| Storage | One SQLite database in `SHARED_TRIP_DATA_DIR`, kept apart from code, config, and backups |
-| Access | One admin token. The browser signs in once and receives an HttpOnly session cookie; API and MCP clients send a bearer token. Every trip link requires sign-in, and there is no anonymous sharing. |
+| Storage | One SQLite database in `SHARED_TRIP_DATA_DIR`, kept apart from code, config, and backups. Optional private photos live in `SHARED_TRIP_DATA_DIR/photos`. |
+| Access | The owner's private admin token covers everything, including MCP (bearer header) and browser sign-in. Companions get a single-use invitation code, request a username/password account, and can sign in once the owner approves them. Approved viewers can read and export **all** trips but cannot edit, import, manage users, or use MCP. Revocation ends their sessions immediately. Every trip link requires sign-in; there is no anonymous sharing or per-trip membership. |
 | Editing | Versioned, atomic change batches. A stale edit is rejected with 409. A retry with the same `requestId` is never applied twice. |
 | Sync | Open pages poll the server and reconnect after network loss. Writes need a connection. Protected trips are never kept in a persistent offline cache. |
-| AI | Remote MCP over Streamable HTTP (protocol `2025-11-25`) with `list_trips`, `get_trip`, `create_trip`, and `apply_trip_changes`. See [mcp.md](references/mcp.md). |
+| AI | Owner-only remote MCP over Streamable HTTP (protocol `2025-11-25`) with `list_trips`, `get_trip`, `create_trip`, and `apply_trip_changes`. See [mcp.md](references/mcp.md). |
+| Recovery | Online validated SQLite snapshots that include accounts. Data-directory ownership is an OS-held lock, so a crashed or killed service can restart without manual lock deletion. This has been exercised locally on Windows only; Linux and containers are not yet verified. |
 | Portability | Import legacy trip JSON or exports, with IDs and translations kept. Export any trip as recoverable JSON. |
 
 ## The interface
@@ -88,8 +89,8 @@ node scripts/qa-static.mjs /tmp/tide-lines-demo
 ## Maintain the framework
 
 ```bash
-npm test                  # existing generator/template/privacy regression suite
-npm run test:server       # self-hosted HTTP, SQLite, and MCP tests (see self-hosted guide)
+npm test                  # legacy, server, and DOM-simulation suites together
+npm run test:server       # self-hosted HTTP, SQLite, MCP, ownership-lock, and account tests
 node scripts/build-docs-demo.mjs
 node scripts/audit-privacy.mjs . --mode framework
 ```
@@ -100,7 +101,8 @@ Rebuild the demo whenever the template or the fictional input changes. Automated
 | --- | --- |
 | [`SKILL.md`](SKILL.md) · [`agents/`](agents/) | Agent instructions and discovery metadata |
 | [`references/`](references/) | Self-hosting, MCP, setup, input, UI, performance, privacy, and legacy deployment guides |
-| `server/` | Self-hosted Node service, SQLite storage, API, and MCP |
+| `server/` | Self-hosted Node service, SQLite storage, accounts, API, and MCP |
+| [`deploy/`](deploy/README.md) | Docker Compose + Caddy HTTPS template (not yet executed) |
 | `assets/selfhosted/` | Home page, manifest, and service worker for the single installed app |
 | [`assets/app-template/`](assets/app-template/) | Shared trip-page UI (also used by the legacy generator) |
 | [`assets/trip.example.json`](assets/trip.example.json) | Fictional multilingual fixture |

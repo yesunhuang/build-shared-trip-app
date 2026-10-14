@@ -1,9 +1,26 @@
-.git
-node_modules
-.env*
-docs
-showcase
-data
-backups
-*.sqlite*
-*.db*
+# Send only the application build inputs to Docker.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!server/
+!server/**
+!assets/
+!assets/app-template/
+!assets/app-template/public/
+!assets/app-template/public/**
+!assets/selfhosted/
+!assets/selfhosted/**
+
+# Runtime state and credentials are never image inputs.
+**/.env
+**/.env.*
+**/*.sqlite*
+**/*.db*
+**/*.pem
+**/*.key
+**/private/**
+**/data/**
+**/backups/**
+**/.git/**
+**/node_modules/**

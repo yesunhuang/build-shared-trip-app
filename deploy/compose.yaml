@@ -1,0 +1,126 @@
+# Shared Trips: Docker Compose + Caddy HTTPS deployment TEMPLATE.
+#
+# Source preparation only. Nothing here proves a working deployment; read
+# deploy/README.md before use. Run from the repository root, for example:
+#
+#   docker compose --env-file /PRIVATE/shared-trips/config/shared-trips.env \
+#     -f deploy/compose.yaml up -d
+#
+# Every private value (admin bearer secret, public origin, Caddy domain, host
+# storage paths) comes from that env file, which lives OUTSIDE the checkout.
+# Never commit it, paste it into a terminal, or print it. Note that
+# `docker compose config` prints interpolated values; validate with
+# `docker compose ... config --quiet` instead.
+#
+# Topology:
+#   internet -> :80/:443 caddy (edge + backend networks) -> app:4173 (backend only)
+# The app publishes NO host port. Only Caddy publishes 80 and 443.
+
+name: shared-trips
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    # The tag lets you keep the previous image for rollback (see README).
+    image: shared-trips:${SHARED_TRIP_IMAGE_TAG:-local}
+    restart: unless-stopped
+    # SIGTERM closes cleanly: ownership is released and server.lock removed.
+    # After a forced kill, OOM or crash the OS releases the ownership lock and
+    # the next start replaces its own stale marker; nothing is deleted by hand.
+    # Only a foreign or legacy PID-format server.lock is refused (see README).
+    stop_grace_period: 30s
+    environment:
+      SHARED_TRIP_ADMIN_TOKEN: "${SHARED_TRIP_ADMIN_TOKEN:?set SHARED_TRIP_ADMIN_TOKEN in the private env file}"
+      SHARED_TRIP_ORIGIN: "${SHARED_TRIP_ORIGIN:?set SHARED_TRIP_ORIGIN in the private env file}"
+      SHARED_TRIP_HOST: "0.0.0.0"
+      SHARED_TRIP_PORT: "4173"
+      SHARED_TRIP_DATA_DIR: "/data"
+    volumes:
+      # Data directory: shared-trip.sqlite (trips, retry log, viewer accounts,
+      # invitations), server-ownership.sqlite, server.lock and the private
+      # photos/ store. Must be a LOCAL filesystem with locking and hard links
+      # (no NFS/SMB/shared VM folders), exist already, be outside the checkout
+      # and any public static directory, and be writable by container UID 1000.
+      - type: bind
+        source: "${SHARED_TRIP_DATA_PATH:?set SHARED_TRIP_DATA_PATH in the private env file}"
+        target: /data
+        bind:
+          create_host_path: false
+      # Separate snapshot storage for server/cli/backup.mjs (online backups).
+      - type: bind
+        source: "${SHARED_TRIP_BACKUP_PATH:?set SHARED_TRIP_BACKUP_PATH in the private env file}"
+        target: /backups
+        bind:
+          create_host_path: false
+    networks:
+      - backend
+    # Intentionally no `ports:` entry.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    # Generic /health only; sends the Host the app accepts (the origin host).
+    # Uses no admin secret.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const http = require("node:http");
+          const host = new URL(process.env.SHARED_TRIP_ORIGIN).host;
+          const req = http.get({ host: "127.0.0.1", port: Number(process.env.SHARED_TRIP_PORT), path: "/health", headers: { host: host }, timeout: 5000 },
+          (res) => { res.resume(); process.exit(res.statusCode === 200 ? 0 : 1); });
+          req.on("timeout", () => req.destroy(new Error("timeout")));
+          req.on("error", () => process.exit(1));
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  caddy:
+    # Pin a specific, reviewed tag or digest in the private env file.
+    image: ${CADDY_IMAGE:-caddy:2}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    # The Caddy admin API stays on its in-container localhost default and is
+    # not published. Caddy receives only the domain, never the admin secret,
+    # and has no access to the data, photo or backup directories.
+    environment:
+      SHARED_TRIP_DOMAIN: "${SHARED_TRIP_DOMAIN:?set SHARED_TRIP_DOMAIN in the private env file}"
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      # Certificates, private keys and ACME account data: private, persistent.
+      - type: bind
+        source: "${CADDY_DATA_PATH:?set CADDY_DATA_PATH in the private env file}"
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${CADDY_CONFIG_PATH:?set CADDY_CONFIG_PATH in the private env file}"
+        target: /config
+        bind:
+          create_host_path: false
+    networks:
+      - edge
+      - backend
+
+networks:
+  # No external connectivity; only Caddy and the app are attached.
+  backend:
+    internal: true
+  # External-facing network used for Caddy's published ports and ACME traffic.
+  edge: {}

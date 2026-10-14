@@ -90,7 +90,7 @@ try {
   assert.equal(build.status, 0, build.stderr || build.stdout);
   const ignores = fs.readFileSync(path.join(generated, ".gitignore"), "utf8");
   for (const entry of ["node_modules/", ".firebase/", ".firebaserc", ".env", "*.pem", "trip-input.json", "private/", "sources/"]) {
-    assert.ok(ignores.split("\n").includes(entry), `generated project must ignore ${entry}`);
+    assert.ok(ignores.split(/\r?\n/).includes(entry), `generated project must ignore ${entry}`);
   }
   assert.deepEqual(auditPrivacy(generated, { mode: "app" }), []);
   console.log("Privacy audit tests passed (strict framework / public-config app modes, external denylist, no secret echo, and self-scan).");

@@ -1,7 +1,10 @@
 // Shared helpers for the self-hosted trip server.
 // Protected trip data lives only in page memory: nothing here writes trip
 // content to localStorage, sessionStorage, IndexedDB, Cache Storage or a
-// BroadcastChannel. The admin token is only sent once in the login POST body.
+// BroadcastChannel. The admin token, viewer passwords and invitation codes are
+// only sent in a POST body and are never stored by the browser code.
+// Role/capability data from /api/session only adjusts the UI; the server
+// enforces every permission independently.
 
 export const TRIP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const LANGUAGE_STORAGE_KEY = "shared-trips-language";
@@ -114,7 +117,7 @@ export function loginUrl(next = `${location.pathname}${location.search}`) {
 }
 
 export async function requestJSON(path, { method = "GET", body, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  if (signoutPending() && path !== "/api/logout" && path !== "/api/login") {
+  if (signoutPending() && !["/api/logout", "/api/login", "/api/accept-invite"].includes(path)) {
     throw new HostedRequestError("Sign in required", { status: 401, code: "signout_pending" });
   }
   const controller = new AbortController();
@@ -169,6 +172,20 @@ export const hostedApi = Object.freeze({
     try { localStorage.removeItem(SIGNOUT_KEY); } catch {}
     return result;
   },
+  loginViewer: async (username, password) => {
+    const result = await requestJSON("/api/login", { method: "POST", body: { username, password }, timeoutMs: WRITE_TIMEOUT_MS });
+    try { localStorage.removeItem(SIGNOUT_KEY); } catch {}
+    return result;
+  },
+  acceptInvitation: (invitation, username, password) => requestJSON("/api/accept-invite", {
+    method: "POST",
+    body: { invitation, username, password },
+    timeoutMs: WRITE_TIMEOUT_MS
+  }),
+  listAccounts: () => requestJSON("/api/users"),
+  createInvitation: (expiresInHours = 72) => requestJSON("/api/invitations", { method: "POST", body: { expiresInHours } }),
+  approveAccount: (accountId) => requestJSON(`/api/users/${encodeURIComponent(accountId)}/approve`, { method: "POST", body: {} }),
+  revokeAccount: (accountId) => requestJSON(`/api/users/${encodeURIComponent(accountId)}/revoke`, { method: "POST", body: {} }),
   logout: () => requestJSON("/api/logout", { method: "POST", body: {}, timeoutMs: 8000 }),
   listTrips: () => requestJSON("/api/trips"),
   getTrip: (tripId) => requestJSON(`/api/trips/${encodeURIComponent(tripId)}`),
@@ -272,13 +289,20 @@ export function scriptSafeJSON(value) {
 
 // In-memory hand-off from the bootstrap module to app.js (same module instance).
 let bootTrip = null;
+let bootSession = null;
 export function setBootTrip(trip) { bootTrip = trip || null; }
 export function getBootTrip() { return bootTrip; }
+export function setBootSession(session) { bootSession = session && typeof session === "object" ? session : null; }
+export function getBootSession() { return bootSession; }
+// Fail closed: anything other than an explicit server capability is read-only.
+export function sessionCanEdit(session) { return session?.capabilities?.editTrips === true; }
+export function sessionCanManageAccounts(session) { return session?.capabilities?.manageAccounts === true; }
 
 const PROTECTED_STORAGE_PREFIXES = ["trip-", "shared-trip-"];
 
 export async function clearProtectedBrowserState() {
   bootTrip = null;
+  bootSession = null;
   const seed = document.getElementById("trip-data");
   if (seed) seed.textContent = "";
   try { sessionStorage.clear(); } catch { /* storage may be unavailable */ }
@@ -300,7 +324,7 @@ export async function clearProtectedBrowserState() {
         const requests = await cache.keys();
         await Promise.all(requests.map((request) => {
           const { pathname } = new URL(request.url);
-          return /^\/(?:api|mcp|trips)(?:\/|$)|^\/resources\.html$|^\/login$/.test(pathname)
+          return /^\/(?:api|mcp|trips|photos|attachments)(?:\/|$)|^\/resources\.html$|^\/login$/.test(pathname)
             ? cache.delete(request)
             : null;
         }));

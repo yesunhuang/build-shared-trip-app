@@ -12,7 +12,7 @@ import {
   toRenderTrip,
   tripIdFromQuery,
   tripPath
-} from "./hosted-client.js?v=v-51f0e68501d2";
+} from "./hosted-client.js?v=v-892a0db82e74";
 
 const MAX_AUTOMATIC_ATTEMPTS = 4;
 const STRINGS = {
@@ -90,7 +90,7 @@ async function start(trip) {
   const backHref = tripPath(tripId);
   document.querySelectorAll(".back-link").forEach((node) => { node.href = backHref; });
   try {
-    await import("./resources.js?v=v-51f0e68501d2");
+    await import("./resources.js?v=v-892a0db82e74");
     overlay.remove();
     document.documentElement.classList.remove("hosted-booting");
     const poller = createTripPoller({

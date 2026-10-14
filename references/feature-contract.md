@@ -6,18 +6,20 @@ Preserve these behaviors unless the user explicitly requests a design change. Th
 | --- | --- | --- |
 | Apps | One service and one PWA for all trips | One generated static app per trip |
 | Data | Server SQLite, authoritative | Embedded seed, plus local preview storage or optional Firebase |
-| Access | Admin sign-in for every page and API | Link-based trust (Firebase) or none (local) |
+| Access | Owner admin token, plus owner-approved read-only viewer accounts; sign-in for every trip and API | Link-based trust (Firebase) or none (local) |
 | Sync | Bounded polling and reconnect | Firestore listener, or none |
 | Offline | Generic shell only; protected data stays in page memory | Cached itinerary shell |
 | Validation | Draft structure | Complete authoring checks |
 
 ## Self-hosted home and trip switching
 
-- `/` shows a sign-in form when signed out. When signed in, it lists trips (archived trips separately or behind a filter) with controls to create, import, edit metadata, archive or restore, export, and open each trip.
-- Each trip opens at `/trips/<trip-id>`, which stays the same through renames and upgrades. The trip page has controls for *All trips*, editing the trip, adding a date, exporting, and signing out.
+- `/` shows sign-in when signed out: a viewer username/password form, a separate **Owner sign-in** with the admin token, and a *Have an invitation?* form. That form takes an invitation code, a username, and a password, and creates a pending account. No invitation URL or self-approval exists.
+- Signed in as owner, `/` lists trips (archived trips separately or behind a filter) with controls to create, import, edit metadata, archive or restore, export, and open each trip. A *Viewer accounts* section creates single-use invitations, showing each code once, lists pending, approved, and revoked accounts, and approves or revokes them.
+- Signed in as an approved viewer, `/` lists the same trips with open and export controls only, plus a read-only note. Create, import, edit, archive, and account controls are absent. The server enforces the same permissions independently of the UI.
+- Each trip opens at `/trips/<trip-id>`, which stays the same through renames and upgrades. The trip page has controls for *All trips*, editing the trip, adding a date, exporting, and signing out. For viewers, the editing controls (trip edit, add date, add/edit plan, checklist changes) are absent or disabled.
 - An unknown trip ID shows a not-found state, and a signed-out visit shows a sign-in state. It never falls back to another trip or to demo data.
 - The manifest `id`, `start_url`, and `scope` are `/` with a generic stable name, so switching trips never needs reinstalling. The service worker caches only generic static assets. It never caches `/api`, `/mcp`, protected trip navigations, or trip payloads.
-- The trip page shows honest status labels: saved, saving, failed, conflict (reload required), offline/reconnecting, and signed out. A failed write is never shown as saved. After a 401, the page clears its data and returns to sign-in.
+- The trip page shows honest status labels: saved, saving, failed, conflict (reload required), offline/reconnecting, and signed out. A failed write is never shown as saved. After a 401, for example the next poll after the owner revokes a viewer, the page clears its data and returns to sign-in.
 
 ## Header and main page
 
@@ -113,6 +115,7 @@ When a full place URL is supplied, parse and save place name, address, final POI
 - Open pages poll at a bounded interval with backoff. They reconnect after an initial connection failure or after a later disconnect, on the `online` event or a manual retry.
 - During a transient network loss, an open page keeps its last trip in memory, clearly marked as not current. Writes are disabled or fail visibly. There is no offline edit queue and no persistent protected cache. Signing out clears page memory.
 - The resources page (`/resources.html?tripId=<id>`) authenticates and loads only that trip's resources.
+- Private photos (`/photos/<file>`, stored in `SHARED_TRIP_DATA_DIR/photos`) load only for signed-in owners and approved viewers and are never cached by the service worker.
 - Install: one app identity. Show the native install prompt where supported and Add to Home Screen guidance on iOS.
 
 ## Synchronization and install: legacy generator
@@ -133,7 +136,8 @@ When a full place URL is supplied, parse and save place name, address, final POI
 - Tap-only handle interaction does not move the sheet.
 - Add/edit close controls remain reachable on iPhone.
 - Self-hosted: two independent signed-in browsers, plus an MCP client, see each other's edits. A stale edit is rejected without loss. A signed-out browser cannot open any `/trips/<id>`.
-- Self-hosted: stopping and restarting the service keeps trips, IDs, and URLs. Taking the server offline shows reconnecting or failed states, never false saves.
+- Self-hosted: stopping and restarting the service keeps trips, IDs, URLs, and viewer accounts. Taking the server offline shows reconnecting or failed states, never false saves. After a hard kill, the next start acquires data-directory ownership without any file being deleted by hand.
+- Self-hosted accounts: an unauthenticated, pending, or revoked user cannot retrieve trip lists, trips, exports, or `/photos/*` through any route. An approved viewer can read and export but every write, import, account route, and `/mcp` is refused. Revocation ends open sessions at their next request, and reapproval does not revive them. An invitation code works once and expires.
 - Legacy Firebase builds only: the first Firestore create and two-client live updates work.
 - Weather freshness and plan update timestamps are current.
 - Long trips expose every equal-height compact weather date card through horizontal scrolling. Each card has one aggregate day row, and the per-date timetable icon opens a contained, scrollable details dialog on desktop and iPhone without shifting the page. Location chips switch one semantic hourly table at a time while preserving dialog scroll and returning focus to the opener.
@@ -151,9 +155,12 @@ Record each check as one of: **specified** (a test or procedure exists), **run**
 | Area | How it is checked | Initial status |
 | --- | --- | --- |
 | API, SQLite, auth, conflicts, retries, migrations, backup/restore, import/export | `npm run test:server` (fictional temporary storage) | Specified; see run evidence |
+| Viewer accounts, invitations, revocation, negative access, v2→v3 upgrade | `npm run test:server` account tests; `npm run test:ui` account UI simulation | Specified; see run evidence |
+| Data-directory ownership: hard kill/restart, contention, restore exclusion, foreign locks | `npm run test:server` ownership tests | Specified; see run evidence for the platform that ran them. Linux/container crash recovery is **not verified** until exercised there. |
 | MCP protocol round trip | Official SDK client in server tests and `scripts/mcp-smoke.mjs`, local HTTP | Specified; see run evidence |
 | Legacy generator and template | `npm test`, demo rebuild, fresh-folder generation and `qa-static` | Specified; see run evidence |
 | Desktop and phone-width UI | Manual or automated browser at the widths in [responsive-performance.md](responsive-performance.md) | Not verified until recorded |
 | Physical iPhone install and gestures | Real device | **Not verified** |
 | Third-party AI clients and hosted connectors | Real account connection | **Not verified** |
-| VPS deployment behind HTTPS | Authorized host | **Not verified** (no deployment authorized) |
+| Docker build, Compose + Caddy template, external HTTPS and MCP | Authorized host, [deploy/README.md](../deploy/README.md) | **Not verified** until run on that host |
+| External map tiles and other providers in a browser | Live browser session | **Not verified** until recorded |

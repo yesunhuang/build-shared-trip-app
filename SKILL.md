@@ -19,8 +19,15 @@ Treat every trip as clean-room data. Never carry itinerary content, travelers, I
 4. Create the trip as a draft. Use MCP `create_trip` ([mcp.md](references/mcp.md)), the home page, or `POST /api/trips`. To migrate an existing structured trip JSON, import it instead (`POST /api/import` or the home-page import control). Report any import `warnings`.
 5. Add content incrementally. Use `get_trip`, then `apply_trip_changes` with the returned `version` as `expectedVersion` and a fresh `requestId`. Use operations for dates, plans, reminders, and metadata. Follow [input-schema.md](references/input-schema.md) for field shapes. On conflict, re-read and reconcile. Never force-overwrite. On a network failure, retry the identical request with the same `requestId`.
 6. Keep English (or the user's source language) as the base and add `zh-Hans`, `zh-Hant`, and `ja` patches when you have reviewed translations. A draft may omit translations, photos, dates, and recommendations. Never fabricate content to fill them.
-7. Verify by following [feature-contract.md](references/feature-contract.md) and [responsive-performance.md](references/responsive-performance.md). Open `/trips/<id>` signed in at desktop and phone widths, in all languages. Then check the map markers, dialogs, weather, reminders, and the swipe-only sheet. Confirm that a signed-out browser cannot open the trip. Label browser emulation honestly.
-8. Do not deploy to a VPS, domain, or public host without a concrete target and the user's authorization. When authorized, follow [self-hosted.md § Deploy](references/self-hosted.md#deploy-on-a-small-vps).
+7. Verify by following [feature-contract.md](references/feature-contract.md) and [responsive-performance.md](references/responsive-performance.md). Open `/trips/<id>` signed in at desktop and phone widths, in all languages. Then check the map markers, dialogs, weather, reminders, and the swipe-only sheet. Confirm that a signed-out browser cannot open the trip. With fictional data, also confirm that a pending or revoked viewer is refused and an approved viewer sees read-only controls. Label browser emulation honestly.
+8. Do not deploy to a VPS, domain, or public host without a concrete target and the user's authorization. When authorized, follow [self-hosted.md § Deploy](references/self-hosted.md#deploy-on-a-small-vps) and the [Compose + Caddy template](deploy/README.md).
+
+## Access model
+
+- The owner's admin token (`SHARED_TRIP_ADMIN_TOKEN`) is private. It is the only credential for MCP and for writes through the API. Never share it with companions, and never write it into files, logs, or reports.
+- Companions get viewer accounts. The owner creates a single-use, expiring invitation code and shares only that code. The invitee enters it on the home page with a new username and password, which creates a **pending** account. The account is usable only after the owner approves it.
+- Approval grants read and export access to **all** trips. Viewers cannot edit, import, manage accounts, or use MCP. Revocation ends their sessions immediately. Reapproval does not revive old sessions.
+- There is no anonymous sharing, per-trip membership, OAuth, self-service access, or offline write queue. Do not describe or promise them.
 
 ## Authoring rules
 
@@ -49,7 +56,7 @@ npm run test:server
 node scripts/build-docs-demo.mjs
 ```
 
-Then repeat the responsive QA. The manifest identity (`id`, `start_url`, and `scope` all `/`) must stay stable. The self-hosted service worker must never cache `/api`, `/mcp`, protected trip pages, or trip payloads.
+Then repeat the responsive QA. The manifest identity (`id`, `start_url`, and `scope` all `/`) must stay stable. The self-hosted service worker must never cache `/api`, `/mcp`, `/photos/*`, protected trip pages, or trip payloads. Self-hosted private photos belong in `SHARED_TRIP_DATA_DIR/photos`, never in source or public directories. Never add private filename mappings to the public, generic `photos/manifest.js`.
 
 ## Legacy static generator (opt-in)
 
@@ -85,4 +92,4 @@ Report:
 - which MCP client was used, if any (for example the official SDK smoke test, not a third-party AI app unless that was actually exercised);
 - assumptions or traveler facts still awaiting confirmation.
 
-Do not claim synchronization, offline behavior, installation, MCP client compatibility, backups, or deployment were verified unless they were actually exercised.
+Do not claim synchronization, offline behavior, installation, MCP client compatibility, viewer access control, backups, crash recovery, map-tile availability, or deployment were verified unless they were actually exercised.

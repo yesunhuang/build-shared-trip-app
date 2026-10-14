@@ -1,0 +1,51 @@
+# Shared Trips: Caddy HTTPS front end TEMPLATE (see deploy/README.md).
+#
+# The site address comes from SHARED_TRIP_DOMAIN in the private env file; this
+# file contains no real hostname. Automatic HTTPS obtains and renews a publicly
+# trusted certificate (suitable for Cloudflare Full (strict)); certificates,
+# keys and ACME account data persist in the private /data bind mount. The
+# default HTTP-01 challenge needs ports 80 and 443 reachable via the hostname.
+#
+# No cache is configured and no proxy timeouts are added, so Streamable HTTP
+# MCP (POST requests, including 202 notification responses) passes unchanged.
+
+{
+	# The admin API keeps its default in-container localhost listener; it is
+	# not published by compose.yaml. HTTP/3 is disabled because only TCP 443
+	# is published.
+	servers {
+		protocols h1 h2
+	}
+}
+
+{$SHARED_TRIP_DOMAIN} {
+	# The app already sends Cache-Control: no-store on these routes. The CDN
+	# headers are defence in depth for Cloudflare and other CDNs, which may
+	# otherwise treat image extensions under /photos/ as cacheable. /photos/*
+	# and /attachments/* are authenticated private media (attachments are
+	# always 404 after the access check); /resources.html and /trips/* are
+	# trip-specific shells whose data loads only after sign-in.
+	@protected path /api/* /mcp /mcp/* /trips/* /photos/* /attachments/* /resources.html
+	header @protected {
+		Cache-Control "no-store"
+		CDN-Cache-Control "no-store"
+		Cloudflare-CDN-Cache-Control "no-store"
+		defer
+	}
+
+	# Caddy forwards the original Host, Origin, Authorization, Cookie and
+	# method by default, as the app's Host/Origin checks, owner bearer auth and
+	# owner/viewer session cookies require. Do not rewrite or strip them.
+	reverse_proxy app:4173 {
+		# Flush immediately so streamed MCP responses are never buffered.
+		flush_interval -1
+	}
+
+	# Proxy-generated errors (for example, app unreachable) are never cacheable.
+	handle_errors {
+		header Cache-Control "no-store"
+		header CDN-Cache-Control "no-store"
+		header Cloudflare-CDN-Cache-Control "no-store"
+		respond "{err.status_code} {err.status_text}"
+	}
+}

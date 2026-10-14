@@ -4601,6 +4601,16 @@ details[open] > summary .summary-chevron,
   }
 }
 .hosted-controls { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+/* Hosted controls sit on the dark --ink header (or the dark mobile footer); quiet buttons there need
+   light text. Quiet buttons elsewhere (dialogs, day cards) keep the default --ink styling. */
+.hosted-controls .button--quiet { color:#fffdf8; background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.42); }
+.hosted-controls .button--quiet:hover { background:rgba(255,255,255,.16); border-color:rgba(255,255,255,.62); }
+.hosted-controls .button--quiet:focus-visible { outline:2px solid #fffdf8; outline-offset:2px; }
+.hosted-controls .button--quiet:disabled { color:rgba(255,253,248,.6); }
+.mobile-footer-tools .hosted-controls { grid-column:1 / -1; justify-content:center; }
+.hosted-read-only-badge { display:inline-flex; align-items:center; padding:6px 10px; border-radius:999px; border:1px solid currentColor; font-size:.82rem; font-weight:650; opacity:.85; }
+.hosted-read-only #add-reminder, .hosted-read-only .todo-edit { display:none !important; }
+.hosted-read-only .checklist input:disabled, .hosted-read-only input[type=checkbox]:disabled { cursor:default; }
 .hosted-editor { color:var(--ink,#17362f); background:#fffaf3; border:0; border-radius:20px; padding:24px; width:min(480px,calc(100vw - 28px)); max-height:calc(100dvh - 48px); overflow:auto; }
 .hosted-editor::backdrop { background:#17362f70; }
 .hosted-editor label { display:grid; gap:8px; margin:16px 0; min-width:0; }

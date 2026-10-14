@@ -1,9 +1,10 @@
-import { getGooglePlaceLinks } from "./google-place-links.js?v=v-51f0e68501d2";
+import { getGooglePlaceLinks } from "./google-place-links.js?v=v-892a0db82e74";
 import {
   createTripPoller,
   downloadJSON,
   expectTrip,
   exportFilename,
+  getBootSession,
   getBootTrip,
   hostedApi,
   isISODate,
@@ -12,13 +13,14 @@ import {
   newRequestId,
   redirectToLogin,
   resourcesPath,
+  sessionCanEdit,
   toRenderTrip,
   tripIdFromPath
-} from "./hosted-client.js?v=v-51f0e68501d2";
-import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-51f0e68501d2";
-import { optimizedPhotoUrl } from "./photo-assets.js?v=v-51f0e68501d2";
-import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-51f0e68501d2";
-import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-51f0e68501d2";
+} from "./hosted-client.js?v=v-892a0db82e74";
+import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-892a0db82e74";
+import { optimizedPhotoUrl } from "./photo-assets.js?v=v-892a0db82e74";
+import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-892a0db82e74";
+import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-892a0db82e74";
 import {
   getInitialLanguage,
   languageStorageKey,
@@ -26,7 +28,7 @@ import {
   localizeTrip,
   saveLanguage,
   ui
-} from "./i18n.js?v=v-51f0e68501d2";
+} from "./i18n.js?v=v-892a0db82e74";
 import {
   DAY_FORECAST_LOCATIONS,
   fetchTripForecast,
@@ -34,9 +36,9 @@ import {
   localizeForecastLocation,
   weatherCodeIcon,
   weatherCodeKey
-} from "./weather-forecast.js?v=v-51f0e68501d2";
-import { getFlightBookings } from "./flight-bookings.js?v=v-51f0e68501d2";
-import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-51f0e68501d2";
+} from "./weather-forecast.js?v=v-892a0db82e74";
+import { getFlightBookings } from "./flight-bookings.js?v=v-892a0db82e74";
+import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-892a0db82e74";
 
 const FIREBASE_SDK_VERSION = "12.15.0";
 // Self-hosted mode is decided before any Firebase code path. It never loads the
@@ -48,7 +50,7 @@ let firebaseConfig = {};
 let tripDocumentPath = "";
 const firebaseConfigPromise = HOSTED
   ? Promise.resolve()
-  : import("./firebase-config.js?v=v-51f0e68501d2")
+  : import("./firebase-config.js?v=v-892a0db82e74")
     .then((module) => {
       firebaseConfig = module.firebaseConfig || {};
       tripDocumentPath = module.tripDocumentPath || "";
@@ -63,6 +65,12 @@ if (HOSTED && (!hostedServerTrip || hostedServerTrip.id !== HOSTED_TRIP_ID)) {
   redirectToLogin();
   throw new Error("Self-hosted trip data is unavailable");
 }
+// Approved viewers (and any session without an explicit edit capability) get an
+// honest read-only page: no create/edit/delete/toggle controls are rendered.
+// The server independently rejects viewer writes.
+const HOSTED_READ_ONLY = HOSTED && !sessionCanEdit(getBootSession());
+const READ_ONLY_LABELS = Object.freeze({ en: "Read-only", "zh-Hans": "只读", "zh-Hant": "唯讀", ja: "閲覧のみ" });
+if (HOSTED_READ_ONLY) document.documentElement.classList.add("hosted-read-only");
 const seedTrip = JSON.parse(document.getElementById("trip-data").textContent);
 const APP_NAME = seedTrip.title || "Shared trip";
 const APP_NAMESPACE = seedTrip.slug || "shared-trip";
@@ -354,6 +362,10 @@ function bindReminderItems(container, computed, { editable = false } = {}) {
     item.classList.toggle("is-complete", reminder.done);
     item.classList.toggle("is-overdue", !reminder.done && computed[index].deadline < todayISO());
     item.dataset.overdueLabel = ` · ${ui(currentLanguage, "due")}`;
+    if (HOSTED_READ_ONLY) {
+      input.disabled = true;
+      return;
+    }
     input.addEventListener("change", async () => {
       const desiredState = input.checked;
       const saved = await mutateTrip((trip) => {
@@ -829,7 +841,7 @@ function renderDayNavigation() {
     button.addEventListener("click", () => selectActiveDay(day.id));
     return button;
   }));
-  if (HOSTED) {
+  if (HOSTED && !HOSTED_READ_ONLY) {
     const addDate = textElement("button", "day-link day-link--add", ui(currentLanguage, "addDate"));
     addDate.type = "button";
     addDate.addEventListener("click", () => openDayDialog());
@@ -1046,8 +1058,8 @@ function renderItinerary() {
 
 function renderNoDays() {
   const empty = element("div", "empty-state empty-state--dates");
-  empty.append(textElement("p", "", ui(currentLanguage, HOSTED ? "noDatesYet" : "emptyDay")));
-  if (HOSTED) {
+  empty.append(textElement("p", "", ui(currentLanguage, HOSTED && !HOSTED_READ_ONLY ? "noDatesYet" : "emptyDay")));
+  if (HOSTED && !HOSTED_READ_ONLY) {
     const add = textElement("button", "button", ui(currentLanguage, "addDate"));
     add.type = "button";
     add.addEventListener("click", () => openDayDialog());
@@ -1077,7 +1089,9 @@ function renderDay(day, index) {
   add.type = "button";
   add.setAttribute("aria-label", ui(currentLanguage, "addToDate", { date: formatDate(day.date, { dateStyle: "full" }) }));
   add.addEventListener("click", () => openItemDialog(day.id));
-  if (HOSTED) {
+  if (HOSTED_READ_ONLY) {
+    heading.append(headingCopy);
+  } else if (HOSTED) {
     const actions = element("div", "day-heading__actions");
     const editDate = textElement("button", "button button--quiet", ui(currentLanguage, "editDate"));
     editDate.type = "button";
@@ -1236,7 +1250,7 @@ function renderSlot(day, slot, slotIndex) {
   const actions = element("div", "timeline-card__actions");
   const mapsAction = googleMapsAnchor(slot, { allowSearchFallback: false });
   if (mapsAction) actions.append(mapsAction);
-  if (!slot.syntheticBooking) {
+  if (!slot.syntheticBooking && !HOSTED_READ_ONLY) {
     const edit = textElement("button", "icon-button", ui(currentLanguage, "edit"));
     edit.type = "button";
     edit.setAttribute("aria-label", `${ui(currentLanguage, "editPlan")}: ${slotName}`);
@@ -2114,6 +2128,7 @@ function syncStandaloneCanvasMetrics() {
 }
 
 function openTodoDialog(reminderId = "") {
+  if (HOSTED_READ_ONLY) return;
   if (HOSTED) els.todoForm.dataset.hostedVersion = String(hostedServerTrip.version);
   const reminder = currentTrip.reminders.find((candidate) => candidate.id === reminderId);
   const displayReminder = displayTrip.reminders.find((candidate) => candidate.id === reminderId);
@@ -2187,6 +2202,7 @@ function reminderDeadline(reminder) {
 }
 
 function openItemDialog(dayId, slotId = "") {
+  if (HOSTED_READ_ONLY) return;
   if (HOSTED) els.form.dataset.hostedVersion = String(hostedServerTrip.version);
   const day = currentTrip.days.find((candidate) => candidate.id === dayId);
   const slot = day?.slots.find((candidate) => candidate.id === slotId);
@@ -2567,6 +2583,7 @@ function setupLocalPreviewSync() {
 }
 
 async function mutateTrip(mutator, successMessage) {
+  if (HOSTED_READ_ONLY) return false;
   if (HOSTED) return mutateHostedTrip(mutator, successMessage);
   await firebaseConfigPromise;
   setSyncStatus("saving", "working");
@@ -2687,18 +2704,26 @@ function renderHostedControls() {
     const node=textElement("button","button button--quiet",ui(currentLanguage,label));node.type="button";node.addEventListener("click",action);return node;
   };
   const home=textElement("a","button button--light",ui(currentLanguage,"allTrips"));home.href="/";
+  const exportButton=button("exportTrip",async()=> {
+    try {downloadJSON(await hostedApi.exportTrip(HOSTED_TRIP_ID),exportFilename(hostedServerTrip));}
+    catch(error){if(error.status===401)redirectToLogin();else showToast("saveError",true);}
+  });
+  if (HOSTED_READ_ONLY) {
+    const badge=textElement("span","hosted-read-only-badge",READ_ONLY_LABELS[currentLanguage]||READ_ONLY_LABELS.en);
+    controls.replaceChildren(home,badge,exportButton,button("retrySync",()=>hostedPoller?.retryNow()),button("signOut",logoutAndLeave));
+    els.addReminder.hidden=true;els.addReminder.disabled=true;
+    return;
+  }
   controls.replaceChildren(home,
     button("editTrip",()=>openMetadataDialog()),
-    button("exportTrip",async()=> {
-      try {downloadJSON(await hostedApi.exportTrip(HOSTED_TRIP_ID),exportFilename(hostedServerTrip));}
-      catch(error){if(error.status===401)redirectToLogin();else showToast("saveError",true);}
-    }),
+    exportButton,
     button("retrySync",()=>hostedPoller?.retryNow()),
     button("signOut",logoutAndLeave));
   els.addReminder.disabled=Boolean(hostedServerTrip.archived);
 }
 
 function hostedEditor(title,fields,onSave,onDelete) {
+  if (HOSTED_READ_ONLY) return;
   const dialog=element("dialog","hosted-editor"); const form=document.createElement("form");
   form.append(textElement("h2","",ui(currentLanguage,title)));
   for(const [key,definition] of Object.entries(fields)){

@@ -8,6 +8,7 @@ import {
   hostedApi,
   loginUrl,
   scriptSafeJSON,
+  setBootSession,
   setBootTrip,
   toRenderTrip,
   tripIdFromPath
@@ -108,9 +109,12 @@ async function load() {
   attempts += 1;
   showState(attempts > 1 ? "retrying" : "loading");
   try {
-    const payload = await hostedApi.getTrip(tripId);
+    // The session role only shapes the UI (owner editor or read-only viewer);
+    // the server rejects viewer writes regardless.
+    const [payload, session] = await Promise.all([hostedApi.getTrip(tripId), hostedApi.session()]);
     const trip = expectTrip(payload, tripId);
     loading = false;
+    setBootSession(session);
     await start(trip);
   } catch (error) {
     loading = false;
@@ -149,6 +153,7 @@ async function start(trip) {
     console.error("Trip page failed to start", error);
     seed.textContent = "";
     setBootTrip(null);
+    setBootSession(null);
     showState("load-error");
   }
 }

@@ -8,10 +8,11 @@ import {
   hostedApi,
   loginUrl,
   scriptSafeJSON,
+  setBootSession,
   setBootTrip,
   toRenderTrip,
   tripIdFromPath
-} from "./hosted-client.js?v=v-51f0e68501d2";
+} from "./hosted-client.js?v=v-892a0db82e74";
 
 const MAX_AUTOMATIC_ATTEMPTS = 4;
 const STRINGS = {
@@ -108,9 +109,12 @@ async function load() {
   attempts += 1;
   showState(attempts > 1 ? "retrying" : "loading");
   try {
-    const payload = await hostedApi.getTrip(tripId);
+    // The session role only shapes the UI (owner editor or read-only viewer);
+    // the server rejects viewer writes regardless.
+    const [payload, session] = await Promise.all([hostedApi.getTrip(tripId), hostedApi.session()]);
     const trip = expectTrip(payload, tripId);
     loading = false;
+    setBootSession(session);
     await start(trip);
   } catch (error) {
     loading = false;
@@ -142,13 +146,14 @@ async function start(trip) {
   setBootTrip(trip);
   seed.textContent = scriptSafeJSON(toRenderTrip(trip));
   try {
-    await import("./app.js?v=v-51f0e68501d2");
+    await import("./app.js?v=v-892a0db82e74");
     overlay.remove();
     document.documentElement.classList.remove("hosted-booting");
   } catch (error) {
     console.error("Trip page failed to start", error);
     seed.textContent = "";
     setBootTrip(null);
+    setBootSession(null);
     showState("load-error");
   }
 }

@@ -1,36 +1,36 @@
 const APP_BASE_URL = new URL("./", self.location.href);
 const CACHE_PREFIX = `shared-trip:${APP_BASE_URL.pathname}:`;
-const CACHE_NAME = CACHE_PREFIX + "tide-lines-sample-v-51f0e68501d2";
+const CACHE_NAME = CACHE_PREFIX + "tide-lines-sample-v-892a0db82e74";
 const appUrl = (value) => new URL(value.replace(/^\.?\//, ""), APP_BASE_URL).href;
-const VERSIONED_RESOURCES_URL = "/resources.html?v=v-51f0e68501d2";
+const VERSIONED_RESOURCES_URL = "/resources.html?v=v-892a0db82e74";
 const LOCAL_SHELL = [
   "/",
   "/index.html",
   VERSIONED_RESOURCES_URL,
-  "/styles.css?v=v-51f0e68501d2",
-  "/app.js?v=v-51f0e68501d2",
-  "/hosted-client.js?v=v-51f0e68501d2",
-  "/photo-assets.js?v=v-51f0e68501d2",
-  "/photos/manifest.js?v=v-51f0e68501d2",
-  "/resources.js?v=v-51f0e68501d2",
-  "/daily-guide.js?v=v-51f0e68501d2",
-  "/i18n.js?v=v-51f0e68501d2",
-  "/map-links.js?v=v-51f0e68501d2",
-  "/google-place-links.js?v=v-51f0e68501d2",
-  "/google-maps-place-url.js?v=v-51f0e68501d2",
-  "/reminder-dates.js?v=v-51f0e68501d2",
-  "/weather-forecast.js?v=v-51f0e68501d2",
-  "/trip-resources.js?v=v-51f0e68501d2",
-  "/flight-bookings.js?v=v-51f0e68501d2",
-  "/translations-zh-hant.js?v=v-51f0e68501d2",
-  "/translations-zh-hans.js?v=v-51f0e68501d2",
-  "/translations-ja.js?v=v-51f0e68501d2",
-  "/firebase-config.js?v=v-51f0e68501d2",
-  "/manifest.webmanifest?v=v-51f0e68501d2",
-  "/icons/icon-192.png?v=v-51f0e68501d2",
-  "/icons/icon-512.png?v=v-51f0e68501d2",
-  "/icons/apple-touch-icon.png?v=v-51f0e68501d2",
-  "/icons/icon.svg?v=v-51f0e68501d2"
+  "/styles.css?v=v-892a0db82e74",
+  "/app.js?v=v-892a0db82e74",
+  "/hosted-client.js?v=v-892a0db82e74",
+  "/photo-assets.js?v=v-892a0db82e74",
+  "/photos/manifest.js?v=v-892a0db82e74",
+  "/resources.js?v=v-892a0db82e74",
+  "/daily-guide.js?v=v-892a0db82e74",
+  "/i18n.js?v=v-892a0db82e74",
+  "/map-links.js?v=v-892a0db82e74",
+  "/google-place-links.js?v=v-892a0db82e74",
+  "/google-maps-place-url.js?v=v-892a0db82e74",
+  "/reminder-dates.js?v=v-892a0db82e74",
+  "/weather-forecast.js?v=v-892a0db82e74",
+  "/trip-resources.js?v=v-892a0db82e74",
+  "/flight-bookings.js?v=v-892a0db82e74",
+  "/translations-zh-hant.js?v=v-892a0db82e74",
+  "/translations-zh-hans.js?v=v-892a0db82e74",
+  "/translations-ja.js?v=v-892a0db82e74",
+  "/firebase-config.js?v=v-892a0db82e74",
+  "/manifest.webmanifest?v=v-892a0db82e74",
+  "/icons/icon-192.png?v=v-892a0db82e74",
+  "/icons/icon-512.png?v=v-892a0db82e74",
+  "/icons/apple-touch-icon.png?v=v-892a0db82e74",
+  "/icons/icon.svg?v=v-892a0db82e74"
 ];
 
 const OPTIONAL_CDN_SHELL = [

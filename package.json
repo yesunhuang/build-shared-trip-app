@@ -8,12 +8,12 @@
   "scripts": {
     "test": "npm run test:legacy && npm run test:server && npm run test:ui",
     "start": "node server/index.mjs",
-    "test:server": "node scripts/test-selfhosted.mjs && node scripts/test-data-lock.mjs",
+    "test:server": "node scripts/test-selfhosted.mjs && node scripts/test-data-lock.mjs && node scripts/test-accounts.mjs",
     "mcp:smoke": "node scripts/mcp-smoke.mjs",
     "backup": "node server/cli/backup.mjs",
     "restore": "node server/cli/restore.mjs",
     "test:legacy": "node scripts/test-google-maps-place-url.mjs && node scripts/test-generator-safety.mjs && node scripts/test-trip-contract.mjs && node scripts/test-reminder-dates.mjs && node scripts/test-generator-isolation.mjs && node scripts/test-map-links.mjs && node scripts/test-map-rendering.mjs && node scripts/test-photo-assets.mjs && node scripts/test-service-worker.mjs && node scripts/test-privacy-audit.mjs && node scripts/audit-privacy.mjs .",
-    "test:ui": "node scripts/test-selfhosted-ui.mjs && node scripts/test-selfhosted-home.mjs"
+    "test:ui": "node scripts/test-selfhosted-ui.mjs && node scripts/test-selfhosted-home.mjs && node scripts/test-accounts-home-ui.mjs && node scripts/test-accounts-trip-ui.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

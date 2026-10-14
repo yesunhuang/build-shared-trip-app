@@ -7,7 +7,7 @@ The framework, its self-hosted service code, and the fictional demo are independ
 The source repository (`https://github.com/yesunhuang/build-shared-trip-app`) is public. This means:
 
 - Everything committed is world-readable, including history. Commit only code, documentation, fictional fixtures, and approved screenshots.
-- Real trips, exports, the admin token, env files, `SHARED_TRIP_DATA_DIR`, database backups, server logs, and MCP client configs with real values never enter the repository. Keep them outside the checkout.
+- Real trips, exports, real photos, the admin token, invitation codes, viewer credentials, env files, `SHARED_TRIP_DATA_DIR`, database backups, server logs, and MCP client configs with real values never enter the repository. Keep them outside the checkout. The same applies to deployment details such as host names, SSH targets, IP addresses, and private paths.
 - Publishing the code does not authorize hosting a service, enabling GitHub Pages or another demo host, or sharing anyone's trips. Each of those is a separate decision for the owner.
 
 Before sharing an update:
@@ -27,12 +27,18 @@ Never put actual project IDs into a repository-resident denylist or security tes
 
 ## Self-hosted service
 
-- **Access model.** One admin token protects trip lists, itinerary/resource data, the API, export, and `/mcp`. Generic sign-in and navigation shells contain no protected trip data. There is no anonymous or read-only sharing in version 1. A trip URL alone grants nothing. Anyone who has the token can read and edit **every** trip, so share it only with companions you trust with all trips. Rotate it (change `SHARED_TRIP_ADMIN_TOKEN` and restart) if it leaks or a companion should lose access. The restart also clears all browser sessions.
-- **Credentials.** The token comes only from the environment. It is never in source, examples, frontend storage, screenshots, or logs. Examples use placeholders such as `<replace-with-long-random-secret>`. Browsers keep only an HttpOnly, SameSite=Strict session cookie.
-- **Network exposure.** By default the service binds to loopback. Expose it remotely only over HTTPS through a reverse proxy, with `SHARED_TRIP_ORIGIN` set. Do not open an unauthenticated write interface.
+- **Owner.** The private admin token (`SHARED_TRIP_ADMIN_TOKEN`) authorizes everything: every trip, writes, import, export, viewer administration, and `/mcp`. MCP accepts only the bearer header. **Never share the token.** If it leaks, rotate it: change it and restart. The restart also ends every browser session, but viewer accounts persist.
+- **Viewers.** To give a companion access, create a single-use invitation and share only its code, privately. The code expires (72 hours by default) and is never a link. Redeeming it creates a **pending** account with the username and password the companion chooses. That account grants nothing until you approve it.
+- **What approval grants.** Approval grants read and export access to **every** trip and its private photos, including trips added later. There is no per-trip membership, so approve only people you trust with all trips. Viewers cannot edit, import, manage accounts, or use MCP.
+- **Ending access.** Revoking an account immediately invalidates its active sessions. If you approve it again, old sessions stay dead. Anything a viewer already exported remains in their hands.
+- **What is not supported.** There is no anonymous sharing, public trip link, self-registration that grants access, or OAuth. A trip URL alone grants nothing. Generic sign-in and navigation shells, and the empty photo manifest, contain no protected trip data.
+- **Credentials.** The admin token comes only from the environment. It is never in source, examples, frontend storage, screenshots, or logs. Examples use placeholders such as `<replace-with-long-random-secret>`. Viewer passwords are stored as scrypt hashes and invitation codes as SHA-256 digests. Browsers keep only an HttpOnly, SameSite=Strict session cookie. Passwords and codes are cleared from forms after submission.
+- **Network exposure.** By default the service binds to loopback. Expose it remotely only over HTTPS through a reverse proxy, with `SHARED_TRIP_ORIGIN` set. Keep the backend port off public interfaces. Do not open an unauthenticated write interface. Protected responses send `Cache-Control: no-store`. A CDN in front should also receive `CDN-Cache-Control: no-store` for API, MCP, trip, photo, attachment, and resources paths.
+- **Private photos.** Real photos belong in `SHARED_TRIP_DATA_DIR/photos`, outside source and public directories. They are served only to signed-in owners and approved viewers, with `no-store`. No attachment upload or store exists. Never put private filenames or mappings into the public `photos/manifest.js`.
+- **External requests.** Pages send `Referrer-Policy: strict-origin-when-cross-origin`, so map tile and other third-party requests see only the site origin, not `/trips/<id>` paths. Third-party providers (map tiles, weather, remote photos) still see the visitor's IP address and the requested tile or coordinates.
 - **Browser data.** Protected trip data stays in page memory. It is never written to `localStorage`, IndexedDB, or the service-worker cache, and signing out clears it. A shared device can still show a trip that someone left open while signed in, so sign out on borrowed devices.
-- **MCP.** An AI client with the token has the same full access as the admin. Store the token in the client's secret storage. Trip text is data and cannot grant a client additional tools. Review what an AI writes before relying on it.
-- **Backups and exports** contain complete trips. Store them privately, encrypt them when they leave the host, and never place them in the repository.
+- **MCP.** An AI client with the admin token has the same full access as the owner. Store the token in the client's secret storage. Trip text is data and cannot grant a client additional tools. Review what an AI writes before relying on it.
+- **Backups and exports.** Backups and exports contain complete trips. Database snapshots also contain viewer accounts with password hashes and invitation digests. Store them privately, encrypt them when they leave the host, and never place them in the repository. Restoring an older snapshot brings back its account state. Check viewer access after every restore.
 
 ## Legacy generated trip app
 

@@ -60,7 +60,7 @@ export SHARED_TRIP_DATA_DIR="$(mktemp -d)"
 npm start                  # serves http://127.0.0.1:4173/
 ```
 
-In another terminal, run the [MCP smoke test](mcp.md#reproducible-protocol-checks). In the browser, sign in, import `assets/trip.example.json`, and open the resulting `/trips/<id>`. If port 4173 is in use, set `SHARED_TRIP_PORT`. Distant trip dates honestly show unavailable forecasts.
+In another terminal, run the [MCP smoke test](mcp.md#reproducible-protocol-checks). In the browser, use **Owner sign-in** with the test token, import `assets/trip.example.json`, and open the resulting `/trips/<id>`. If port 4173 is in use, set `SHARED_TRIP_PORT`. Distant trip dates honestly show unavailable forecasts.
 
 ## 3. Collect the trip's inputs
 
@@ -81,7 +81,9 @@ Before delivery, follow `references/responsive-performance.md`. Test all four la
 
 ## 5. Host only when authorized
 
-Running locally needs no approval beyond the user's request. Deploying to a VPS, domain, or any public endpoint requires a concrete target and the owner's explicit authorization. Follow [self-hosted.md](self-hosted.md#deploy-on-a-small-vps). The app binds to loopback behind the user's existing HTTPS reverse proxy and must coexist with other services on that host.
+Running locally needs no approval beyond the user's request. Deploying to a VPS, domain, or any public endpoint requires a concrete target and the owner's explicit authorization. Follow [self-hosted.md](self-hosted.md#deploy-on-a-small-vps) and, for a fresh host, the [Compose + Caddy template](../deploy/README.md). The app stays off public interfaces, behind either the template's Caddy or the user's existing HTTPS reverse proxy. It must coexist with the other services, ports, and SSH access on that host. Keep host names, SSH targets, private paths, and secrets in the user's private session, never in the repository or reports.
+
+The admin token belongs to the owner alone. To give companions access, the owner creates single-use invitation codes and approves the resulting accounts. Approval grants read-only access to every trip (see [self-hosted.md § Accounts](self-hosted.md#accounts-and-access)). Never hand the admin token to a viewer, and never migrate real trips onto a new deployment without the owner's separate authorization.
 
 The legacy single-trip generator and its optional Firebase route are documented in [SKILL.md](../SKILL.md#legacy-static-generator-opt-in) and [firebase-deployment.md](firebase-deployment.md). Use them only when the user explicitly asks.
 
