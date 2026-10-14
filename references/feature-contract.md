@@ -156,10 +156,10 @@ Record each check as one of: **specified** (a test or procedure exists), **run**
 | --- | --- | --- |
 | API, SQLite, auth, conflicts, retries, migrations, backup/restore, import/export | `npm run test:server` (fictional temporary storage) | Specified; see run evidence |
 | Viewer accounts, invitations, revocation, negative access, v2→v3 upgrade | `npm run test:server` account tests; `npm run test:ui` account UI simulation | Specified; see run evidence |
-| Data-directory ownership: hard kill/restart, contention, restore exclusion, foreign locks | `npm run test:server` ownership tests | Windows and isolated Linux container checks passed; automatic container recovery and fictional-data preservation are recorded in the [container acceptance report](../doc/Progress/progress_2026_10_14_cpx003_codex_b.md). Live-stack acceptance remains separate. |
-| MCP protocol round trip | Official SDK client in server tests and `scripts/mcp-smoke.mjs`, local HTTP | Specified; see run evidence |
+| Data-directory ownership: hard kill/restart, contention, restore exclusion, foreign locks | `npm run test:server` ownership tests | Windows and isolated Linux container checks passed; automatic crash recovery is recorded in the [container report](../doc/Progress/progress_2026_10_14_cpx003_codex_b.md). Actual app restart and live snapshot/separate restore with fictional data passed in the [live report](../doc/Progress/progress_2026_10_14_cpx004_codex_b.md). |
+| MCP protocol round trip | Official SDK client in server tests and `scripts/mcp-smoke.mjs`; private live harness | Local HTTP and actual external HTTPS SDK round trips passed; see the [live report](../doc/Progress/progress_2026_10_14_cpx004_codex_b.md). Named external AI-client integration remains unverified. |
 | Legacy generator and template | `npm test`, demo rebuild, fresh-folder generation and `qa-static` | Specified; see run evidence |
-| Desktop and phone-width UI | Manual or automated browser at the widths in [responsive-performance.md](responsive-performance.md) | Not verified until recorded |
+| Desktop and phone-width UI | Manual or automated browser at the widths in [responsive-performance.md](responsive-performance.md) | Chrome desktop and phone emulation checks are recorded in the [live report](../doc/Progress/progress_2026_10_14_cpx004_codex_b.md); physical-phone installation and full touch regression remain unverified. |
 | Physical iPhone install and gestures | Real device | **Not verified** |
 | Third-party AI clients and hosted connectors | Real account connection | **Not verified** |
 | Docker build, Compose + Caddy template, external HTTPS and MCP | Authorized host, [deploy/README.md](../deploy/README.md) | **Not verified** until run on that host |

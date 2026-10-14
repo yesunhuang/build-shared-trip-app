@@ -1,6 +1,6 @@
 # Docker Compose + Caddy HTTPS template
 
-A reusable template for running the [self-hosted service](../references/self-hosted.md) behind Caddy automatic HTTPS. Compose validation, the app image build, Caddy configuration validation and isolated Linux container acceptance passed; see the [container acceptance report](../doc/Progress/progress_2026_10_14_cpx003_codex_b.md). Live HTTPS acceptance remains pending. Verify the configuration and acceptance checks on your own host.
+A reusable template for running the [self-hosted service](../references/self-hosted.md) behind Caddy automatic HTTPS. Compose/image validation, isolated Linux container tests and fictional live HTTPS, HTTP/MCP, account restrictions, restart and backup/restore checks passed. See the [live acceptance report](../doc/Progress/progress_2026_10_14_cpx004_codex_b.md) for tested scope and remaining checks. Verify the configuration and acceptance checks on your own host.
 
 | File | Purpose |
 | --- | --- |
@@ -124,7 +124,7 @@ Viewers cannot write, import, manage accounts, or use MCP. Restarting the servic
 
 ```bash
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-dc exec app node server/cli/backup.mjs "/backups/shared-trip-${stamp}.sqlite"
+dc exec -T app node server/cli/backup.mjs "/backups/shared-trip-${stamp}.sqlite" < /dev/null
 sudo sha256sum "/PRIVATE/shared-trips/backups/shared-trip-${stamp}.sqlite"
 # Private photos are not inside the database; archive them separately if used:
 photos="/PRIVATE/shared-trips/backups/photos-${stamp}.tar"
@@ -132,6 +132,8 @@ sudo test ! -e "$photos" && sudo tar -C /PRIVATE/shared-trips/data -cf "$photos"
 ```
 
 The CLI uses SQLite's online backup while the service runs and validates the snapshot. The snapshot contains trips, IDs, versions, archive state, the retry log, viewer accounts (with password hashes), and invitation digests. Treat it as a credential-bearing secret.
+
+The backup command needs no input. Redirecting stdin prevents Compose from consuming later commands when this recipe runs inside a script.
 
 The CLI refuses an existing target, so snapshots are never overwritten. If a name collides, rerun the command. Same-server snapshots are **not** off-site protection. Copy them, encrypted, to separate storage you control. Delete old snapshots only one at a time, after the off-site copy has been verified. This template has no automatic cleanup.
 
@@ -255,8 +257,9 @@ The app sends `Referrer-Policy: strict-origin-when-cross-origin`, so external ma
 
 ## Limitations
 
-- Compose `config --quiet`, image build, Caddy configuration validation, isolated Linux server tests, automatic container crash recovery and container backup/separate restore passed with fictional data. Certificate issuance, the full live Compose healthcheck and external HTTPS/CDN acceptance remain unverified. See the [container acceptance report](../doc/Progress/progress_2026_10_14_cpx003_codex_b.md) and [local browser acceptance report](../doc/Progress/progress_2026_10_14_cpx002_codex_b.md).
-- First certificate issuance behind a CDN that redirects HTTP or proxies TLS is not verified. Watch the Caddy logs.
+- First certificate issuance, verified public/origin HTTPS, live Compose health, account and HTTP/MCP privacy paths, protected-response cache headers, app restart and a live snapshot/separate restore passed in one fictional trial. This does not establish every host or CDN configuration; see the [live acceptance report](../doc/Progress/progress_2026_10_14_cpx004_codex_b.md), [isolated container report](../doc/Progress/progress_2026_10_14_cpx003_codex_b.md) and [local browser report](../doc/Progress/progress_2026_10_14_cpx002_codex_b.md).
+- Renewal is configured through Caddy automatic HTTPS and persistent certificate mounts; a renewal cycle and a full host reboot have not been exercised. Watch the Caddy logs.
+- Cloudflare consumes `Cloudflare-CDN-Cache-Control` rather than forwarding it to browsers. Verify that header at the origin and check downstream `Cache-Control`, `CDN-Cache-Control`, cache status and authenticated-then-anonymous behavior. See [Cloudflare's header documentation](https://developers.cloudflare.com/cache/concepts/cdn-cache-control/).
 - Rate limits for sign-in (10 failures per minute) and invitations (10 invalid codes per 15 minutes) are keyed by connection address. Behind Caddy, all clients share Caddy's address, so failures by one client briefly block everyone.
 - The running app can write to the backup mount, so off-site copies are the real protection.
-- Server tests and the fictional supervisor trial passed with the app's non-root user, read-only root filesystem and dropped capabilities. Full live-stack acceptance remains pending.
+- Desktop and phone-width Chrome interactions passed. Direct enumeration of browser Cache Storage, physical-phone installation, full pointer/touch regression and named external AI-client integration remain separate checks; keep real-data import pending until the remaining browser cache inspection is complete.
