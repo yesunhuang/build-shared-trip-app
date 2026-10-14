@@ -60,7 +60,7 @@ export SHARED_TRIP_DATA_DIR="$(mktemp -d)"
 npm start                  # serves http://127.0.0.1:4173/
 ```
 
-In another terminal, run the [MCP smoke test](mcp.md#verify-with-the-official-sdk-client). In the browser, sign in, import `assets/trip.example.json`, and open the resulting `/trips/<id>`. If port 4173 is in use, set `SHARED_TRIP_PORT`. Distant trip dates honestly show unavailable forecasts.
+In another terminal, run the [MCP smoke test](mcp.md#reproducible-protocol-checks). In the browser, sign in, import `assets/trip.example.json`, and open the resulting `/trips/<id>`. If port 4173 is in use, set `SHARED_TRIP_PORT`. Distant trip dates honestly show unavailable forecasts.
 
 ## 3. Collect the trip's inputs
 
@@ -74,7 +74,7 @@ Ask only about choices that materially affect the result. Otherwise, record reas
 
 Keep private source material and any authoring JSON in a separate private working directory, never in the checkout.
 
-- **Through MCP or the API:** create a draft, then add days, plans, and reminders in versioned batches (see [mcp.md](mcp.md) and [self-hosted.md](self-hosted.md#editing-versions-and-synchronization)).
+- **Through MCP or the API:** create a draft, then add days, plans, and reminders in versioned batches (see [mcp.md](mcp.md) and [self-hosted.md](self-hosted.md#http-interface)).
 - **From an existing structured JSON:** import it. IDs and localizations are kept, unmapped fields are reported as warnings, and a repeat import creates a new trip instead of overwriting one.
 
 Before delivery, follow `references/responsive-performance.md`. Test all four languages, weather, flexible due dates, optional-location plans, the desktop map, the phone swipe sheet, and safe-area dialogs. Capture separate desktop and phone-width previews. Browser emulation is not a physical-iPhone install test.

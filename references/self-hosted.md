@@ -90,7 +90,7 @@ The private env file supplies the admin secret and SHARED_TRIP_ORIGIN=https://tr
 
 Use the existing HTTPS reverse proxy with a dedicated virtual host, preserve the incoming Host header, and forward to the chosen loopback port. Preserve other services' configuration. No OAuth provider, Firebase account, or live AI call is required for normal use.
 
-Stop/restart with docker stop shared-trips and docker start shared-trips. Replace containers while retaining the data mount and private configuration. Local processes stop cleanly with Ctrl+C/SIGTERM.
+Stop/restart with docker stop shared-trips and docker start shared-trips. Replace containers while retaining the data mount and private configuration. Local processes stop cleanly with Ctrl+C/SIGTERM, which removes their own server.lock. A crash, SIGKILL, OOM kill, or power loss leaves the lock behind. The service then refuses to start, including under --restart unless-stopped, until the [data-directory lock](#data-directory-lock) is recovered manually.
 
 ## Backup and restore
 
@@ -101,9 +101,22 @@ SHARED_TRIP_DATA_DIR=/absolute/private/restored-data npm run restore -- /absolut
 
 Backup uses SQLite's online backup API and validates the snapshot; it can run while the service is active. Targets must not already exist. Copying a live SQLite main file alone is not this method.
 
-Restore requires the target service to be stopped. It validates and migrates a staging replacement, validates that replacement, and snapshots an existing target before swapping it. A server lock blocks restoration over a running service. First restore into separate storage and compare IDs, versions, and content.
+Restore requires the target service to be stopped. It takes the data-directory lock before writing anything and holds it for the whole operation: it validates and migrates a staging replacement, validates that replacement, snapshots an existing target, and swaps it in, releasing the lock only afterwards. If the lock already exists, restore exits without touching the target. First restore into separate storage and compare IDs, versions, and content.
 
 Run maintenance commands with Node 24 and private storage access. The container also contains server/cli/backup.mjs and server/cli/restore.mjs; mount a separate backup directory when running them in a maintenance container.
+
+### Data-directory lock
+
+The service and restore both claim a data directory by exclusively creating SHARED_TRIP_DATA_DIR/server.lock, which contains the owner's decimal process ID (the same path and format as earlier releases). The first creator wins. Every other service or restore refuses to start, leaves the lock and all data unchanged, and reports the lock path. An existing lock is never removed automatically, even when its recorded process appears to have exited. Process IDs are reused, and two contenders could otherwise each "reclaim" the lock and delete the other's fresh one. A normal shutdown or completed restore removes only the lock file it created; a replaced file is left in place. Keep data on local storage; exclusive creation on network filesystems is not guaranteed.
+
+Recovery after a crash, kill, or power loss:
+
+1. Stop every service and maintenance process or container configured with this data directory. With Docker, run docker stop shared-trips and confirm with docker ps that no other container mounts the directory. Check any other host that shares the storage as well.
+2. Optionally note the recorded process ID. It is informational only and may have been reused.
+3. Delete only server.lock from the data directory.
+4. Start the service (or rerun restore) and verify reading and editing.
+
+Never delete the lock while any owner may still be running. Doing so allows two writers, or a restore under a live service.
 
 ## Upgrades and rollback
 

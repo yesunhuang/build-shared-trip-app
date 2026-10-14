@@ -13,7 +13,15 @@ Every request needs an administrator bearer header. Origin headers, when present
 | create_trip | requestId, trip | Draft with stable ID |
 | apply_trip_changes | tripId, requestId, expectedVersion, changes | Stored trip, new version, generated IDs |
 
-Discovery publishes schemas/descriptions. Tools expose domain operations only, with no SQL, file access, shell, or outbound fetch. Travel content is untrusted data and cannot widen authority.
+Discovery publishes schemas, descriptions, and tool annotations, following the MCP 2025-11-25 [ToolAnnotations schema](https://modelcontextprotocol.io/specification/2025-11-25/schema#toolannotations). These are hints; server authorization remains authoritative:
+
+| Tool | readOnlyHint | destructiveHint | idempotentHint | openWorldHint |
+| --- | --- | --- | --- | --- |
+| list_trips, get_trip | true | false (irrelevant when read-only) | true | false |
+| create_trip | false | false (additive) | true | false |
+| apply_trip_changes | false | true | true | false |
+
+apply_trip_changes is destructive because delete_day, delete_plan, delete_reminder, and replace_content remove existing content. Writes are idempotent only for an identical requestId and payload, which durably replays the original result; a fresh requestId is a new operation. Tools expose domain operations only, with no SQL, file access, shell, or outbound fetch. Travel content is untrusted data and cannot widen authority.
 
 Read before editing. Use the returned version, a fresh requestId, and the operations in the [HTTP interface](self-hosted.md#http-interface) and [input contract](input-schema.md). Invalid batches change nothing. Failures return isError with structured codes such as version_conflict, validation_failed, trip_not_found, target_not_found, trip_archived, or request_id_conflict.
 

@@ -8,7 +8,7 @@
   "scripts": {
     "test": "npm run test:legacy && npm run test:server && npm run test:ui",
     "start": "node server/index.mjs",
-    "test:server": "node scripts/test-selfhosted.mjs",
+    "test:server": "node scripts/test-selfhosted.mjs && node scripts/test-data-lock.mjs",
     "mcp:smoke": "node scripts/mcp-smoke.mjs",
     "backup": "node server/cli/backup.mjs",
     "restore": "node server/cli/restore.mjs",

@@ -6,6 +6,7 @@ import { openDatabase } from "./db.mjs";
 import { TripService } from "./domain/service.mjs";
 import { DomainError, errorBody, errorStatus } from "./domain/errors.mjs";
 import { handleMcp } from "./mcp.mjs";
+import { acquireDataLock } from "./data-lock.mjs";
 import { serveStatic } from "./static.mjs";
 
 export function readConfig(env = process.env) {
@@ -47,16 +48,11 @@ async function readJSON(req) {
   catch { throw new DomainError("validation_failed",422,"Invalid JSON."); }
 }
 export async function startServer(config) {
-  const lock = path.join(config.dataDir, "server.lock");
-  if (fs.existsSync(lock)) {
-    const pid = Number(fs.readFileSync(lock,"utf8"));
-    try { process.kill(pid,0); throw new Error("A service already owns this data directory."); }
-    catch (error) { if (error.code !== "ESRCH") throw error; fs.unlinkSync(lock); }
-  }
-  fs.writeFileSync(lock,String(process.pid),{flag:"wx",mode:0o600});
+  // Fail closed: an existing server.lock is never removed here; data stays untouched (see data-lock.mjs).
+  const lock = acquireDataLock(config.dataDir);
   let db;
   try { db = openDatabase(path.join(config.dataDir,"shared-trip.sqlite")); }
-  catch (error) { fs.unlinkSync(lock); throw error; }
+  catch (error) { lock.release(); throw error; }
   const service = new TripService(db);
   const sessions = new Map();
   const failures = new Map();
@@ -138,7 +134,11 @@ export async function startServer(config) {
   });
   server.requestTimeout = 15_000; server.headersTimeout = 10_000;
   try { await new Promise((resolve,reject) => {server.once("error",reject); server.listen(config.port,config.host,resolve);}); }
-  catch (error) {db.close();fs.unlinkSync(lock);throw error;}
+  catch (error) { try { db.close(); } finally { lock.release(); } throw error; }
+  let closing;
   return { server, service, db, url: config.origin || "http://" + config.host + ":" + server.address().port,
-    close: async () => { await new Promise((resolve) => server.close(resolve)); db.close(); if(fs.existsSync(lock)) fs.unlinkSync(lock); } };
+    close: () => closing ??= (async () => {
+      await new Promise((resolve) => server.close(() => resolve()));
+      try { db.close(); } finally { lock.release(); }
+    })() };
 }

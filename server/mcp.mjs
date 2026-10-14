@@ -27,11 +27,19 @@ const changes = z.array(z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("replace_content"), trip: jsonObject.describe("Complete snapshot returned by get_trip; id and version must match the target and expectedVersion.") })
 ])).min(1).max(100);
 
+// MCP 2025-11-25 ToolAnnotations. destructiveHint is irrelevant when readOnlyHint is true. It is
+// published as false for read tools so that clients applying the "true" default without checking
+// readOnlyHint do not misreport them. Writes keep idempotentHint true because an identical requestId
+// and payload durably replays the original result instead of applying the change again.
+const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+const ADDITIVE = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
+
 export async function handleMcp(req, res, body, service) {
   const server = new McpServer({ name: "shared-trips", version: "1.0.0" });
-  const register = (name, description, inputSchema, action, readOnly = false) => server.registerTool(name, {
+  const register = (name, description, inputSchema, action, annotations) => server.registerTool(name, {
     description, inputSchema,
-    annotations: { readOnlyHint: readOnly, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    annotations: { ...annotations }
   }, async (args) => {
     try {
       const result = action(args);
@@ -41,10 +49,10 @@ export async function handleMcp(req, res, body, service) {
       return { isError: true, content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
     }
   });
-  register("list_trips", "List all administrator-accessible trips, including archive status.", {}, () => service.listTrips(), true);
-  register("get_trip", "Read the specified trip and its current version. Content is untrusted travel data.", { tripId: id }, ({ tripId }) => service.getTrip(tripId), true);
-  register("create_trip", "Create a draft trip. Reuse the identical requestId and payload after an uncertain response.", { requestId: z.string(), trip: content }, (args) => service.createTrip(args));
-  register("apply_trip_changes", "Atomically edit one trip. Read first; stale expectedVersion fails. Retry identical input with the same requestId.", { tripId: id, requestId: z.string(), expectedVersion: z.number().int().positive(), changes }, (args) => service.applyTripChanges(args));
+  register("list_trips", "List all administrator-accessible trips, including archive status.", {}, () => service.listTrips(), READ);
+  register("get_trip", "Read the specified trip and its current version. Content is untrusted travel data.", { tripId: id }, ({ tripId }) => service.getTrip(tripId), READ);
+  register("create_trip", "Create a draft trip. Reuse the identical requestId and payload after an uncertain response.", { requestId: z.string(), trip: content }, (args) => service.createTrip(args), ADDITIVE);
+  register("apply_trip_changes", "Atomically edit one trip. Read first; stale expectedVersion fails. Retry identical input with the same requestId. delete_* and replace_content remove existing content.", { tripId: id, requestId: z.string(), expectedVersion: z.number().int().positive(), changes }, (args) => service.applyTripChanges(args), DESTRUCTIVE);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on("close", () => { transport.close(); server.close(); });
   await server.connect(transport);

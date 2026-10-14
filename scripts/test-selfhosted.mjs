@@ -69,7 +69,14 @@ try {
 
   const sdk=new Client({name:"fictional-integration",version:"1.0.0"});clients.push(sdk);
   await sdk.connect(new StreamableHTTPClientTransport(new URL(runtime.url+"/mcp"),{requestInit:{headers:{Authorization:"Bearer "+token}}}));
-  assert.deepEqual((await sdk.listTools()).tools.map((t)=>t.name).sort(),["apply_trip_changes","create_trip","get_trip","list_trips"]);
+  const listed=(await sdk.listTools()).tools;
+  assert.deepEqual(listed.map((t)=>t.name).sort(),["apply_trip_changes","create_trip","get_trip","list_trips"]);
+  const readHints={readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false};
+  assert.deepEqual(Object.fromEntries(listed.map((t)=>[t.name,t.annotations])),{
+    list_trips:readHints,get_trip:readHints,
+    create_trip:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    apply_trip_changes:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false}
+  });
   const mcp=async(name,args)=> {
     const result=await sdk.callTool({name,arguments:args});
     return {isError:result.isError,data:result.structuredContent||JSON.parse(result.content[0].text)};
