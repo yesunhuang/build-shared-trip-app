@@ -104,7 +104,7 @@ Use the assigned checkpoint number, or the next unambiguous number for that iden
 - The smallest useful next action and any genuinely missing decision.
 - A final `## comment` section reserved for continuation instructions from the user or authorized coordinator.
 
-Preserve existing comments; do not silently delete or rewrite instructions. On resume, acknowledge the applicable comment in the next report. Reports compress evidence rather than dump raw logs. Public reports follow the same privacy rules as source code.
+Preserve existing comments; do not silently delete or rewrite instructions. On resume, acknowledge the applicable comment in the next report. Reports compress evidence rather than dump raw logs. Public reports follow the same privacy rules as source code. **Every progress report and every `## comment` directive must be sanitized before publication**, including manager/coordinator instructions, quotations, logs, links, screenshots, and handoff notes. Never copy private conversation content or deployment details into a report or comment; retain only the public-safe task, evidence, and next action. Section 11 applies to all authors without exception.
 
 ## 7. Communication, questions, and blockers
 
@@ -161,7 +161,17 @@ Upgrades should preserve existing user state and configuration by default.
 
 ## 11. Public-repository privacy
 
-Treat every commit, branch, report, issue/PR body, build artifact, and screenshot published here as public.
+Treat every commit, branch, report, comment, issue/PR body, build artifact, and screenshot published here as public.
+
+### Mandatory sanitization of progress reports and comments
+
+- All files under `doc/Progress/`, all report `## comment` sections, and all commit/issue/PR/review comments must be sanitized before they are written or published to this public repository. This applies equally to workers, the Manager, coordinators, and delegated helpers; task instructions are not an exception.
+- Do not include private personal information or operational identifiers: real travel dates/locations/bookings or companions, names/contact details, account identifiers, user-owned deployment domains/URLs, origin IP addresses, SSH host aliases/targets, local machine paths, credentials, private keys, session IDs, or private service links. A publicly reachable deployment address is not permission to associate it with the user in this repository.
+- Replace needed examples with explicitly fictional values or descriptive placeholders. Reference exact connection details only as already supplied through the authorized private session/configuration; never embed them in public instructions. Preserve concrete public evidence such as repository-relative source paths, public commit IDs, test methods, and sanitized outcomes.
+- Keep access instructions, credentials, raw logs, screenshots containing private data, and unsanitized deployment reports in an authorized private location outside the checkout. Review quoted text, command arguments, URLs/query strings, error output, images, and attachments as well as prose; masking one token is insufficient if the remaining context identifies the person or deployment.
+- Before publishing a report or comment, inspect the actual outgoing content/diff and run the applicable privacy audit. If safe wording cannot preserve an essential detail, omit it from Git and convey it privately. Do not claim a report/comment has been reviewed unless its actual contents were checked.
+
+### General publication rules
 
 - Never copy private project instructions verbatim into this repository. Transfer only the applicable generalized rule, with no private project name, repository URL, task history, or internal evidence link.
 - Remove real names and contact details, personal account identifiers, hostnames/IP addresses, machine paths, SSH targets, session/workspace IDs, chat/channel/thread IDs, cloud account/project identifiers, budgets/quota details, and unrelated research or infrastructure information.
