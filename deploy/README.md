@@ -1,6 +1,6 @@
 # Docker Compose + Caddy HTTPS template
 
-A reusable source template for running the [self-hosted service](../references/self-hosted.md) behind Caddy automatic HTTPS. It is **source preparation only**. It has not been built, validated, or deployed from this repository, and its presence is not evidence of any live deployment. Verify every step on your own host.
+A reusable template for running the [self-hosted service](../references/self-hosted.md) behind Caddy automatic HTTPS. Compose validation, the app image build, Caddy configuration validation and isolated Linux container acceptance passed; see the [container acceptance report](../doc/Progress/progress_2026_10_14_cpx003_codex_b.md). Live HTTPS acceptance remains pending. Verify the configuration and acceptance checks on your own host.
 
 | File | Purpose |
 | --- | --- |
@@ -192,7 +192,7 @@ The app and the restore CLI claim the data directory through `server-ownership.s
 
 On a clean stop (SIGTERM within `stop_grace_period`), the owner rolls back, closes the database, and removes its marker. After a kill, OOM, or crash, the OS drops the lock. The next start then takes ownership and, while holding it, atomically replaces the stale marker that it can attribute to this ownership database. `restart: unless-stopped` can therefore restart the app without manual steps. A `server-ownership.sqlite-journal` left behind is removed by SQLite itself.
 
-**Never delete** `server-ownership.sqlite`, its journal, or a current-format marker. Crash recovery under Linux and containers has not been exercised yet, so after an unclean stop, check `dc ps` and `dc logs app`.
+**Never delete** `server-ownership.sqlite`, its journal, or a current-format marker. Isolated Linux container checks exercised contention and automatic recovery after a hard kill with preserved trip IDs, versions and retry entries. After an unclean stop, check `dc ps` and `dc logs app`; see the [container acceptance report](../doc/Progress/progress_2026_10_14_cpx003_codex_b.md) for the tested scope.
 
 | `dc logs app` says | Meaning | Action |
 | --- | --- | --- |
@@ -255,8 +255,8 @@ The app sends `Referrer-Policy: strict-origin-when-cross-origin`, so external ma
 
 ## Limitations
 
-- Compose `config --quiet` passed using public placeholders. Image build, Caddyfile runtime validation, certificate issuance, container healthcheck, Linux/container crash recovery and the container backup/restore recipe remain unverified. See the [local acceptance report](../doc/Progress/progress_2026_10_14_cpx002_codex_b.md).
+- Compose `config --quiet`, image build, Caddy configuration validation, isolated Linux server tests, automatic container crash recovery and container backup/separate restore passed with fictional data. Certificate issuance, the full live Compose healthcheck and external HTTPS/CDN acceptance remain unverified. See the [container acceptance report](../doc/Progress/progress_2026_10_14_cpx003_codex_b.md) and [local browser acceptance report](../doc/Progress/progress_2026_10_14_cpx002_codex_b.md).
 - First certificate issuance behind a CDN that redirects HTTP or proxies TLS is not verified. Watch the Caddy logs.
 - Rate limits for sign-in (10 failures per minute) and invitations (10 invalid codes per 15 minutes) are keyed by connection address. Behind Caddy, all clients share Caddy's address, so failures by one client briefly block everyone.
 - The running app can write to the backup mount, so off-site copies are the real protection.
-- The read-only root filesystem and dropped capabilities for the app are untested hardening.
+- Server tests and the fictional supervisor trial passed with the app's non-root user, read-only root filesystem and dropped capabilities. Full live-stack acceptance remains pending.

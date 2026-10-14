@@ -21,7 +21,7 @@ export SHARED_TRIP_DATA_DIR="$HOME/.local/share/shared-trip-dev"   # must be out
 npm start
 ```
 
-Open `http://127.0.0.1:4173/` and use **Owner sign-in** with your token. Create a trip, or import the fictional `assets/trip.example.json`. The service listens only on `127.0.0.1:4173` by default; set `SHARED_TRIP_HOST` or `SHARED_TRIP_PORT` to change that. For remote use, put it behind an HTTPS reverse proxy and set `SHARED_TRIP_ORIGIN`. The [self-hosted guide](references/self-hosted.md) covers configuration, viewer accounts, VPS deployment alongside other services, backups, restores, upgrades, and rollback. A [Docker Compose + Caddy template](deploy/README.md) is included; static Compose validation passed, while container and HTTPS runtime checks remain pending.
+Open `http://127.0.0.1:4173/` and use **Owner sign-in** with your token. Create a trip, or import the fictional `assets/trip.example.json`. The service listens only on `127.0.0.1:4173` by default; set `SHARED_TRIP_HOST` or `SHARED_TRIP_PORT` to change that. For remote use, put it behind an HTTPS reverse proxy and set `SHARED_TRIP_ORIGIN`. The [self-hosted guide](references/self-hosted.md) covers configuration, viewer accounts, VPS deployment alongside other services, backups, restores, upgrades, and rollback. A [Docker Compose + Caddy template](deploy/README.md) is included; the image build, Caddy configuration validation and isolated Linux container checks passed. Live HTTPS acceptance remains pending; see the [container acceptance report](doc/Progress/progress_2026_10_14_cpx003_codex_b.md).
 
 | What | How |
 | --- | --- |
@@ -30,7 +30,7 @@ Open `http://127.0.0.1:4173/` and use **Owner sign-in** with your token. Create 
 | Editing | Versioned, atomic change batches. A stale edit is rejected with 409. A retry with the same `requestId` is never applied twice. |
 | Sync | Open pages poll the server and reconnect after network loss. Writes need a connection. Protected trips are never kept in a persistent offline cache. |
 | AI | Owner-only remote MCP over Streamable HTTP (protocol `2025-11-25`) with `list_trips`, `get_trip`, `create_trip`, and `apply_trip_changes`. See [mcp.md](references/mcp.md). |
-| Recovery | Online validated SQLite snapshots that include accounts. Data-directory ownership is an OS-held lock, so a crashed or killed service can restart without manual lock deletion. This has been exercised locally on Windows only; Linux and containers are not yet verified. |
+| Recovery | Online validated SQLite snapshots that include accounts. Data-directory ownership is an OS-held lock, so a crashed or killed service can restart without manual lock deletion. Windows and isolated Linux container checks passed, including automatic container recovery after a hard kill, contention and fictional-data preservation. |
 | Portability | Import legacy trip JSON or exports, with IDs and translations kept. Export any trip as recoverable JSON. |
 
 ## The interface
@@ -102,7 +102,7 @@ Rebuild the demo whenever the template or the fictional input changes. Automated
 | [`SKILL.md`](SKILL.md) · [`agents/`](agents/) | Agent instructions and discovery metadata |
 | [`references/`](references/) | Self-hosting, MCP, setup, input, UI, performance, privacy, and legacy deployment guides |
 | `server/` | Self-hosted Node service, SQLite storage, accounts, API, and MCP |
-| [`deploy/`](deploy/README.md) | Docker Compose + Caddy HTTPS template (runtime checks pending) |
+| [`deploy/`](deploy/README.md) | Docker Compose + Caddy HTTPS template (live HTTPS acceptance pending) |
 | `assets/selfhosted/` | Home page, manifest, and service worker for the single installed app |
 | [`assets/app-template/`](assets/app-template/) | Shared trip-page UI (also used by the legacy generator) |
 | [`assets/trip.example.json`](assets/trip.example.json) | Fictional multilingual fixture |

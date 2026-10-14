@@ -156,7 +156,7 @@ Record each check as one of: **specified** (a test or procedure exists), **run**
 | --- | --- | --- |
 | API, SQLite, auth, conflicts, retries, migrations, backup/restore, import/export | `npm run test:server` (fictional temporary storage) | Specified; see run evidence |
 | Viewer accounts, invitations, revocation, negative access, v2→v3 upgrade | `npm run test:server` account tests; `npm run test:ui` account UI simulation | Specified; see run evidence |
-| Data-directory ownership: hard kill/restart, contention, restore exclusion, foreign locks | `npm run test:server` ownership tests | Specified; see run evidence for the platform that ran them. Linux/container crash recovery is **not verified** until exercised there. |
+| Data-directory ownership: hard kill/restart, contention, restore exclusion, foreign locks | `npm run test:server` ownership tests | Windows and isolated Linux container checks passed; automatic container recovery and fictional-data preservation are recorded in the [container acceptance report](../doc/Progress/progress_2026_10_14_cpx003_codex_b.md). Live-stack acceptance remains separate. |
 | MCP protocol round trip | Official SDK client in server tests and `scripts/mcp-smoke.mjs`, local HTTP | Specified; see run evidence |
 | Legacy generator and template | `npm test`, demo rebuild, fresh-folder generation and `qa-static` | Specified; see run evidence |
 | Desktop and phone-width UI | Manual or automated browser at the widths in [responsive-performance.md](responsive-performance.md) | Not verified until recorded |
