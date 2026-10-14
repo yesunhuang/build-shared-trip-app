@@ -58,7 +58,7 @@ The claim is a narrow coordination exception; it grants no authority to merge ap
 | Agent | Status | Claimed at (UTC) | Public branch / task | Role |
 | --- | --- | --- | --- | --- |
 | Codex A | CLAIMED | 2026-10-13 21:54 UTC | main / self-hosted multi-trip and MCP | Technical integration lead |
-| Codex B | AVAILABLE | - | - | Worker |
+| Codex B | CLAIMED | 2026-10-14 07:25 UTC | main / repository review and first progress report | Worker |
 | Codex C | AVAILABLE | - | - | Worker |
 | Codex D | AVAILABLE | - | - | Worker |
 
