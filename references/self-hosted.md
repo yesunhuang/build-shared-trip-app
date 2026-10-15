@@ -21,27 +21,45 @@ Generate a secret with a password manager or Node crypto.randomBytes(32).toStrin
 | SHARED_TRIP_PORT | 4173 | Choose an unused listen port |
 | SHARED_TRIP_ORIGIN | Local listen origin | External HTTPS origin behind a proxy; no credentials, path, query, or fragment |
 
-All trips share the manifest identity, start URL, and scope /. Trip pages are /trips/&lt;id&gt;. Every trip URL requires an owner or approved-viewer sign-in. Anonymous sharing, per-trip membership, self-registration that grants access, and OAuth are not implemented.
+All trips share the manifest identity, start URL, and scope /. Trip pages are /trips/&lt;id&gt;. Every trip URL requires an owner or approved-account sign-in. Anonymous sharing, per-trip membership, self-registration that grants access, and OAuth are not implemented.
 
 ## Accounts and access
 
+Every account has one role, `viewer` or `content-manager`. The owner is not an account: it signs in separately with the admin secret.
+
 | Principal | How it authenticates | May do |
 | --- | --- | --- |
-| Owner | `Authorization: Bearer <admin secret>`, or browser **Owner sign-in** with that secret | Everything: read, export, create, edit, import, invitations, approve/revoke. MCP accepts **only** the bearer header, not an owner cookie. |
+| Owner | `Authorization: Bearer <admin secret>`, or browser **Owner sign-in** with that secret | Everything: trip content plus invitations, approve/revoke, role changes, access tokens, audit. MCP accepts the admin secret **only** as a bearer header, not an owner cookie. |
+| Approved content manager | Browser username/password sign-in; for MCP, a separate owner-issued access token | Owner-like trip content work on **every** trip, current and future: read (including protected photos), export, create, edit, delete content, import, archive and restore. No account, invitation, role, token, security, or infrastructure administration. |
 | Approved viewer | Browser username/password sign-in | Read and export **every** trip and its protected photos; sign out. No writes, import, account management, or MCP. |
 | Pending or revoked account | Cannot sign in (403 access_denied) | Nothing |
 
-Viewer onboarding is owner-controlled:
+Nobody can permanently purge a trip through the web or MCP; archiving is the removal path. Database restore, backups, secrets, the proxy and the host stay with the owner and whoever operates the server.
 
-1. The owner creates an invitation (home page *Viewer accounts* → **Create invitation**, or `POST /api/invitations`). The random single-use code is shown once, is stored only as a SHA-256 digest, and expires after 72 hours by default (1-168 hours allowed). It is unrelated to the admin secret.
+Onboarding is owner-controlled:
+
+1. The owner creates an invitation (home page *Accounts* → **Create invitation**, or `POST /api/invitations`). The random single-use code is shown once, is stored only as a SHA-256 digest, and expires after 72 hours by default (1-168 hours allowed). It is unrelated to the admin secret.
 2. The owner shares **only the invitation code**, privately. Never share the admin secret. Invitations are typed into a form; there is no invitation URL.
-3. The invitee opens the home page, chooses *Have an invitation?*, and enters the code with a new username and password. This creates a **pending** account and consumes the code.
-4. The owner approves the account. Approval grants read access to **all** trips, current and future.
-5. The owner can revoke an account at any time. Revocation immediately invalidates every active session of that account. Reapproving it allows new sign-ins but never revives older sessions.
+3. The invitee opens the home page, chooses *Have an invitation?*, and enters the code with a username and a password that they choose privately. This creates a **pending viewer** account and consumes the code. The owner never needs to know the password.
+4. Optionally, the owner selects **Content manager** as the account's access level and saves it (`POST /api/users/<id>/role`). Invitations always start as viewers; only the owner can change a role.
+5. The owner approves the account. Approval grants the role's access to **all** trips, current and future.
+6. The owner can revoke an account or change its role at any time. Both immediately invalidate every active session of that account and every MCP access token issued for it. Reapproving a revoked account allows new sign-ins but never revives older sessions or tokens.
+
+### MCP access tokens for content managers
+
+A content manager's browser identity (username, password, role) persists until the owner changes or revokes it. MCP access is separate and expiring:
+
+- Only the owner can list, issue, or revoke tokens, from the content manager's row on the home page (**Show assistant access**) or through the API below. Tokens can be issued only for approved content managers, never for viewers, and a content manager cannot issue one for themselves.
+- Each token has a label, a fixed 90-day lifetime, and works **only** at `/mcp` as `Authorization: Bearer <token>`. It is not a browser sign-in and is refused by every `/api/*` route.
+- The secret is returned exactly once. The home page shows it in a one-time box as plain text with explicit **Copy** and **Done, hide token** buttons. It is kept only in page memory, never in browser storage or a URL, is never copied automatically, and disappears on dismiss, Refresh, reload, sign-out, a revoke of that token or account, or a role change. A failed issuance is reported and never retried automatically; check the token list before issuing again.
+- The owner configures the AI client: paste the secret only into a private, owner-controlled credential store. Never send it through chat or commit it.
+- **Renew** before expiry: issue a replacement, update the client's private configuration, confirm it works, then revoke the old token. Revoke first instead if a token may have leaked. Nothing renews automatically.
+
+Owner actions on accounts and tokens are recorded in an owner-only audit log (`GET /api/audit`). Entries are metadata only, never passwords, invitation codes, token secrets or trip payloads. The home page does not display the audit log.
 
 Usernames are 3-32 characters of lowercase letters, digits, `.`, `_` or `-`, starting with a letter or digit (input is trimmed and lowercased). Passwords are 10-128 characters, hashed with Node's built-in scrypt (`scrypt$N$r$p$salt$key`). Limits: 500 accounts, 50 unused unexpired invitations, 10 sessions per viewer.
 
-Browser sessions are HttpOnly, SameSite=Strict cookies (`Secure` on HTTPS origins), held only in process memory. They expire after 12 hours, on sign-out, or when the service restarts or a restore runs; accounts themselves persist in SQLite. Every protected request re-reads the viewer account, so approval state applies immediately. Same-origin checks protect cookie writes, sign-in, and invitation redemption; invalid Origin and Host headers are rejected. A presented but wrong bearer header never falls back to a cookie.
+Browser sessions are HttpOnly, SameSite=Strict cookies (`Secure` on HTTPS origins), held only in process memory. They expire after 12 hours, on sign-out, or when the service restarts or a restore runs; accounts themselves persist in SQLite. Every protected request re-reads the account, so approval state and role apply immediately. Same-origin checks protect cookie writes, sign-in, and invitation redemption; invalid Origin and Host headers are rejected. A presented but wrong bearer header never falls back to a cookie.
 
 Sign-in failures are limited to 10 per minute and invalid invitation codes to 10 per 15 minutes, keyed by connection address; behind a reverse proxy all clients share the proxy's address. Concurrent password hashing is bounded; excess attempts return 429.
 
@@ -51,24 +69,29 @@ Domain responses are JSON with Cache-Control: no-store. Errors use `{ "error": {
 
 | Method | Path | Who | Input / result |
 | --- | --- | --- | --- |
-| POST | /api/login | public, same origin | `{token}` (owner) or `{username, password}` (viewer); returns `{authenticated, role[, username]}` and a session cookie |
-| POST | /api/accept-invite | public, same origin | `{invitation, username, password}`; 201 `{account: {username, status: "pending"}}` |
-| GET | /api/session | signed in | `{authenticated, role[, username], capabilities: {readTrips, exportTrips, editTrips, importTrips, manageAccounts, mcp}}` |
+| POST | /api/login | public, same origin | `{token}` (owner) or `{username, password}` (account); returns `{authenticated, role[, username]}` and a session cookie |
+| POST | /api/accept-invite | public, same origin | `{invitation, username, password}`; 201 `{account: {username, status: "pending"}}` (role `viewer`) |
+| GET | /api/session | signed in | `{authenticated, role[, username], capabilities: {readTrips, exportTrips, editTrips, importTrips, manageAccounts, mcp}}`; `role` is `owner`, `viewer`, or `content-manager` |
 | POST | /api/logout | signed in | Revokes this session |
-| GET | /api/trips | owner, viewer | Summaries, including archived trips |
-| GET | /api/trips/&lt;id&gt; | owner, viewer | Full trip and version |
-| GET | /api/trips/&lt;id&gt;/export | owner, viewer | Recoverable versioned JSON |
-| POST | /api/trips | owner | requestId, trip; returns trip |
-| POST | /api/trips/&lt;id&gt;/changes | owner | requestId, expectedVersion, changes; returns trip and generated IDs |
-| POST | /api/import | owner | requestId, data; returns trip and mapping warnings |
+| GET | /api/trips | owner, manager, viewer | Summaries, including archived trips |
+| GET | /api/trips/&lt;id&gt; | owner, manager, viewer | Full trip and version |
+| GET | /api/trips/&lt;id&gt;/export | owner, manager, viewer | Recoverable versioned JSON |
+| POST | /api/trips | owner, manager | requestId, trip; returns trip |
+| POST | /api/trips/&lt;id&gt;/changes | owner, manager | requestId, expectedVersion, changes; returns trip and generated IDs |
+| POST | /api/import | owner, manager | requestId, data; returns trip and mapping warnings |
 | POST | /api/invitations | owner | Optional `{expiresInHours}`; 201 `{invitation: {id, token, expiresAt}}` (token shown once) |
-| GET | /api/users | owner | `{accounts: [{id, username, status, createdAt, updatedAt}], invitations: [{id, createdAt, expiresAt}]}` (unused, unexpired only) |
+| GET | /api/users | owner | `{accounts: [{id, username, status, role, createdAt, updatedAt}], invitations: [{id, createdAt, expiresAt}]}` (unused, unexpired only) |
 | POST | /api/users/&lt;id&gt;/approve | owner | `{account}` |
-| POST | /api/users/&lt;id&gt;/revoke | owner | `{account}`; ends that account's sessions |
-| GET, HEAD | /photos/&lt;name&gt; | owner, viewer | Private photo file (see [Private photos](#private-photos)) |
-| POST | /mcp | owner bearer only | See [mcp.md](mcp.md) |
+| POST | /api/users/&lt;id&gt;/revoke | owner | `{account}`; ends that account's sessions and MCP tokens |
+| POST | /api/users/&lt;id&gt;/role | owner | `{role: "viewer" \| "content-manager"}`; returns `{account}`; ends that account's sessions and MCP tokens |
+| GET | /api/users/&lt;id&gt;/mcp-tokens | owner | `{tokens: [{id, label, createdAt, expiresAt, revokedAt, lastUsedAt}]}`; never secrets |
+| POST | /api/users/&lt;id&gt;/mcp-tokens | owner | `{label}` for an approved content manager; returns `{token: {id, label, createdAt, expiresAt}, secret}` once; fixed 90-day lifetime |
+| POST | /api/users/&lt;id&gt;/mcp-tokens/&lt;tokenId&gt;/revoke | owner | Returns `{token}` metadata |
+| GET | /api/audit | owner | Optional `?limit=`; `{events: [...]}` metadata only, no secrets or payloads |
+| GET, HEAD | /photos/&lt;name&gt; | owner, manager, viewer | Private photo file (see [Private photos](#private-photos)) |
+| POST | /mcp | owner admin bearer, or content-manager access token | See [mcp.md](mcp.md). Cookies are refused. |
 
-Error codes: 401 `unauthorized` (missing or invalid credentials); 403 `forbidden` (role not permitted), `forbidden_origin`, `forbidden_host`, `access_denied` (pending or revoked account signing in), `invitation_invalid` (invalid, used, or expired code); 404 `account_not_found`; 409 `username_unavailable`, `too_many_invitations`, `too_many_accounts`; 422 `validation_failed`; 429 `rate_limited`. Viewer access is an explicit read-only allowlist, so any route not listed for viewers is refused.
+Error codes: 401 `unauthorized` (missing or invalid credentials); 403 `forbidden` (role not permitted), `forbidden_origin`, `forbidden_host`, `access_denied` (pending or revoked account signing in), `invitation_invalid` (invalid, used, or expired code); 404 `account_not_found`; 409 `username_unavailable`, `too_many_invitations`, `too_many_accounts`; 422 `validation_failed`; 429 `rate_limited`. A route not listed for a role is refused for that role; account, invitation, role, token, and audit routes are owner-only.
 
 GET /health reports generic health only. Bodies are limited to 2 MB (8 KB for sign-in, invitation, and redemption); canonical content is bounded to 31 days, 80 plans per day, 80 reminders, and 100 operations per batch. Optional photos, translations, recommendations, and dates do not block a draft.
 
@@ -92,7 +115,7 @@ HTTP and MCP call the same TripService and validators. A batch commits completel
 
 The self-hosted photo store is `<SHARED_TRIP_DATA_DIR>/photos`, outside the source tree and every public directory. Put approved images there as flat files named `[A-Za-z0-9][A-Za-z0-9_-]*` with a `.webp`, `.png`, `.jpg`, or `.jpeg` extension, and reference them from trip content with root-relative URLs such as `/photos/harbor-walk.webp`.
 
-`GET`/`HEAD /photos/<name>` requires an owner or approved-viewer session and returns the file with `Cache-Control: no-store`. Anything else (subdirectories, other types, files resolving outside the store, missing files) returns a generic 404 after the access check. Viewers can only read. There is no upload or attachment store: `/attachments/*` always returns 404 after the access check. Database snapshots do not include photos; back the directory up separately.
+`GET`/`HEAD /photos/<name>` requires an owner, approved content-manager, or approved-viewer session and returns the file with `Cache-Control: no-store`. Anything else (subdirectories, other types, files resolving outside the store, missing files) returns a generic 404 after the access check. Every role can only read photos over HTTP. There is no upload or attachment store: `/attachments/*` always returns 404 after the access check. Database snapshots do not include photos; back the directory up separately.
 
 `/photos/manifest.js` is the public, generic, empty-by-default module used by the shared template. Never put private filenames or mappings into it. The legacy generator and the fictional `docs/` demo keep their existing generated photo assets unchanged.
 
@@ -100,15 +123,15 @@ Responses send `Referrer-Policy: strict-origin-when-cross-origin`, so third-part
 
 ## Synchronization and connection failures
 
-Trip pages poll every 20 seconds. Errors use bounded retries; Reconnect and online/focus/visibility events resume them. Home lists also refresh. An open page retains authenticated content in memory during brief outages; fresh offline navigation shows a generic connection page. A revoked viewer's next refresh returns 401, which clears the page.
+Trip pages poll every 20 seconds. Errors use bounded retries; Reconnect and online/focus/visibility events resume them. Home lists also refresh. An open page retains authenticated content in memory during brief outages; fresh offline navigation shows a generic connection page. A revoked account's next refresh, or the next refresh after its role changes, returns 401, which clears the page.
 
 Protected payloads never enter persistent browser storage or the service-worker cache. Offline writes fail explicitly; there is no offline queue. Editors retain their opening version to reject later conflicting changes. After an uncertain response, reconnect and read before editing again.
 
-Sign-out clears content and revokes the session. During an outage, a non-secret pending-sign-out marker blocks protected reads until revocation or a new explicit sign-in; other pages respond to that marker. When browser storage is unavailable, failed sign-out shows a retry control. Passwords and invitation codes stay in form fields and are cleared after submission.
+Sign-out clears content and revokes the session. During an outage, a non-secret pending-sign-out marker blocks protected reads until revocation or a new explicit sign-in; other pages respond to that marker. When browser storage is unavailable, failed sign-out shows a retry control. Passwords and invitation codes stay in form fields and are cleared after submission. A newly issued MCP token secret exists only in the owner's open page until dismissed (see [MCP access tokens](#mcp-access-tokens-for-content-managers)).
 
 ## Import and export
 
-Import accepts structured authoring JSON, a runtime trip object, or a shared-trip-export file. Compatible IDs and localization are retained. Available incoming trip IDs are preserved; importing again creates another trip rather than overwriting. Retrying the same requestId creates nothing twice. Only the owner can import; owner and approved viewers can export.
+Import accepts structured authoring JSON, a runtime trip object, or a shared-trip-export file. Compatible IDs and localization are retained. Available incoming trip IDs are preserved; importing again creates another trip rather than overwriting. Retrying the same requestId creates nothing twice. The owner and approved content managers can import; every approved role can export. The same import and export are also available as the MCP tools `import_trip` and `export_trip`, sharing validation and storage with HTTP.
 
 Safe unmapped fields are retained in compatibility content and reported. Legacy transport configuration is inert; import never contacts Firebase. Validation errors reject the whole import. Export restores content, IDs, versions, and archive state into empty storage. Database snapshots also retain retry records and account state.
 
@@ -140,11 +163,11 @@ SHARED_TRIP_DATA_DIR=/absolute/private/trip-data npm run backup -- /absolute/pri
 SHARED_TRIP_DATA_DIR=/absolute/private/restored-data npm run restore -- /absolute/private/backups/trips-<timestamp>.sqlite
 ~~~
 
-Backup uses SQLite's online backup API and validates the snapshot; it can run while the service is active and does not take ownership. Targets must not already exist, so snapshots are never overwritten. Copying a live SQLite main file alone is not this method. A snapshot contains trips, IDs, versions, archive state, retry records, viewer accounts (password hashes and status), and invitation digests: store it as a secret. Photos are not included. Same-server snapshots are not off-site protection.
+Backup uses SQLite's online backup API and validates the snapshot; it can run while the service is active and does not take ownership. Targets must not already exist, so snapshots are never overwritten. Copying a live SQLite main file alone is not this method. A snapshot contains trips, IDs, versions, archive state, retry records, accounts (password hashes, status and role), invitation digests, MCP access-token records, and the audit log: store it as a secret. Photos are not included. Same-server snapshots are not off-site protection.
 
 Restore takes data-directory ownership before writing anything and holds it for the whole operation: it validates and migrates a staging replacement, validates it again, snapshots an existing target (`shared-trip.sqlite.before-restore-<time>`), and swaps it in. If a running service or another restore owns the directory, restore exits without touching the target. First restore into separate storage and compare IDs, versions, content, and accounts.
 
-Restoring signs everyone out. The account state is the snapshot's: accounts revoked after the snapshot become approved again and invitations redeemed after it become usable again until they expire. Review *Viewer accounts* immediately after a restore and revoke again as needed.
+Restoring signs everyone out. The account state is the snapshot's: accounts revoked after the snapshot become approved again, role changes made after it are undone, MCP tokens revoked after it become valid again until they expire, and invitations redeemed after it become usable again until they expire. Review *Accounts* and each content manager's tokens immediately after a restore, and revoke or change roles again as needed.
 
 Run maintenance commands with Node 24 and private storage access. The container also contains server/cli/backup.mjs and server/cli/restore.mjs; mount a separate backup directory when running them in a maintenance container.
 
@@ -179,13 +202,14 @@ Schemas use PRAGMA user_version:
 - v1: the prior prototype layout.
 - v2: maps days.plans to days.slots, normalizes compatible content, and adds an archive index.
 - v3: adds the `users` and `invitations` tables. Trip rows, IDs, versions, archive state, and retry records are untouched.
+- The content-manager release adds the account role, MCP access-token records, and the audit log in a further schema version. Existing accounts migrate as `viewer`, so nobody gains write access by upgrading; the owner promotes accounts explicitly afterwards. Trips and existing accounts are otherwise untouched. The exact schema number is recorded with that release's server change.
 
 Before migrating an older database, the service writes a snapshot named for the target schema, such as `shared-trip.sqlite.before-v3-<time>`, beside it with VACUUM INTO and never deletes it automatically. The migration runs in one transaction. Newer-than-supported schemas are rejected ("Database requires a newer application").
 
-Back up before upgrading. Stop the service and any restore, replace its image/code while retaining data/configuration, restart, and verify reading, editing, and viewer sign-in. Test fictional prior-version data first. To roll back across a schema change, stop the new service and restore the pre-upgrade snapshot into separate storage for the old code; never open a newer schema with older code. Accounts created after the upgrade are not in that snapshot.
+Back up before upgrading. Stop the service and any restore, replace its image/code while retaining data/configuration, restart, and verify reading, editing, viewer sign-in and, if used, content-manager sign-in and MCP. Test fictional prior-version data first. To roll back across a schema change, stop the new service and restore the pre-upgrade snapshot into separate storage for the old code; never open a newer schema with older code. Accounts, role changes and MCP tokens created after the upgrade are not in that snapshot; an older release has no content-manager role, so its accounts are viewers again and every issued MCP access token stops working (only the admin bearer remains).
 
 ## Verification and limits
 
 Run npm test for regression, HTTP/MCP integration, account and ownership checks, and DOM simulation. The [implementation plan](../doc/implementation-plan.md) and progress reports record which checks actually ran.
 
-The official MCP SDK was tested over local HTTP. DOM simulation does not establish desktop/phone layout, map gestures, live weather/maps, physical installation, or third-party AI account connections. Crash recovery of the ownership lock under Linux and in containers, Docker builds, and a real VPS deployment require their own environment checks.
+The official MCP SDK was tested over local HTTP. `scripts/test-content-manager-ui.mjs` is a DOM simulation of the content-manager home page and the owner's role and token controls; consult the progress reports for whether it has been run. The existing live HTTPS trial predates content managers and MCP access tokens, so those have no live evidence. DOM simulation does not establish desktop/phone layout, map gestures, live weather/maps, physical installation, or third-party AI account connections. Crash recovery of the ownership lock under Linux and in containers, Docker builds, and a real VPS deployment require their own environment checks.

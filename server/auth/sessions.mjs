@@ -18,10 +18,10 @@ export class SessionStore {
   sweep(now = Date.now()) {
     for (const [key, value] of this.sessions) if (value.expires < now) this.sessions.delete(key);
   }
-  /** data: { role: "owner" } or { role: "viewer", userId, epoch }. Returns the opaque cookie value. */
+  /** data: { role: "owner" } or { role: "viewer" | "content-manager", userId, epoch }. Returns the opaque cookie value. */
   create(data, now = Date.now()) {
     this.sweep(now);
-    if (data.role === "viewer") {
+    if (data.userId) {
       const own = [...this.sessions].filter(([, value]) => value.userId === data.userId);
       while (own.length >= this.maxPerAccount) this.sessions.delete(own.shift()[0]);
     }

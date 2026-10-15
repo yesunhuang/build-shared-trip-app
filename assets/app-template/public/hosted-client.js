@@ -1,8 +1,11 @@
 // Shared helpers for the self-hosted trip server.
 // Protected trip data lives only in page memory: nothing here writes trip
 // content to localStorage, sessionStorage, IndexedDB, Cache Storage or a
-// BroadcastChannel. The admin token, viewer passwords and invitation codes are
-// only sent in a POST body and are never stored by the browser code.
+// BroadcastChannel. The admin token, account passwords and invitation codes are
+// only sent in a POST body and are never stored by the browser code. A newly
+// issued MCP access-token secret arrives once in a POST response; callers keep
+// it in page memory only until the owner dismisses it, and nothing here
+// stores, copies or transmits it anywhere else.
 // Role/capability data from /api/session only adjusts the UI; the server
 // enforces every permission independently.
 
@@ -165,6 +168,14 @@ export async function requestJSON(path, { method = "GET", body, timeoutMs = DEFA
   return payload;
 }
 
+async function accountLogin(username, password) {
+  const result = await requestJSON("/api/login", { method: "POST", body: { username, password }, timeoutMs: WRITE_TIMEOUT_MS });
+  try { localStorage.removeItem(SIGNOUT_KEY); } catch {}
+  return result;
+}
+
+export const ACCOUNT_ROLES = Object.freeze(["viewer", "content-manager"]);
+
 export const hostedApi = Object.freeze({
   session: () => requestJSON("/api/session", { timeoutMs: 8000 }),
   login: async (token) => {
@@ -172,11 +183,10 @@ export const hostedApi = Object.freeze({
     try { localStorage.removeItem(SIGNOUT_KEY); } catch {}
     return result;
   },
-  loginViewer: async (username, password) => {
-    const result = await requestJSON("/api/login", { method: "POST", body: { username, password }, timeoutMs: WRITE_TIMEOUT_MS });
-    try { localStorage.removeItem(SIGNOUT_KEY); } catch {}
-    return result;
-  },
+  // Username/password sign-in for any approved account (viewer or content manager).
+  loginAccount: (username, password) => accountLogin(username, password),
+  // Deprecated alias kept for compatibility with older callers.
+  loginViewer: (username, password) => accountLogin(username, password),
   acceptInvitation: (invitation, username, password) => requestJSON("/api/accept-invite", {
     method: "POST",
     body: { invitation, username, password },
@@ -186,6 +196,25 @@ export const hostedApi = Object.freeze({
   createInvitation: (expiresInHours = 72) => requestJSON("/api/invitations", { method: "POST", body: { expiresInHours } }),
   approveAccount: (accountId) => requestJSON(`/api/users/${encodeURIComponent(accountId)}/approve`, { method: "POST", body: {} }),
   revokeAccount: (accountId) => requestJSON(`/api/users/${encodeURIComponent(accountId)}/revoke`, { method: "POST", body: {} }),
+  // Owner only. Changing a role signs that account out and invalidates its MCP access tokens.
+  setAccountRole: (accountId, role) => requestJSON(`/api/users/${encodeURIComponent(accountId)}/role`, {
+    method: "POST",
+    body: { role },
+    timeoutMs: WRITE_TIMEOUT_MS
+  }),
+  // Owner only. Metadata only; secrets are never listed.
+  listMcpTokens: (accountId) => requestJSON(`/api/users/${encodeURIComponent(accountId)}/mcp-tokens`),
+  // Owner only, approved content managers only. Returns {token, secret} exactly once.
+  // Deliberately single-shot: a failed issuance is reported, never retried automatically.
+  issueMcpToken: (accountId, label) => requestJSON(`/api/users/${encodeURIComponent(accountId)}/mcp-tokens`, {
+    method: "POST",
+    body: { label },
+    timeoutMs: WRITE_TIMEOUT_MS
+  }),
+  revokeMcpToken: (accountId, tokenId) => requestJSON(
+    `/api/users/${encodeURIComponent(accountId)}/mcp-tokens/${encodeURIComponent(tokenId)}/revoke`,
+    { method: "POST", body: {}, timeoutMs: WRITE_TIMEOUT_MS }
+  ),
   logout: () => requestJSON("/api/logout", { method: "POST", body: {}, timeoutMs: 8000 }),
   listTrips: () => requestJSON("/api/trips"),
   getTrip: (tripId) => requestJSON(`/api/trips/${encodeURIComponent(tripId)}`),
@@ -297,6 +326,7 @@ export function getBootSession() { return bootSession; }
 // Fail closed: anything other than an explicit server capability is read-only.
 export function sessionCanEdit(session) { return session?.capabilities?.editTrips === true; }
 export function sessionCanManageAccounts(session) { return session?.capabilities?.manageAccounts === true; }
+export function sessionCanImport(session) { return session?.capabilities?.importTrips === true; }
 
 const PROTECTED_STORAGE_PREFIXES = ["trip-", "shared-trip-"];
 

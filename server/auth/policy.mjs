@@ -1,26 +1,46 @@
 // Server-side role policy. The owner (admin bearer token or an owner browser session) may do
-// everything; MCP additionally requires the bearer token. Approved viewers get an explicit
-// allowlist of read-only routes. Everything not on the allowlist is refused for viewers, so a new
-// owner route is never accidentally exposed to them.
+// everything; MCP additionally requires a bearer credential. Approved viewers get an explicit
+// allowlist of read-only routes. Approved content managers get the viewer allowlist plus trip
+// creation, import and trip changes (edit, delete content, replace content, archive/unarchive) for
+// all current and future trips. Everything not on an allowlist is refused, so a new owner route is
+// never accidentally exposed to viewers or content managers.
+//
+// A content manager's per-account MCP credential (principal.via "mcp-token") is accepted only at
+// /mcp; app.mjs never builds such a principal for any other route. A browser session (via "cookie")
+// never authorizes /mcp.
 
 export const OWNER = "owner";
 export const VIEWER = "viewer";
+export const CONTENT_MANAGER = "content-manager";
+
+export const canEditContent = (principal) => principal?.role === OWNER || principal?.role === CONTENT_MANAGER;
 
 export function capabilitiesFor(principal) {
   const owner = principal?.role === OWNER;
+  const editor = canEditContent(principal);
   return {
     readTrips: Boolean(principal), exportTrips: Boolean(principal),
-    editTrips: owner, importTrips: owner, manageAccounts: owner,
-    mcp: owner && principal.via === "bearer"
+    editTrips: editor, importTrips: editor, manageAccounts: owner,
+    mcp: (owner && principal.via === "bearer") || (principal?.role === CONTENT_MANAGER && principal.via === "mcp-token")
   };
 }
 
 const VIEWER_READ_ROUTES = [/^\/api\/session$/, /^\/api\/trips$/, /^\/api\/trips\/[^/]+$/, /^\/api\/trips\/[^/]+\/export$/];
+const MANAGER_WRITE_ROUTES = [/^\/api\/trips$/, /^\/api\/import$/, /^\/api\/trips\/[^/]+\/changes$/];
 
 export function viewerMayAccess(method, pathname) {
   if (method === "POST" && pathname === "/api/logout") return true;
   if (isProtectedMediaPath(pathname)) return method === "GET" || method === "HEAD";
   return method === "GET" && VIEWER_READ_ROUTES.some((route) => route.test(pathname));
+}
+
+/** Non-owner route allowlist. The owner is never checked here. */
+export function mayAccess(principal, method, pathname) {
+  if (pathname === "/mcp") return principal?.role === CONTENT_MANAGER && principal.via === "mcp-token";
+  if (principal?.via === "mcp-token") return false;
+  if (principal?.role === VIEWER) return viewerMayAccess(method, pathname);
+  if (principal?.role === CONTENT_MANAGER) return viewerMayAccess(method, pathname) || (method === "POST" && MANAGER_WRITE_ROUTES.some((route) => route.test(pathname)));
+  return false;
 }
 
 // /photos/* (other than the generic, empty-by-default manifest module) and /attachments/* are

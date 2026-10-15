@@ -37,7 +37,10 @@ export class TripService {
     if (!row) throw notFound();
     return { trip: withAliases(JSON.parse(row.data)) };
   }
-  transact(scope, requestId, payload, action) {
+  // record(result, replayed), when given, runs inside the same transaction just before COMMIT (used for
+  // payload-free audit metadata). If it throws, the whole write rolls back, so an audit entry never
+  // claims a write that did not commit and no committed write lacks its entry.
+  transact(scope, requestId, payload, action, record) {
     if (typeof requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(requestId)) throw validationError("requestId must be a stable identifier of at most 128 characters.");
     assertSafePayload(payload);
     const fingerprint = crypto.createHash("sha256").update(JSON.stringify(ordered(payload))).digest("hex");
@@ -46,11 +49,14 @@ export class TripService {
       const prior = this.db.prepare("SELECT fingerprint,result FROM request_log WHERE scope=? AND request_id=?").get(scope, requestId);
       if (prior) {
         if (prior.fingerprint !== fingerprint) throw conflict("request_id_conflict", "This request identifier was already used for different input.");
+        const replay = JSON.parse(prior.result);
+        record?.(replay, true);
         this.db.exec("COMMIT");
-        return JSON.parse(prior.result);
+        return replay;
       }
       const result = action();
       this.db.prepare("INSERT INTO request_log VALUES(?,?,?,?)").run(scope, requestId, fingerprint, JSON.stringify(result));
+      record?.(result, false);
       this.db.exec("COMMIT");
       return result;
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
@@ -69,10 +75,10 @@ export class TripService {
     this.db.prepare("INSERT INTO trips VALUES(?,?,?,?)").run(id, version, Number(trip.archived), JSON.stringify(trip));
     return { trip: withAliases(trip) };
   }
-  createTrip({ requestId, trip }) {
-    return this.transact("create", requestId, { trip }, () => this.insert(trip));
+  createTrip({ requestId, trip }, record) {
+    return this.transact("create", requestId, { trip }, () => this.insert(trip), record);
   }
-  applyTripChanges({ tripId, requestId, expectedVersion, changes }) {
+  applyTripChanges({ tripId, requestId, expectedVersion, changes }, record) {
     return this.transact("trip:" + tripId, requestId, { tripId, expectedVersion, changes }, () => {
       const { trip: current } = this.getTrip(tripId);
       if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw validationError("expectedVersion must be a positive safe integer.");
@@ -82,15 +88,15 @@ export class TripService {
       const stored = { ...validate(next.content, content), id, version: version + 1, archived: next.archived, createdAt, updatedAt: new Date().toISOString() };
       this.db.prepare("UPDATE trips SET version=?,archived=?,data=? WHERE id=?").run(stored.version, Number(stored.archived), JSON.stringify(stored), id);
       return { trip: withAliases(stored), generated: next.generated };
-    });
+    }, record);
   }
-  importTrip({ requestId, data }) {
+  importTrip({ requestId, data }, record) {
     return this.transact("import", requestId, { data }, () => {
       const { content, preferredId, warnings } = importContent(data);
       const result = this.insert(content, preferredId, data.format ? data.trip : {});
       if (preferredId && result.trip.id !== preferredId) warnings.push("The incoming trip ID was unavailable or invalid; created a new trip instead of overwriting.");
       return { ...result, warnings };
-    });
+    }, record);
   }
   exportTrip(id) {
     return { format: "shared-trip-export", formatVersion: 1, exportedAt: new Date().toISOString(), ...this.getTrip(id) };

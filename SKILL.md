@@ -15,18 +15,19 @@ Treat every trip as clean-room data. Never carry itinerary content, travelers, I
 
 1. Inspect all supplied itinerary files, booking summaries, and notes. Extract facts before filling gaps. If you cannot open a source, ask the user for an export.
 2. Read [research-and-content.md](references/research-and-content.md) before browsing or writing traveler content.
-3. Make sure a service is available. Either use the user's running instance, or start a local one by following [self-hosted.md](references/self-hosted.md#run-locally) (`npm ci`, then `npm start` with `SHARED_TRIP_ADMIN_TOKEN` and an out-of-repo `SHARED_TRIP_DATA_DIR`). Never invent, print, or commit the user's token. A local test token should be a placeholder you generate for disposable data only.
-4. Create the trip as a draft. Use MCP `create_trip` ([mcp.md](references/mcp.md)), the home page, or `POST /api/trips`. To migrate an existing structured trip JSON, import it instead (`POST /api/import` or the home-page import control). Report any import `warnings`.
+3. Make sure a service is available. Either use the user's running instance, or start a local one by following [self-hosted.md](references/self-hosted.md#run-locally) (`npm ci`, then `npm start` with `SHARED_TRIP_ADMIN_TOKEN` and an out-of-repo `SHARED_TRIP_DATA_DIR`). Never invent, print, or commit the user's admin token or any MCP access token. A local test token should be a placeholder you generate for disposable data only.
+4. Create the trip as a draft. Use MCP `create_trip` ([mcp.md](references/mcp.md)), the home page, or `POST /api/trips`. To migrate an existing structured trip JSON, import it instead (MCP `import_trip`, `POST /api/import`, or the home-page import control). Report any import `warnings`. MCP `export_trip` and `GET /api/trips/<id>/export` return recoverable JSON.
 5. Add content incrementally. Use `get_trip`, then `apply_trip_changes` with the returned `version` as `expectedVersion` and a fresh `requestId`. Use operations for dates, plans, reminders, and metadata. Follow [input-schema.md](references/input-schema.md) for field shapes. On conflict, re-read and reconcile. Never force-overwrite. On a network failure, retry the identical request with the same `requestId`.
 6. Keep English (or the user's source language) as the base and add `zh-Hans`, `zh-Hant`, and `ja` patches when you have reviewed translations. A draft may omit translations, photos, dates, and recommendations. Never fabricate content to fill them.
-7. Verify by following [feature-contract.md](references/feature-contract.md) and [responsive-performance.md](references/responsive-performance.md). Open `/trips/<id>` signed in at desktop and phone widths, in all languages. Then check the map markers, dialogs, weather, reminders, and the swipe-only sheet. Confirm that a signed-out browser cannot open the trip. With fictional data, also confirm that a pending or revoked viewer is refused and an approved viewer sees read-only controls. Label browser emulation honestly.
+7. Verify by following [feature-contract.md](references/feature-contract.md) and [responsive-performance.md](references/responsive-performance.md). Open `/trips/<id>` signed in at desktop and phone widths, in all languages. Then check the map markers, dialogs, weather, reminders, and the swipe-only sheet. Confirm that a signed-out browser cannot open the trip. With fictional data, also confirm that a pending or revoked account is refused, an approved viewer sees read-only controls, and an approved content manager can edit but sees no account or token controls. Label browser emulation honestly.
 8. Do not deploy to a VPS, domain, or public host without a concrete target and the user's authorization. When authorized, follow [self-hosted.md § Deploy](references/self-hosted.md#deploy-on-a-small-vps) and the [Compose + Caddy template](deploy/README.md).
 
 ## Access model
 
-- The owner's admin token (`SHARED_TRIP_ADMIN_TOKEN`) is private. It is the only credential for MCP and for writes through the API. Never share it with companions, and never write it into files, logs, or reports.
-- Companions get viewer accounts. The owner creates a single-use, expiring invitation code and shares only that code. The invitee enters it on the home page with a new username and password, which creates a **pending** account. The account is usable only after the owner approves it.
-- Approval grants read and export access to **all** trips. Viewers cannot edit, import, manage accounts, or use MCP. Revocation ends their sessions immediately. Reapproval does not revive old sessions.
+- The owner's admin token (`SHARED_TRIP_ADMIN_TOKEN`) is private and authorizes everything, including account administration and MCP. Never share it with companions, and never write it into files, logs, or reports.
+- Companions get accounts. The owner creates a single-use, expiring invitation code and shares only that code. The invitee enters it on the home page with a username and password they choose privately, which creates a **pending viewer** account. The account is usable only after the owner approves it.
+- Each account is a **viewer** (read and export all trips) or, if the owner assigns it, a **content manager** (owner-like content editing, import, export, archive and restore on **all** trips, current and future). Neither role can manage accounts, invitations, roles, tokens, security, backups, or the server, and nobody can permanently purge a trip. Revocation or a role change ends that account's sessions and MCP tokens immediately. Reapproval does not revive them.
+- MCP accepts the owner's admin bearer or an owner-issued content-manager access token (fixed 90 days, `/mcp` only, shown once). Browser cookies never authorize MCP. If you act through a content-manager token, you have no account or security authority; do not ask for the admin token to gain it. Only the owner issues, renews (issue replacement, update client, revoke old), or revokes tokens and configures clients. Never request, accept, print, or store a token secret in chat, files, or reports.
 - There is no anonymous sharing, per-trip membership, OAuth, self-service access, or offline write queue. Do not describe or promise them.
 
 ## Authoring rules
@@ -53,6 +54,7 @@ Shared trip-page UI lives in `assets/app-template/public/`. The self-hosted home
 ```bash
 npm test
 npm run test:server
+node scripts/test-content-manager-ui.mjs   # content-manager and owner token UI simulation, if not already part of npm test
 node scripts/build-docs-demo.mjs
 ```
 
@@ -92,4 +94,4 @@ Report:
 - which MCP client was used, if any (for example the official SDK smoke test, not a third-party AI app unless that was actually exercised);
 - assumptions or traveler facts still awaiting confirmation.
 
-Do not claim synchronization, offline behavior, installation, MCP client compatibility, viewer access control, backups, crash recovery, map-tile availability, or deployment were verified unless they were actually exercised.
+Do not claim synchronization, offline behavior, installation, MCP client compatibility, viewer or content-manager access control, token issuance or expiry, backups, crash recovery, map-tile availability, or deployment were verified unless they were actually exercised.

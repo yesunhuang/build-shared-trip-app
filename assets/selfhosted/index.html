@@ -12,7 +12,7 @@
   <main>
     <p id="status" role="status" aria-live="polite"></p>
     <section id="login" hidden>
-      <h1 data-text="viewerSignin">Sign in</h1>
+      <h1 data-text="accountSignin">Sign in</h1>
       <form id="viewer-login-form"><label><span data-text="username">Username</span><input name="username" type="text" required minlength="3" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false"></label><label><span data-text="pw">Password</span><input name="password" type="password" required maxlength="128" autocomplete="current-password"></label><button data-text="signin">Sign in</button></form>
       <details id="invite-panel"><summary data-text="haveInvite">Have an invitation?</summary>
         <form id="invite-form"><label><span data-text="inviteCode">Invitation code</span><input name="invitation" type="text" required minlength="32" maxlength="128" autocomplete="off" autocapitalize="none" spellcheck="false"></label><label><span data-text="username">Username</span><input name="username" type="text" required minlength="3" maxlength="32" autocomplete="username" autocapitalize="none" spellcheck="false"></label><label><span data-text="pw">Password</span><input name="password" type="password" required minlength="10" maxlength="128" autocomplete="new-password"></label><button data-text="requestAccess">Request access</button></form>
@@ -21,8 +21,10 @@
         <form id="login-form"><label><span data-text="token">Admin token</span><input name="token" type="password" required autocomplete="off"></label><button data-text="signin">Sign in</button></form>
       </details>
     </section>
-    <section id="trips" hidden><div class="heading"><h1 data-text="yourTrips">Your trips</h1><button id="create" data-text="create">Create trip</button></div><p id="read-only-note" class="note" data-text="readOnly" hidden></p><div class="tools"><label><input id="archived" type="checkbox"><span data-text="archived">Show archived</span></label><label class="import" id="import-control"><span data-text="import">Import JSON</span><input id="import" type="file" accept="application/json,.json"></label><button id="retry" data-text="retry">Refresh</button></div><div id="list" class="trip-list"></div></section>
-    <section id="accounts" hidden><div class="heading"><h2 data-text="accounts">Viewer accounts</h2><button id="create-invite" type="button" data-text="createInvite">Create invitation</button></div><output id="invite-output" class="invite-output" hidden></output><p id="invite-count" class="note"></p><ul id="account-list" class="account-list"></ul></section>
+    <section id="trips" hidden><div class="heading"><h1 data-text="yourTrips">Your trips</h1><button id="create" data-text="create">Create trip</button></div><p id="read-only-note" class="note" data-text="readOnly" hidden></p><p id="manager-note" class="note" data-text="managerNote" hidden></p><div class="tools"><label><input id="archived" type="checkbox"><span data-text="archived">Show archived</span></label><label class="import" id="import-control"><span data-text="import">Import JSON</span><input id="import" type="file" accept="application/json,.json"></label><button id="retry" data-text="retry">Refresh</button></div><div id="list" class="trip-list"></div></section>
+    <section id="accounts" hidden><div class="heading"><h2 data-text="accounts">Accounts</h2><button id="create-invite" type="button" data-text="createInvite">Create invitation</button></div><p id="accounts-note" class="note" data-text="accountsNote"></p>
+      <section id="token-output" class="token-output" aria-labelledby="token-output-title" tabindex="-1" hidden><h3 id="token-output-title" data-text="tokenOnceTitle">New assistant access token</h3><p id="token-message"></p><code id="token-secret" class="token-secret"></code><div class="actions"><button id="token-copy" type="button" data-text="copy">Copy</button><button id="token-dismiss" type="button" data-text="dismiss">Done, hide token</button></div><p id="token-copy-status" class="note" role="status" aria-live="polite"></p></section>
+      <output id="invite-output" class="invite-output" hidden></output><p id="invite-count" class="note"></p><ul id="account-list" class="account-list"></ul></section>
   </main>
   <script type="module" src="/home.js?v=__CACHE_VERSION__"></script>
 </body></html>

@@ -1,7 +1,7 @@
 // Owner-managed viewer accounts: real HTTP requests against the actual service with fictional data.
 // Covers unauthenticated, pending, approved read-only, revoked-active-session and owner paths, MCP
 // refusal, invitations (single use, expiry), logout, protected media and cache headers, rate
-// limits, the default <dataDir>/photos media store, the referrer policy, schema v2 -> v3 upgrade and
+// limits, the default <dataDir>/photos media store, the referrer policy, schema v2 -> v4 upgrade and
 // backup/restore preservation of account state.
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -141,7 +141,7 @@ try {
   // --- Pending accounts get generic access errors and no session ---
   const list = async () => expect(await api.owner("/api/users"), 200, "list").accounts;
   const idOf = async (username) => (await list()).find((account) => account.username === username).id;
-  for (const account of await list()) assert.deepEqual(Object.keys(account).sort(), ["createdAt", "id", "status", "updatedAt", "username"]);
+  for (const account of await list()) assert.deepEqual(Object.keys(account).sort(), ["createdAt", "id", "role", "status", "updatedAt", "username"]);
   const pending = await api.signIn("fictional.viewer", viewerSecret);
   assert.equal(pending.status, 403); assert.equal(pending.body.error.code, "access_denied"); assert.equal(pending.headers.get("set-cookie"), null);
   const badSecret = await api.signIn("fictional.viewer", viewerSecret + "x");
@@ -213,7 +213,7 @@ try {
   assert.equal((await api.as(viewer, "/api/trips", { headers: { Authorization: "Basic ZmljdGlvbmFsOnByb3h5" } })).status, 200, "non-bearer proxy authorization headers are ignored");
   const sdk = new Client({ name: "fictional-accounts", version: "1.0.0" });
   await sdk.connect(new StreamableHTTPClientTransport(new URL(runtime.url + "/mcp"), { requestInit: { headers: { Authorization: "Bearer " + token } } }));
-  assert.equal((await sdk.listTools()).tools.length, 4, "owner bearer MCP remains available");
+  assert.equal((await sdk.listTools()).tools.length, 6, "owner bearer MCP remains available");
   await sdk.close();
   console.log("MCP refuses viewer cookies, owner cookies and session-as-bearer misuse; the admin bearer token still works.");
 
@@ -335,7 +335,7 @@ try {
   await stop(defaults);
   console.log("Default photo store lives in <dataDir>/photos outside the checkout: unauthenticated, pending and revoked access is refused, approved viewers and the owner read it, the public manifest stays generic, and the referrer policy sends only the origin cross-origin.");
 
-  // --- Fictional schema v2 -> v3 upgrade ---
+  // --- Fictional schema v2 -> v4 upgrade ---
   const v2 = await start("schema-v2");
   const old = client(v2.url);
   const v2Trip = expect(await old.owner("/api/trips", { method: "POST", body: { requestId: "v2-create", trip: { title: "Fictional Prior Coast" } } }), 201, "v2 create").trip;
@@ -351,9 +351,9 @@ try {
   const priorRows = rows(downgrade); downgrade.close();
   const upgraded = await start("schema-v2");
   const now3 = client(upgraded.url);
-  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version, 3);
+  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version, 4);
   assert.equal(rows(upgraded.db), priorRows, "trip rows, IDs, versions, archive state and retry records are unchanged");
-  const snapshots = () => fs.readdirSync(path.join(temporary, "schema-v2")).filter((file) => /^shared-trip\.sqlite\.before-v3-\d+$/.test(file));
+  const snapshots = () => fs.readdirSync(path.join(temporary, "schema-v2")).filter((file) => /^shared-trip\.sqlite\.before-v4-\d+$/.test(file));
   assert.equal(snapshots().length, 1);
   const preUpgrade = new DatabaseSync(path.join(temporary, "schema-v2", snapshots()[0]), { readOnly: true });
   assert.equal(preUpgrade.prepare("PRAGMA user_version").get().user_version, 2); assert.equal(rows(preUpgrade), priorRows); preUpgrade.close();
@@ -363,17 +363,17 @@ try {
   expect(await now3.accept(upgradeInvite.token, "upgrade.viewer", viewerSecret), 201, "accounts work after upgrade");
   await stop(upgraded);
   const again = await start("schema-v2");
-  assert.equal(again.db.prepare("PRAGMA user_version").get().user_version, 3);
-  assert.equal(snapshots().length, 1, "the migration is idempotent and does not re-snapshot a v3 database");
+  assert.equal(again.db.prepare("PRAGMA user_version").get().user_version, 4);
+  assert.equal(snapshots().length, 1, "the migration is idempotent and does not re-snapshot a v4 database");
   assert.equal(expect(await client(again.url).owner("/api/users"), 200, "after restart").accounts[0].username, "upgrade.viewer");
   await stop(again);
   const fromOld = path.join(temporary, "restored-from-v2");
   execFileSync(process.execPath, ["server/cli/restore.mjs", path.join(temporary, "schema-v2", snapshots()[0])], { cwd: repoRoot, env: { ...process.env, SHARED_TRIP_DATA_DIR: fromOld }, stdio: "pipe" });
   const restoredOld = await start("restored-from-v2");
-  assert.equal(restoredOld.db.prepare("PRAGMA user_version").get().user_version, 3);
+  assert.equal(restoredOld.db.prepare("PRAGMA user_version").get().user_version, 4);
   assert.equal(expect(await client(restoredOld.url).owner("/api/trips/" + v2Archived.id), 200, "restored v2").trip.archived, true);
   await stop(restoredOld);
-  console.log("Fictional schema-v2 database upgrades to v3 idempotently with a retained pre-upgrade snapshot; a v2 snapshot restores into v3.");
+  console.log("Fictional schema-v2 database upgrades to v4 idempotently with a retained pre-upgrade snapshot; a v2 snapshot restores into v4.");
 } finally {
   for (const item of running.reverse()) await item.close().catch(() => {});
   fs.rmSync(temporary, { recursive: true, force: true });

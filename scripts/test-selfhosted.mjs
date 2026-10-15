@@ -70,11 +70,12 @@ try {
   const sdk=new Client({name:"fictional-integration",version:"1.0.0"});clients.push(sdk);
   await sdk.connect(new StreamableHTTPClientTransport(new URL(runtime.url+"/mcp"),{requestInit:{headers:{Authorization:"Bearer "+token}}}));
   const listed=(await sdk.listTools()).tools;
-  assert.deepEqual(listed.map((t)=>t.name).sort(),["apply_trip_changes","create_trip","get_trip","list_trips"]);
+  assert.deepEqual(listed.map((t)=>t.name).sort(),["apply_trip_changes","create_trip","export_trip","get_trip","import_trip","list_trips"]);
   const readHints={readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false};
   assert.deepEqual(Object.fromEntries(listed.map((t)=>[t.name,t.annotations])),{
-    list_trips:readHints,get_trip:readHints,
+    list_trips:readHints,get_trip:readHints,export_trip:readHints,
     create_trip:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    import_trip:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
     apply_trip_changes:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false}
   });
   const mcp=async(name,args)=> {
@@ -148,13 +149,13 @@ try {
   const upgraded=await startServer(readConfig({SHARED_TRIP_ADMIN_TOKEN:token,SHARED_TRIP_DATA_DIR:priorDir,SHARED_TRIP_PORT:"0"}));all.push(upgraded);
   const oldRead=ok(await api("/api/trips/prior-trip",{base:upgraded.url})).trip;
   assert.equal(oldRead.id,oldTrip.id);assert.equal(oldRead.version,3);assert.equal(oldRead.days[0].slots[0].id,"prior-plan");
-  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version,3);
-  const priorSnapshot=fs.readdirSync(priorDir).find((file)=>/^shared-trip\.sqlite\.before-v3-\d+$/.test(file));
+  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version,4);
+  const priorSnapshot=fs.readdirSync(priorDir).find((file)=>/^shared-trip\.sqlite\.before-v4-\d+$/.test(file));
   assert.ok(priorSnapshot);
   const retained=new DatabaseSync(path.join(priorDir,priorSnapshot),{readOnly:true});
   assert.equal(retained.prepare("PRAGMA user_version").get().user_version,1);retained.close();
   assert.deepEqual(ok(await api("/api/users",{base:upgraded.url})),{accounts:[],invitations:[]});
-  console.log("Fictional schema-v1 upgrade to v3 preserves trip/item identity, adds empty account tables and keeps a pre-migration snapshot.");
+  console.log("Fictional schema-v1 upgrade to v4 preserves trip/item identity, adds empty account tables and keeps a pre-migration snapshot.");
   const navigation=await fetch(runtime.url+"/trips/"+a.id,{headers:{Authorization:"Bearer "+token}});
   const html=await navigation.text();assert.equal(navigation.headers.get("cache-control"),"no-store");assert.ok(!html.includes(a.title));assert.ok(html.includes("/hosted-bootstrap.js"));
   const manifest=await (await fetch(runtime.url+"/manifest.webmanifest")).json();assert.equal(manifest.id,"/");assert.equal(manifest.scope,"/");assert.equal(manifest.start_url,"/");

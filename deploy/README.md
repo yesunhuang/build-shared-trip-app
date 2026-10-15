@@ -14,7 +14,7 @@ Placeholders: `trips.example.org` is fictional. `/PRIVATE/shared-trips/...` stan
 
 | Variable (private env file) | Used by | Meaning |
 | --- | --- | --- |
-| SHARED_TRIP_ADMIN_TOKEN | app only | Owner-only bearer secret of 32-512 characters. It is the only MCP credential. |
+| SHARED_TRIP_ADMIN_TOKEN | app only | Owner-only bearer secret of 32-512 characters. It is the master credential, including MCP. Content-manager MCP tokens are issued from the home page and stored in the database, not in this file. |
 | SHARED_TRIP_ORIGIN | app | `https://<public host>`. The app rejects any other Host or Origin value. |
 | SHARED_TRIP_DOMAIN | Caddy only | Same hostname as the origin |
 | SHARED_TRIP_DATA_PATH | app `/data` | Data directory owned by UID 1000 on a local filesystem |
@@ -22,7 +22,7 @@ Placeholders: `trips.example.org` is fictional. `/PRIVATE/shared-trips/...` stan
 | CADDY_DATA_PATH / CADDY_CONFIG_PATH | Caddy `/data`, `/config` | Certificates, keys, and ACME account data |
 | SHARED_TRIP_IMAGE_TAG / CADDY_IMAGE | images | App rollback tag; pinned Caddy image |
 
-The data directory holds `shared-trip.sqlite` (trips, retry log, viewer accounts, invitations), the ownership files described in [section 9](#9-unclean-stops-and-data-directory-ownership), pre-migration snapshots, and the optional private `photos/` store. Compose refuses to start when a variable is missing, and it does not create missing host directories. Neither the app port nor the Caddy admin API is published.
+The data directory holds `shared-trip.sqlite` (trips, retry log, accounts and roles, invitations, MCP access-token records, audit log), the ownership files described in [section 9](#9-unclean-stops-and-data-directory-ownership), pre-migration snapshots, and the optional private `photos/` store. Compose refuses to start when a variable is missing, and it does not create missing host directories. Neither the app port nor the Caddy admin API is published.
 
 ## 1. Inspect the host before installing anything
 
@@ -101,24 +101,28 @@ Then sign in on the home page with the admin secret (**Owner sign-in**). Import 
 
 For an authenticated curl check, keep the header in a private 0600 file. Write one line, `Authorization: Bearer <secret>`, with sudoedit, then run `sudo curl -H @/PRIVATE/shared-trips/config/api-auth.header https://trips.example.org/api/trips`. Remove that file afterwards if you no longer need it.
 
-Exercise the viewer flow with a fictional account in a separate private browser window (see [section 6](#6-viewer-accounts)):
+Exercise the account flows with fictional accounts in separate private browser windows (see [section 6](#6-accounts-and-roles)):
 
 - A pending account cannot sign in.
-- An approved account sees trips read-only and has no create, import, edit, or account controls.
-- `/mcp` rejects the viewer's session.
-- After you revoke the account, the viewer's next refresh signs them out.
+- An approved viewer sees trips read-only and has no create, import, edit, or account controls.
+- An approved content manager (for example `sample-editor`) can create, edit, import, archive and restore trips and has no *Accounts* section or token controls.
+- `/mcp` rejects every browser session, and a fictional content-manager token works at `/mcp` but is refused at `/api/trips`.
+- After you revoke an account or change its role, its next refresh signs it out and its tokens stop working.
 
 Before using real data, revoke the fictional account and archive the fictional trip. Alternatively, switch SHARED_TRIP_DATA_PATH to a new empty directory and keep the trial directory.
 
-## 6. Viewer accounts
+## 6. Accounts and roles
 
-1. **Create an invitation.** Signed in as owner, choose **Create invitation** under *Viewer accounts*. The single-use code is shown once and expires after 72 hours. The API also accepts `expiresInHours` from 1 to 168.
+1. **Create an invitation.** Signed in as owner, choose **Create invitation** under *Accounts*. The single-use code is shown once and expires after 72 hours. The API also accepts `expiresInHours` from 1 to 168.
 2. **Share the code privately.** Send only the invitation code, never the admin secret. There is no invitation URL.
-3. **The viewer redeems it.** They open the home page, choose *Have an invitation?*, and enter the code with a new username (3-32 lowercase characters) and password (10-128 characters). This creates a **pending** account that cannot sign in.
-4. **Approve the account.** Approving grants read and export access to **every** trip. There is no per-trip membership.
-5. **Revoke when needed.** Revocation immediately invalidates that viewer's active sessions. Approving the account again lets them sign in afresh; it does not revive old sessions.
+3. **The invitee redeems it.** They open the home page, choose *Have an invitation?*, and enter the code with a username (3-32 lowercase characters) and a password (10-128 characters) that they choose privately. This creates a **pending viewer** account that cannot sign in.
+4. **Choose the access level.** Leave it as **Viewer** (read and export every trip), or select **Content manager** and choose **Save access level** (create, edit, delete content in, import, export, archive and restore every trip, current and future). Only the owner can change roles.
+5. **Approve the account.** Approval applies the role to **every** trip. There is no per-trip membership.
+6. **Revoke or change roles when needed.** Either action immediately invalidates that account's active sessions and MCP tokens. Approving the account again lets it sign in afresh; it does not revive old sessions or tokens.
 
-Viewers cannot write, import, manage accounts, or use MCP. Restarting the service or running a restore signs everyone out, but accounts persist in the database.
+Neither role can manage accounts, invitations, roles, tokens, security, backups, restores, or this host, and nobody can permanently purge a trip through the app. Viewers cannot write, import, or use MCP. Restarting the service or running a restore signs everyone out, but accounts and MCP access tokens persist in the database.
+
+**Content-manager MCP tokens (owner only).** On the content manager's row choose **Show assistant access**, enter a label, and choose **Issue token**. The secret is shown once, has a fixed 90-day lifetime, and works only at `/mcp`. Copy it with the explicit **Copy** button directly into the AI client's private credential store on a machine you control, then choose **Done, hide token**. Never send it through chat or put it in this checkout, the env file, or a script. A failed issuance is not retried; check the list before issuing again. To renew, issue a replacement, update the client, confirm it connects, then revoke the old token. Owner-only `GET /api/audit` lists metadata about these actions, without secrets or payloads. See [mcp.md](../references/mcp.md#provisioning-a-content-managers-token-owner-only).
 
 ## 7. Online backup
 
@@ -131,7 +135,7 @@ photos="/PRIVATE/shared-trips/backups/photos-${stamp}.tar"
 sudo test ! -e "$photos" && sudo tar -C /PRIVATE/shared-trips/data -cf "$photos" photos
 ```
 
-The CLI uses SQLite's online backup while the service runs and validates the snapshot. The snapshot contains trips, IDs, versions, archive state, the retry log, viewer accounts (with password hashes), and invitation digests. Treat it as a credential-bearing secret.
+The CLI uses SQLite's online backup while the service runs and validates the snapshot. The snapshot contains trips, IDs, versions, archive state, the retry log, accounts (with password hashes and roles), invitation digests, MCP access-token records, and the audit log. Treat it as a credential-bearing secret.
 
 The backup command needs no input. Redirecting stdin prevents Compose from consuming later commands when this recipe runs inside a script.
 
@@ -184,9 +188,9 @@ The drill never touches live data or the backup directory, needs no secret, and 
 3. If you use private photos, extract the matching photo archive into the new directory.
 4. Point SHARED_TRIP_DATA_PATH at the new directory and run `dc up -d app`.
 5. Keep the previous directory untouched.
-6. Open *Viewer accounts* and revoke again anyone whose access was revoked after the snapshot was taken.
+6. Open *Accounts* and revoke again anyone whose access was revoked after the snapshot was taken, reapply later role changes, and revoke again any MCP token revoked after the snapshot.
 
-The restored database has the account state from snapshot time. Accounts revoked later are approved again, and invitations redeemed later become usable again until they expire.
+The restored database has the account state from snapshot time. Accounts revoked later are approved again, later role changes are undone, MCP tokens revoked later become valid again until they expire, and invitations redeemed later become usable again until they expire.
 
 ## 9. Unclean stops and data-directory ownership
 
@@ -209,9 +213,9 @@ Never run older and newer releases against one data directory. Docker named or b
 2. Take and validate a backup ([section 7](#7-online-backup)) and copy it off-site.
 3. Update the checkout to the reviewed version. Set a new SHARED_TRIP_IMAGE_TAG in the env file; the previous image keeps its old tag.
 4. Run `dc stop app` and confirm that no other container or host process uses the data directory. A graceful stop of an older PID-lock release removes its own lock. A leftover legacy lock is handled as in [section 9](#9-unclean-stops-and-data-directory-ownership).
-5. Run `dc build app && dc up -d app`, then check `dc ps`, the logs, reading, editing, and viewer sign-in. Data and configuration mounts are unchanged. If deploy/Caddyfile changed, run `dc up -d --force-recreate caddy`, because a single-file mount otherwise keeps the old file.
+5. Run `dc build app && dc up -d app`, then check `dc ps`, the logs, reading, editing, viewer sign-in and, if used, content-manager sign-in and MCP tokens. Data and configuration mounts are unchanged. If deploy/Caddyfile changed, run `dc up -d --force-recreate caddy`, because a single-file mount otherwise keeps the old file.
 
-**Schema v3** adds viewer accounts and invitations. The first start on an older database writes `shared-trip.sqlite.before-v3-<time>` into the data directory and migrates in one transaction. Trips, IDs, versions, archive state, and the retry log are unchanged. The pre-migration snapshot is never deleted automatically. Copy it to your backups.
+**Schema v4** adds account roles, MCP access-token records and the audit log to schema v3's viewer accounts and invitations. The first start on an older database writes `shared-trip.sqlite.before-v4-<time>` into the data directory and migrates in one transaction. Trips, IDs, versions, archive state, retry records and account approval states are preserved. Existing accounts become viewers; promote content managers explicitly afterwards. The pre-migration snapshot is never deleted automatically. Copy it to your backups.
 
 **Rollback:** if no schema migration happened, set the old tag and run `dc up -d --no-build app`. Older code refuses a newer schema. In that case:
 
@@ -219,7 +223,9 @@ Never run older and newer releases against one data directory. Docker named or b
 2. With the old image, restore the pre-upgrade snapshot into a new directory ([section 8](#8-restore-drill-into-separate-storage)).
 3. Point SHARED_TRIP_DATA_PATH at the new directory, set the old tag, and start with `--no-build`.
 
-Keep the upgraded directory for analysis. Edits and accounts created after the upgrade are not in that snapshot, so export trips first if needed. A crashed newer release leaves a marker that older releases refuse. Delete that marker only after verifying that every newer process has stopped.
+Keep the upgraded directory for analysis. Edits, accounts, role changes and MCP tokens created after the upgrade are not in that snapshot, so export trips first if needed. After rolling back past the content-manager release, every account is a viewer again and only the admin bearer works at `/mcp`; remove the old tokens from AI clients. Restore into fresh storage and preserve any foreign or legacy ownership marker for diagnosis.
+
+Restoring a snapshot also restores its approval and credential-revocation state. Before reconnecting clients, review credentials that were revoked after the snapshot and revoke them again where needed.
 
 ## Existing proxy
 
@@ -249,7 +255,7 @@ The proxy must:
 
 ## Access model
 
-The owner-held admin secret authorizes everything: every trip, writes, import, account management, and MCP (bearer only). Approved viewers sign in with a username and password and can read and export every trip. They cannot write, and no one can access trip data anonymously.
+The owner-held admin secret authorizes everything: every trip, writes, import, account, role and token management, the audit log, and MCP (bearer only). Approved accounts sign in with a username and password. Viewers can read and export every trip. Content managers can also create, edit, import, archive and restore every trip, and can use MCP only with an owner-issued, 90-day, `/mcp`-only token; they cannot administer accounts, security or this host. No one can access trip data anonymously.
 
 Generic shells (sign-in page, scripts, styles, the empty photo manifest) and `/health` are public and carry no trip data. Publishing this code or template grants no trip access.
 
@@ -263,3 +269,4 @@ The app sends `Referrer-Policy: strict-origin-when-cross-origin`, so external ma
 - Rate limits for sign-in (10 failures per minute) and invitations (10 invalid codes per 15 minutes) are keyed by connection address. Behind Caddy, all clients share Caddy's address, so failures by one client briefly block everyone.
 - The running app can write to the backup mount, so off-site copies are the real protection.
 - Desktop and phone-width Chrome interactions and direct Cache Storage/local-storage inspection passed in the observed trial profile; see the [cache completion report](../doc/Progress/progress_2026_10_14_cpx005_codex_b.md). Physical-phone installation, full pointer/touch regression and named external AI-client integration remain separate checks. Real-data migration requires its own authorization and preservation plan.
+- The live trial above predates content managers, MCP access tokens, `import_trip` and `export_trip`. Their behavior over this template's HTTPS, proxy and CDN path has not been exercised; verify them with fictional accounts and tokens before relying on them.

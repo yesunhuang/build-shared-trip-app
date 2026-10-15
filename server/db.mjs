@@ -5,16 +5,25 @@ import { normalizeContent, applyParsedPlaces } from "./domain/validate.mjs";
 import { resolveAliases } from "./domain/operations.mjs";
 import { applyContentRules } from "./domain/content-rules.mjs";
 import { USERNAME_PATTERN } from "./auth/passwords.mjs";
-import { ACCOUNT_ID_PATTERN, ACCOUNT_STATUSES } from "./auth/accounts.mjs";
+import { ACCOUNT_ID_PATTERN, ACCOUNT_ROLES, ACCOUNT_STATUSES } from "./auth/accounts.mjs";
+import { MCP_TOKEN_ID_PATTERN } from "./auth/mcp-tokens.mjs";
+import { AUDIT_ACTIONS, AUDIT_CHANNELS, AUDIT_OUTCOMES } from "./audit.mjs";
 
 // Schema history:
 //   v1 trips + request_log (days used "plans")
 //   v2 normalized trip content ("slots"), trips_archived index
 //   v3 owner-managed viewer accounts (users) and single-use invitations (digest only)
-export const SCHEMA_VERSION = 3;
+//   v4 users.role ('viewer' default | 'content-manager'), per-account MCP credentials (digest only)
+//      and the bounded, payload-free audit_log
+export const SCHEMA_VERSION = 4;
 const BASE_TABLES = "CREATE TABLE IF NOT EXISTS trips (id TEXT PRIMARY KEY, version INTEGER NOT NULL, archived INTEGER NOT NULL, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS request_log (scope TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(scope,request_id));";
 const ACCOUNT_TABLES = "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('pending','approved','revoked')), session_epoch INTEGER NOT NULL DEFAULT 0, invitation_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); " +
   "CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at TEXT, used_by TEXT);";
+const ROLE_COLUMN = "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer','content-manager'))";
+const V4_TABLES = "CREATE TABLE IF NOT EXISTS mcp_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), label TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, account_epoch INTEGER NOT NULL, created_at TEXT NOT NULL, expires_at INTEGER NOT NULL, revoked_at TEXT, last_used_at TEXT); " +
+  "CREATE INDEX IF NOT EXISTS mcp_tokens_user ON mcp_tokens(user_id); " +
+  "CREATE TABLE IF NOT EXISTS audit_log (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, actor TEXT NOT NULL, channel TEXT NOT NULL, action TEXT NOT NULL, outcome TEXT NOT NULL, reason TEXT, trip_id TEXT, request_id TEXT, version INTEGER, target TEXT, role TEXT);";
+const hasColumn = (db, table, column) => db.prepare("SELECT name FROM pragma_table_info(?)").all(table).some((row) => row.name === column);
 
 export function openDatabase(filename) {
   fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
@@ -51,6 +60,11 @@ export function openDatabase(filename) {
     // v3 only adds tables: trip rows, IDs, versions, archive state and retry records are untouched.
     db.exec(ACCOUNT_TABLES);
     if (old < 3) db.exec("PRAGMA user_version=3");
+    // v4 adds a defaulted column and new tables only. Existing accounts become viewers and keep their
+    // IDs, statuses, hashes and session epochs; trips, versions and retry records are untouched.
+    if (!hasColumn(db, "users", "role")) db.exec(ROLE_COLUMN);
+    db.exec(V4_TABLES);
+    if (old < 4) db.exec("PRAGMA user_version=4");
     db.exec("COMMIT");
   } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
   return db;
@@ -83,6 +97,20 @@ export function validateSnapshot(filename) {
           !ACCOUNT_STATUSES.includes(row.status) || !Number.isInteger(row.session_epoch)) throw new Error("Invalid account in snapshot.");
       }
       db.prepare("SELECT id,token_hash,created_at,expires_at,used_at,used_by FROM invitations LIMIT 1").all();
+    }
+    if (version >= 4) {
+      const users = new Map(db.prepare("SELECT id,role FROM users").all().map((row) => [row.id, row.role]));
+      for (const role of users.values()) if (!ACCOUNT_ROLES.includes(role)) throw new Error("Invalid account role in snapshot.");
+      for (const row of db.prepare("SELECT id,user_id,label,token_hash,account_epoch,created_at,expires_at,revoked_at,last_used_at FROM mcp_tokens").all()) {
+        if (!MCP_TOKEN_ID_PATTERN.test(row.id) || !users.has(row.user_id) || typeof row.label !== "string" || !row.label || row.label.length > 64 ||
+          !/^[0-9a-f]{64}$/.test(row.token_hash) || !Number.isInteger(row.account_epoch) || !Number.isInteger(row.expires_at) ||
+          !Number.isFinite(Date.parse(row.created_at)) || (row.revoked_at !== null && !Number.isFinite(Date.parse(row.revoked_at))) ||
+          (row.last_used_at !== null && !Number.isFinite(Date.parse(row.last_used_at)))) throw new Error("Invalid credential in snapshot.");
+      }
+      for (const row of db.prepare("SELECT seq,at,actor,channel,action,outcome FROM audit_log").all()) {
+        if (!Number.isInteger(row.seq) || !Number.isFinite(Date.parse(row.at)) || typeof row.actor !== "string" || !AUDIT_CHANNELS.includes(row.channel) ||
+          !AUDIT_ACTIONS.includes(row.action) || !AUDIT_OUTCOMES.includes(row.outcome)) throw new Error("Invalid audit event in snapshot.");
+      }
     }
   } finally { db.close(); }
 }

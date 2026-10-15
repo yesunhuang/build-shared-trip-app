@@ -11,7 +11,10 @@ import { serveStatic } from "./static.mjs";
 import { AccountStore, INVITATION_TOKEN_PATTERN, invitationInvalid } from "./auth/accounts.mjs";
 import { boundedPassword, dummyVerify, hashPassword, normalizeUsername, passwordProblem, verifyPassword } from "./auth/passwords.mjs";
 import { AttemptLimiter, SESSION_COOKIE, SESSION_TTL_MS, SessionStore } from "./auth/sessions.mjs";
-import { OWNER, VIEWER, capabilitiesFor, isProtectedMediaPath, viewerMayAccess } from "./auth/policy.mjs";
+import { CONTENT_MANAGER, OWNER, capabilitiesFor, isProtectedMediaPath, mayAccess } from "./auth/policy.mjs";
+import { McpTokenStore } from "./auth/mcp-tokens.mjs";
+import { AuditLog } from "./audit.mjs";
+import { ContentGateway, actorOf } from "./content-access.mjs";
 
 // Private trip photos live in <dataDir>/photos, outside the checkout and every static directory, and
 // are served only by the authenticated media handler below.
@@ -61,9 +64,13 @@ const isObject = (value) => Boolean(value) && typeof value === "object" && !Arra
 const unauthorized = (message = "Authentication required.") => new DomainError("unauthorized",401,message);
 const forbidden = () => new DomainError("forbidden",403,"This action is not available for this account.");
 
+const decodeSegment = (value) => { try { return decodeURIComponent(value); } catch { return ""; } }; // invalid escape: treated as unknown
+
 // Photos default to <config.dataDir>/photos. config.photoDir is an optional, code-only override
-// (tests may use a disposable directory). It is not read from the environment.
+// (tests may use a disposable directory). config.clock is an optional, code-only millisecond clock for
+// credential expiry and audit timestamps (tests inject one). Neither is read from the environment.
 export async function startServer(config) {
+  const clock = typeof config.clock === "function" ? config.clock : Date.now;
   // Data-directory ownership (crash-recoverable SQLite-based ownership) is defined in data-lock.mjs,
   // not here. Startup never deletes a foreign or legacy server.lock: if ownership cannot be taken it
   // fails closed and leaves the data untouched.
@@ -72,22 +79,49 @@ export async function startServer(config) {
   try { db = openDatabase(path.join(config.dataDir,"shared-trip.sqlite")); }
   catch (error) { lock.release(); throw error; }
   const service = new TripService(db);
-  const accounts = new AccountStore(db);
+  const audit = new AuditLog(db, { clock });
+  const accounts = new AccountStore(db, { audit });
+  const tokens = new McpTokenStore(db, { audit });
+  const gateway = new ContentGateway(service, audit);
   const sessions = new SessionStore();
   const loginLimiter = new AttemptLimiter({ limit: 10, windowMs: 60_000, message: "Try signing in again later." });
   const inviteLimiter = new AttemptLimiter({ limit: 10, windowMs: 15 * 60_000, message: "Try again later." });
   const photoDir = path.resolve(config.photoDir || path.join(config.dataDir, PHOTO_SUBDIR));
   const send = (res,status,payload) => { res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}); res.end(JSON.stringify(payload)); };
 
-  // Every protected request re-reads the viewer account, so approval state and revocation apply
-  // immediately to sessions that were issued earlier.
+  // Every protected request re-reads the account, so approval state, role changes and revocation
+  // apply immediately to sessions that were issued earlier.
   function principalFromCookie(key, now) {
     const session = sessions.get(key, now);
     if (!session) return null;
     if (session.role === OWNER) return { role: OWNER, via: "cookie" };
     const account = accounts.sessionRecord(session.userId);
-    if (!account || account.status !== "approved" || account.session_epoch !== session.epoch) { sessions.delete(key); return null; }
-    return { role: VIEWER, via: "cookie", userId: account.id, username: account.username };
+    if (!account || account.status !== "approved" || account.session_epoch !== session.epoch || account.role !== session.role) { sessions.delete(key); return null; }
+    return { role: account.role, via: "cookie", userId: account.id, username: account.username };
+  }
+
+  // Owner bearer first (unchanged and compatible). Any other bearer is tried as a content-manager MCP
+  // credential, which yields a principal only at /mcp. A presented but unusable bearer never falls
+  // back to a cookie session.
+  function principalFromBearer(value, pathname, protectedPath) {
+    if (value && sameSecret(value, config.token)) return { role: OWNER, via: "bearer" };
+    const atMcp = pathname === "/mcp";
+    const credential = value ? tokens.authenticate(value, clock(), { touch: atMcp }) : null;
+    if (!credential) return null;
+    const refuse = (reason) => { if (protectedPath) audit.safeRecord({ actor: credential.userId, channel: atMcp ? "mcp" : "http", action: "auth.refused", outcome: "refused", reason }); return null; };
+    if (!credential.ok) return refuse(credential.reason);
+    if (!atMcp) return refuse("mcp_token_wrong_route");
+    return { role: CONTENT_MANAGER, via: "mcp-token", userId: credential.userId, username: credential.username, tokenId: credential.tokenId };
+  }
+
+  // Owner-only administration: refusals are audited best effort (successes are audited by the stores
+  // inside their transactions).
+  async function administer(action, target, work) {
+    try { return await work(); }
+    catch (error) {
+      audit.safeRecord({ actor: "owner", channel: "http", action, outcome: "refused", reason: error instanceof DomainError ? error.code : "internal_error", target });
+      throw error;
+    }
   }
 
   function serveProtectedMedia(req, res, pathname) {
@@ -109,6 +143,7 @@ export async function startServer(config) {
   }
 
   const server = http.createServer(async (req,res) => {
+    let deniedActor = null; let deniedChannel = "http";
     res.setHeader("X-Content-Type-Options","nosniff");
     // Cross-origin requests (e.g. OpenStreetMap tiles, whose usage policy requires a valid Referer)
     // receive only this origin, never trip IDs or other private paths; HTTPS -> HTTP sends none.
@@ -130,10 +165,12 @@ export async function startServer(config) {
       const secure = allowedOrigin.startsWith("https:") ? "; Secure" : "";
       const authorization = req.headers.authorization || "";
       const match = /^Bearer (.{1,512})$/.exec(authorization);
-      const bearer = Boolean(match && sameSecret(match[1],config.token));
       const cookie = new RegExp("(?:^|;\\s*)" + SESSION_COOKIE + "=([A-Za-z0-9_-]+)").exec(req.headers.cookie || "")?.[1];
+      const media = isProtectedMediaPath(pathname);
+      const protectedPath = pathname === "/mcp" || pathname.startsWith("/api/") || media;
       // A presented but wrong bearer token never falls back to a cookie session.
-      const principal = bearer ? { role: OWNER, via: "bearer" } : /^Bearer\s/i.test(authorization) ? null : principalFromCookie(cookie, now);
+      const principal = /^Bearer\s/i.test(authorization) ? principalFromBearer(match?.[1], pathname, protectedPath) : principalFromCookie(cookie, now);
+      if (principal) { deniedActor = actorOf(principal); deniedChannel = principal.via === "mcp-token" ? "mcp" : "http"; }
       const unsafe = !["GET","HEAD","OPTIONS"].includes(req.method);
       const client = req.socket.remoteAddress || "local";
       const issueSession = (data) => {
@@ -163,8 +200,8 @@ export async function startServer(config) {
         // Re-read after the asynchronous hash: an approval state change during hashing wins.
         const current = accounts.sessionRecord(record.id);
         if (!current || current.status !== "approved") throw new DomainError("access_denied",403,"Access is not available for this account.");
-        issueSession({ role: VIEWER, userId: current.id, epoch: current.session_epoch });
-        send(res,200,{authenticated:true,role:VIEWER,username:current.username}); return;
+        issueSession({ role: current.role, userId: current.id, epoch: current.session_epoch });
+        send(res,200,{authenticated:true,role:current.role,username:current.username}); return;
       }
 
       if (pathname === "/api/accept-invite" && req.method === "POST") {
@@ -182,11 +219,12 @@ export async function startServer(config) {
         send(res,201,accounts.redeemInvitation({ token: invitation, username, passwordHash }, Date.now())); return;
       }
 
-      const media = isProtectedMediaPath(pathname);
-      if (pathname === "/mcp" || pathname.startsWith("/api/") || media) {
-        if (!principal || (pathname === "/mcp" && principal.via !== "bearer")) throw unauthorized();
-        if (unsafe && principal.via !== "bearer" && origin !== allowedOrigin) throw new DomainError("forbidden_origin",403,"Same-origin browser request required.");
-        if (principal.role !== OWNER && !viewerMayAccess(req.method, pathname)) throw forbidden();
+      if (protectedPath) {
+        // Browser sessions (owner or account) never authorize MCP; only the owner bearer or a valid
+        // content-manager credential does.
+        if (!principal || (pathname === "/mcp" && principal.via === "cookie")) throw unauthorized();
+        if (unsafe && principal.via === "cookie" && origin !== allowedOrigin) throw new DomainError("forbidden_origin",403,"Same-origin browser request required.");
+        if (principal.role !== OWNER && !mayAccess(principal, req.method, pathname)) throw forbidden();
       }
       if (media) { serveProtectedMedia(req,res,pathname); return; }
       const requireOwner = () => { if (principal?.role !== OWNER) throw forbidden(); };
@@ -199,36 +237,56 @@ export async function startServer(config) {
         send(res,200,{authenticated:false}); return;
       }
       if (pathname === "/mcp") {
-        requireOwner();
+        if (!(principal.role === OWNER && principal.via === "bearer") && !(principal.role === CONTENT_MANAGER && principal.via === "mcp-token")) throw unauthorized();
         if (req.method !== "POST") { res.setHeader("Allow","POST"); send(res,405,{error:{code:"method_not_allowed",message:"Stateless MCP supports POST."}}); return; }
-        await handleMcp(req,res,await readJSON(req),service); return;
+        await handleMcp(req,res,await readJSON(req),gateway,principal); return;
       }
+      const context = { principal, channel: "http" };
       let result; let status = 200;
-      if (pathname === "/api/trips" && req.method === "GET") result = service.listTrips();
-      else if (pathname === "/api/trips" && req.method === "POST") { requireOwner(); result = service.createTrip(await readJSON(req)); status = 201; }
-      else if (pathname === "/api/import" && req.method === "POST") { requireOwner(); result = service.importTrip(await readJSON(req)); status = 201; }
-      else if (pathname === "/api/invitations" && req.method === "POST") { requireOwner(); result = accounts.createInvitation(await readJSON(req, SMALL_BODY)); status = 201; }
+      if (pathname === "/api/trips" && req.method === "GET") result = gateway.listTrips(context);
+      else if (pathname === "/api/trips" && req.method === "POST") { result = gateway.createTrip(context, await readJSON(req)); status = 201; }
+      else if (pathname === "/api/import" && req.method === "POST") { result = gateway.importTrip(context, await readJSON(req)); status = 201; }
+      else if (pathname === "/api/invitations" && req.method === "POST") { requireOwner(); result = await administer("invitation.create", null, async () => accounts.createInvitation(await readJSON(req, SMALL_BODY))); status = 201; }
       else if (pathname === "/api/users" && req.method === "GET") { requireOwner(); result = accounts.listAccounts(); }
+      else if (pathname === "/api/audit" && req.method === "GET") { requireOwner(); result = audit.list(url.searchParams.get("limit")); }
       else {
-        const account = /^\/api\/users\/([^/]+)\/(approve|revoke)$/.exec(pathname);
+        const account = /^\/api\/users\/([^/]+)\/(approve|revoke|role)$/.exec(pathname);
+        const credentials = /^\/api\/users\/([^/]+)\/mcp-tokens$/.exec(pathname);
+        const credential = /^\/api\/users\/([^/]+)\/mcp-tokens\/([^/]+)\/revoke$/.exec(pathname);
         const trip = /^\/api\/trips\/([^/]+)(?:\/(changes|export))?$/.exec(pathname);
         if (account && req.method === "POST") {
           requireOwner();
-          let id = "";
-          try { id = decodeURIComponent(account[1]); } catch { /* invalid escape: treated as unknown */ }
-          result = account[2] === "approve" ? accounts.approve(id) : accounts.revoke(id);
-          if (account[2] === "revoke") sessions.deleteForAccount(result.account.id);
+          const id = decodeSegment(account[1]);
+          if (account[2] === "role") {
+            const { account: changed, changed: roleChanged } = await administer("account.role", id, async () => accounts.setRole(id, await readJSON(req, SMALL_BODY), clock()));
+            // The store already bumped the epoch; dropping in-memory sessions is additional cleanup.
+            if (roleChanged) sessions.deleteForAccount(changed.id);
+            result = { account: changed };
+          } else {
+            result = await administer("account." + account[2], id, () => account[2] === "approve" ? accounts.approve(id, clock()) : accounts.revoke(id, clock()));
+            if (account[2] === "revoke") sessions.deleteForAccount(result.account.id);
+          }
+        } else if (credentials && ["GET","POST"].includes(req.method)) {
+          requireOwner();
+          const id = decodeSegment(credentials[1]);
+          if (req.method === "GET") result = tokens.list(id);
+          else { result = await administer("token.issue", id, async () => tokens.issue(id, await readJSON(req, SMALL_BODY), clock())); status = 201; }
+        } else if (credential && req.method === "POST") {
+          requireOwner();
+          const id = decodeSegment(credential[1]); const tokenId = decodeSegment(credential[2]);
+          result = await administer("token.revoke", tokenId, () => tokens.revoke(id, tokenId, clock()));
         } else if (trip) {
           const tripId = decodeURIComponent(trip[1]);
-          if (!trip[2] && req.method === "GET") result = service.getTrip(tripId);
-          else if (trip[2] === "export" && req.method === "GET") result = service.exportTrip(tripId);
-          else if (trip[2] === "changes" && req.method === "POST") { requireOwner(); result = service.applyTripChanges({...await readJSON(req),tripId}); }
+          if (!trip[2] && req.method === "GET") result = gateway.getTrip(context, tripId);
+          else if (trip[2] === "export" && req.method === "GET") result = gateway.exportTrip(context, tripId);
+          else if (trip[2] === "changes" && req.method === "POST") result = gateway.applyTripChanges(context, {...await readJSON(req),tripId});
         }
       }
       if (result) { send(res,status,result); return; }
       if (["GET","HEAD"].includes(req.method) && !pathname.startsWith("/api/") && serveStatic(req,res,pathname)) return;
       send(res,404,{error:{code:"not_found",message:"Not found."}});
     } catch (error) {
+      if (error instanceof DomainError && error.code === "forbidden" && !error.audited && deniedActor) audit.safeRecord({ actor: deniedActor, channel: deniedChannel, action: "access.denied", outcome: "refused", reason: "forbidden" });
       if (!res.headersSent) send(res,errorStatus(error),errorBody(error));
       else res.end();
     }
@@ -237,7 +295,7 @@ export async function startServer(config) {
   try { await new Promise((resolve,reject) => {server.once("error",reject); server.listen(config.port,config.host,resolve);}); }
   catch (error) { try { db.close(); } finally { lock.release(); } throw error; }
   let closing;
-  return { server, service, accounts, db, url: config.origin || "http://" + config.host + ":" + server.address().port,
+  return { server, service, accounts, tokens, audit, db, url: config.origin || "http://" + config.host + ":" + server.address().port,
     close: () => closing ??= (async () => {
       await new Promise((resolve) => server.close(() => resolve()));
       try { db.close(); } finally { lock.release(); }
