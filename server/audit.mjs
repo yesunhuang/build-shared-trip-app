@@ -1,7 +1,7 @@
 // Durable, payload-free audit metadata (schema v4 table audit_log in db.mjs).
 //
-// An event records only: timestamp, a stable actor reference ("owner", an account ID or
-// "anonymous"), the channel ("http" or "mcp"), an action from a fixed enum, an outcome from a fixed
+// An event records only: timestamp, a stable actor reference ("owner", "operator", an account ID
+// or "anonymous"), the channel ("http", "mcp" or "operator"), an action from a fixed enum, an outcome from a fixed
 // enum, an optional error code, and optional trip ID / requestId / resulting version / target ID
 // (account or credential ID) / role enum. Every field is checked against a strict pattern before it
 // is stored, so request or response bodies, titles, raw URLs, credentials, digests, invitation
@@ -12,18 +12,22 @@ import { validationError } from "./domain/errors.mjs";
 
 export const AUDIT_ACTIONS = Object.freeze([
   "trip.create", "trip.import", "trip.change", "trip.archive", "trip.unarchive", "trip.replace_content",
+  // Schema v6: owner-only permanent trip deletion (trip ID, requestId and deleted version only).
+  "trip.delete",
   "account.approve", "account.revoke", "account.role", "invitation.create",
   "token.issue", "token.revoke", "access.denied", "auth.refused",
   // Schema v5 OAuth lifecycle (metadata only: client/grant IDs and fixed reason codes).
   "oauth.register", "oauth.login", "oauth.consent", "oauth.token", "oauth.refresh", "oauth.revoke", "oauth.grant.revoke"
 ]);
 export const AUDIT_OUTCOMES = Object.freeze(["accepted", "replayed", "unchanged", "refused"]);
-export const AUDIT_CHANNELS = Object.freeze(["http", "mcp"]);
+// "operator" (schema v6) marks host-operator maintenance run offline through server/cli/*, never a
+// network request; such events use the fixed actor "operator".
+export const AUDIT_CHANNELS = Object.freeze(["http", "mcp", "operator"]);
 export const MAX_AUDIT_EVENTS = 5000;
 export const DEFAULT_AUDIT_LIMIT = 100;
 export const MAX_AUDIT_LIMIT = 500;
 
-const ACTOR = /^(?:owner|anonymous|usr_[A-Za-z0-9_-]{8,40})$/;
+const ACTOR = /^(?:owner|operator|anonymous|usr_[A-Za-z0-9_-]{8,40})$/;
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const REASON = /^[a-z][a-z_]{0,47}$/;
 const TARGET = /^(?:usr|inv|mct|ocl|oag)_[A-Za-z0-9_-]{8,40}$/;

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync, backup } from "node:sqlite";
-import { normalizeContent, applyParsedPlaces } from "./domain/validate.mjs";
+import { normalizeContent, applyParsedPlaces, isValidId } from "./domain/validate.mjs";
 import { resolveAliases } from "./domain/operations.mjs";
 import { applyContentRules } from "./domain/content-rules.mjs";
 import { USERNAME_PATTERN } from "./auth/passwords.mjs";
@@ -18,7 +18,11 @@ import { AUDIT_ACTIONS, AUDIT_CHANNELS, AUDIT_OUTCOMES } from "./audit.mjs";
 //      and the bounded, payload-free audit_log
 //   v5 OAuth 2.1 tables only (registered public clients, grants, one-time codes and tokens, digest
 //      only). Every earlier table, row, ID, version, epoch and retry record is untouched.
-export const SCHEMA_VERSION = 5;
+//   v6 trip_tombstones only (owner-only permanent deletion): stable trip ID, deleted version and
+//      deletion time, never trip content. A tombstoned ID is never reused. Migration adds the empty
+//      table; every existing row (trips, retry records, accounts, credentials, grants, audit) is
+//      untouched.
+export const SCHEMA_VERSION = 6;
 const BASE_TABLES = "CREATE TABLE IF NOT EXISTS trips (id TEXT PRIMARY KEY, version INTEGER NOT NULL, archived INTEGER NOT NULL, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS request_log (scope TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(scope,request_id));";
 const ACCOUNT_TABLES = "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('pending','approved','revoked')), session_epoch INTEGER NOT NULL DEFAULT 0, invitation_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); " +
   "CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at TEXT, used_by TEXT);";
@@ -32,13 +36,16 @@ const V5_TABLES = "CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY
   "CREATE TABLE IF NOT EXISTS oauth_codes (code_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), user_id TEXT NOT NULL REFERENCES users(id), account_epoch INTEGER NOT NULL, redirect_uri TEXT NOT NULL, resource TEXT NOT NULL, scope TEXT NOT NULL, code_challenge TEXT NOT NULL, created_at TEXT NOT NULL, expires_at INTEGER NOT NULL, grant_expires_at INTEGER NOT NULL, used_at TEXT, grant_id TEXT REFERENCES oauth_grants(id)); " +
   "CREATE TABLE IF NOT EXISTS oauth_tokens (token_hash TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('access','refresh')), grant_id TEXT NOT NULL REFERENCES oauth_grants(id), created_at TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER, revoked_at TEXT); " +
   "CREATE INDEX IF NOT EXISTS oauth_tokens_grant ON oauth_tokens(grant_id);";
+const V6_TABLES = "CREATE TABLE IF NOT EXISTS trip_tombstones (id TEXT PRIMARY KEY, deleted_version INTEGER NOT NULL CHECK (deleted_version > 0), deleted_at TEXT NOT NULL);";
 const hasColumn = (db, table, column) => db.prepare("SELECT name FROM pragma_table_info(?)").all(table).some((row) => row.name === column);
 
 export function openDatabase(filename) {
   fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(filename);
   fs.chmodSync(filename, 0o600);
-  db.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON");
+  // secure_delete (per connection, no schema change) overwrites freed pages, so a permanently deleted
+  // trip's bytes do not linger in the main database file once SQLite checkpoints its WAL.
+  db.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON");
   const old = db.prepare("PRAGMA user_version").get().user_version;
   if (old > SCHEMA_VERSION) { db.close(); throw new Error("Database requires a newer application."); }
   // A pre-upgrade snapshot is kept for every older schema and is never deleted automatically.
@@ -80,6 +87,9 @@ export function openDatabase(filename) {
     // v5 adds OAuth tables only (CREATE ... IF NOT EXISTS, so re-running is a no-op).
     db.exec(V5_TABLES);
     if (old < 5) db.exec("PRAGMA user_version=5");
+    // v6 adds the deletion tombstone table only (CREATE ... IF NOT EXISTS, so re-running is a no-op).
+    db.exec(V6_TABLES);
+    if (old < 6) db.exec("PRAGMA user_version=6");
     db.exec("COMMIT");
   } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
   return db;
@@ -128,7 +138,29 @@ export function validateSnapshot(filename) {
       }
     }
     if (version >= 5) validateOAuthTables(db);
+    if (version >= 6) validateTombstones(db);
   } finally { db.close(); }
+}
+
+// Schema v6: a tombstone holds only a valid stable trip ID, a positive deleted version and a valid
+// time, and its ID must not also be a live trip. Retry records of a deleted trip must be redacted:
+// none may still return that trip's content.
+function validateTombstones(db) {
+  const deleted = new Set();
+  for (const row of db.prepare("SELECT id,deleted_version,deleted_at FROM trip_tombstones").all()) {
+    if (!isValidId(row.id) || !Number.isSafeInteger(row.deleted_version) || row.deleted_version < 1 || !isTime(row.deleted_at)) throw new Error("Invalid trip tombstone in snapshot.");
+    deleted.add(row.id);
+  }
+  if (!deleted.size) return;
+  const live = db.prepare("SELECT id FROM trips WHERE id=?");
+  for (const id of deleted) if (live.get(id)) throw new Error("Invalid trip tombstone in snapshot.");
+  for (const row of db.prepare("SELECT scope,result FROM request_log").all()) {
+    let result = null;
+    try { result = JSON.parse(row.result); } catch { throw new Error("Invalid retry record in snapshot."); }
+    if (result?.deletedTrip) continue;
+    const tripId = row.scope.startsWith("trip:") ? row.scope.slice(5) : (row.scope === "create" || row.scope === "import") ? result?.trip?.id : null;
+    if (tripId && deleted.has(tripId)) throw new Error("Unredacted retry record for a deleted trip in snapshot.");
+  }
 }
 
 const isTime = (value) => typeof value === "string" && Number.isFinite(Date.parse(value));

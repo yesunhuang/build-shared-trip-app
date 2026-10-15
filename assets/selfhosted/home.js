@@ -1,4 +1,4 @@
-import { hostedApi, newRequestId, downloadJSON, exportFilename, safeNextPath, LANGUAGE_STORAGE_KEY, logoutAndLeave, finishPendingLogout, signoutPending, sessionCanEdit, sessionCanImport, sessionCanManageAccounts, ACCOUNT_ROLES } from "/hosted-client.js?v=__CACHE_VERSION__";
+import { hostedApi, requestJSON, WRITE_TIMEOUT_MS, newRequestId, downloadJSON, exportFilename, safeNextPath, LANGUAGE_STORAGE_KEY, logoutAndLeave, finishPendingLogout, signoutPending, sessionCanEdit, sessionCanImport, sessionCanManageAccounts, ACCOUNT_ROLES } from "/hosted-client.js?v=__CACHE_VERSION__";
 // Sign-in values, passwords and invitation codes stay in form fields only: they are cleared after
 // each submission and never written to browser storage. Role-based controls follow /api/session;
 // the server enforces the same permissions independently.
@@ -54,7 +54,21 @@ const more = {
     grantCreated: "Connected {time}", grantEnds: "Ends {time}", grantEnded: "Ended {time}", grantRevokedAt: "Revoked {time}",
     revokeGrant: "Revoke browser connection {name}",
     grantRevokedNote: "Browser connection revoked. The assistant must sign in and approve again to reconnect.",
-    grantRevokeFailed: "The browser connection was not revoked. It was not retried automatically; check the list before trying again."
+    grantRevokeFailed: "The browser connection was not revoked. It was not retried automatically; check the list before trying again.",
+    deleteTrip: "Delete", deleteTripFor: "Delete trip {title}",
+    deleteTitle: "Delete “{title}”?",
+    deleteWarning: "This permanently removes the whole trip for everyone, including every day, plan, reminder, note and link in it. It cannot be undone in the app.",
+    deleteTip: "To keep a copy, export it first. To only hide it, archive it instead.",
+    deleteConfirm: "Delete trip", deleting: "Deleting…", deleteRetry: "Try again", deleteCheck: "Check status", checking: "Checking…", close: "Close",
+    deleted: "“{title}” was deleted.",
+    deleteConflict: "“{title}” changed after you opened this, so nothing was deleted. The list now shows the latest version. Review it, then choose Delete again if you still want to remove it.",
+    deleteUncertain: "No confirmation came back, so it is not known whether “{title}” was deleted. Nothing was retried automatically. Choose Check status to look again, or Try again to repeat this same deletion.",
+    deleteStillThere: "“{title}” is still in your trips, so it has not been deleted. You can try again or close this.",
+    deleteCheckFailed: "The status could not be checked. Check your connection, then try again.",
+    deleteNotSent: "Nothing was deleted because the connection is unavailable. Check your connection, then try again.",
+    deleteFailed: "“{title}” was not deleted. You can try again or close this.",
+    deleteGone: "“{title}” is no longer in your trips. It may already have been deleted.",
+    deleteOwnerOnly: "Only the owner can delete trips."
   },
   "zh-Hans": {
     managerNote: "内容管理者权限：你可以创建、编辑、导入、导出、归档和恢复所有旅行。账户和安全设置仍由所有者管理。",
@@ -86,7 +100,21 @@ const more = {
     grantCreated: "连接于 {time}", grantEnds: "到期：{time}", grantEnded: "已于 {time} 结束", grantRevokedAt: "撤销于 {time}",
     revokeGrant: "撤销浏览器连接 {name}",
     grantRevokedNote: "浏览器连接已撤销。助手需要重新登录并同意才能再次连接。",
-    grantRevokeFailed: "浏览器连接未能撤销，系统没有自动重试。请先检查列表再重试。"
+    grantRevokeFailed: "浏览器连接未能撤销，系统没有自动重试。请先检查列表再重试。",
+    deleteTrip: "删除", deleteTripFor: "删除旅行 {title}",
+    deleteTitle: "删除“{title}”？",
+    deleteWarning: "这会为所有人永久删除整个旅行，包括其中的每一天、行程、提醒、备注和链接。应用内无法撤销。",
+    deleteTip: "如需保留副本，请先导出。如只想隐藏，请改为归档。",
+    deleteConfirm: "删除旅行", deleting: "正在删除…", deleteRetry: "重试", deleteCheck: "检查状态", checking: "正在检查…", close: "关闭",
+    deleted: "已删除“{title}”。",
+    deleteConflict: "“{title}”在你打开此确认后有了更改，因此没有删除任何内容。列表现在显示最新版本。请先查看，如仍要删除，再次选择“删除”。",
+    deleteUncertain: "没有收到确认，无法确定“{title}”是否已删除。系统没有自动重试。请选择“检查状态”重新查看，或选择“重试”再次执行同一删除。",
+    deleteStillThere: "“{title}”仍在你的旅行中，尚未删除。你可以重试或关闭此窗口。",
+    deleteCheckFailed: "无法检查状态。请检查网络连接后重试。",
+    deleteNotSent: "网络连接不可用，没有删除任何内容。请检查网络连接后重试。",
+    deleteFailed: "“{title}”未删除。你可以重试或关闭此窗口。",
+    deleteGone: "“{title}”已不在你的旅行中，可能已被删除。",
+    deleteOwnerOnly: "只有所有者可以删除旅行。"
   },
   "zh-Hant": {
     managerNote: "內容管理者權限：你可以建立、編輯、匯入、匯出、封存和還原所有旅行。帳戶和安全設定仍由擁有者管理。",
@@ -118,7 +146,21 @@ const more = {
     grantCreated: "連線於 {time}", grantEnds: "到期：{time}", grantEnded: "已於 {time} 結束", grantRevokedAt: "撤銷於 {time}",
     revokeGrant: "撤銷瀏覽器連線 {name}",
     grantRevokedNote: "瀏覽器連線已撤銷。助理需要重新登入並同意才能再次連線。",
-    grantRevokeFailed: "瀏覽器連線未能撤銷，系統沒有自動重試。請先檢查清單再重試。"
+    grantRevokeFailed: "瀏覽器連線未能撤銷，系統沒有自動重試。請先檢查清單再重試。",
+    deleteTrip: "刪除", deleteTripFor: "刪除旅行 {title}",
+    deleteTitle: "刪除「{title}」？",
+    deleteWarning: "這會為所有人永久刪除整個旅行，包括其中的每一天、行程、提醒、備註和連結。應用程式內無法復原。",
+    deleteTip: "如需保留副本，請先匯出。如只想隱藏，請改為封存。",
+    deleteConfirm: "刪除旅行", deleting: "正在刪除…", deleteRetry: "重試", deleteCheck: "檢查狀態", checking: "正在檢查…", close: "關閉",
+    deleted: "已刪除「{title}」。",
+    deleteConflict: "「{title}」在你開啟此確認後有了變更，因此沒有刪除任何內容。清單現在顯示最新版本。請先檢視，如仍要刪除，再次選擇「刪除」。",
+    deleteUncertain: "沒有收到確認，無法確定「{title}」是否已刪除。系統沒有自動重試。請選擇「檢查狀態」重新查看，或選擇「重試」再次執行同一刪除。",
+    deleteStillThere: "「{title}」仍在你的旅行中，尚未刪除。你可以重試或關閉此視窗。",
+    deleteCheckFailed: "無法檢查狀態。請檢查網路連線後重試。",
+    deleteNotSent: "網路連線無法使用，沒有刪除任何內容。請檢查網路連線後重試。",
+    deleteFailed: "「{title}」未刪除。你可以重試或關閉此視窗。",
+    deleteGone: "「{title}」已不在你的旅行中，可能已被刪除。",
+    deleteOwnerOnly: "只有擁有者可以刪除旅行。"
   },
   ja: {
     managerNote: "コンテンツ管理者：すべての旅行の作成・編集・インポート・エクスポート・アーカイブ・復元ができます。アカウントとセキュリティの設定はオーナーが管理します。",
@@ -150,7 +192,21 @@ const more = {
     grantCreated: "接続：{time}", grantEnds: "期限：{time}", grantEnded: "終了：{time}", grantRevokedAt: "取り消し：{time}",
     revokeGrant: "ブラウザー接続「{name}」を取り消す",
     grantRevokedNote: "ブラウザー接続を取り消しました。再接続するには、アシスタントで再度サインインして承認する必要があります。",
-    grantRevokeFailed: "ブラウザー接続を取り消せませんでした。自動では再試行していません。一覧を確認してから再度お試しください。"
+    grantRevokeFailed: "ブラウザー接続を取り消せませんでした。自動では再試行していません。一覧を確認してから再度お試しください。",
+    deleteTrip: "削除", deleteTripFor: "旅行「{title}」を削除",
+    deleteTitle: "「{title}」を削除しますか？",
+    deleteWarning: "旅行全体（すべての日、予定、リマインダー、メモ、リンク）が全員から完全に削除されます。アプリ内で元に戻すことはできません。",
+    deleteTip: "コピーを残すには、先にエクスポートしてください。非表示にするだけなら、代わりにアーカイブしてください。",
+    deleteConfirm: "旅行を削除", deleting: "削除中…", deleteRetry: "再試行", deleteCheck: "状態を確認", checking: "確認中…", close: "閉じる",
+    deleted: "「{title}」を削除しました。",
+    deleteConflict: "確認画面を開いた後に「{title}」が変更されたため、何も削除していません。一覧に最新の内容が表示されています。確認したうえで、まだ削除する場合はもう一度「削除」を選んでください。",
+    deleteUncertain: "確認の応答がなかったため、「{title}」が削除されたかどうか分かりません。自動では再試行していません。「状態を確認」で確認するか、「再試行」で同じ削除をもう一度実行してください。",
+    deleteStillThere: "「{title}」はまだ旅行一覧にあり、削除されていません。再試行するか、閉じてください。",
+    deleteCheckFailed: "状態を確認できませんでした。接続を確認してから再度お試しください。",
+    deleteNotSent: "接続できないため、何も削除していません。接続を確認してから再度お試しください。",
+    deleteFailed: "「{title}」は削除されませんでした。再試行するか、閉じてください。",
+    deleteGone: "「{title}」は旅行一覧にありません。すでに削除された可能性があります。",
+    deleteOwnerOnly: "旅行を削除できるのはオーナーだけです。"
   }
 };
 const LABEL_MAX = 60;
@@ -169,10 +225,172 @@ const text = (key, values = {}) => fill((more[language] || more.en)[key] ?? more
 const when = (value) => { const date = new Date(value); return Number.isNaN(date.valueOf()) ? "" : date.toLocaleString(language); };
 const roleOf = (account) => ACCOUNT_ROLES.includes(account?.role) ? account.role : "viewer";
 const isApprovedManager = (account) => account?.status === "approved" && account?.role === "content-manager";
+// Owner-only whole-trip deletion. The card control and its confirmation exist only while the
+// current session role is "owner": content managers can edit every trip but never delete one, and
+// the server enforces the same rule independently. The owner role is checked again with a fresh
+// session read right before anything is sent. A confirmed deletion sends the version shown on the
+// card when the confirmation opened plus one request id kept in page memory only, so an explicit
+// retry after an unknown outcome repeats exactly the same request. Nothing is retried
+// automatically, nothing about a deletion is written to browser storage, and answers that arrive
+// after sign-out or a role/session change are discarded.
+let deleteFlow = null;
+// tripId -> {version, requestId} for deletions that were sent but whose outcome is not known.
+const deleteAttempts = new Map();
+const isOwnerSession = () => loggedIn && session?.role === "owner";
+const deletableVersion = (value) => Number.isSafeInteger(value) && value >= 1;
+function deleteButton(trip) {
+  const node=document.createElement("button");node.type="button";node.className="danger-action";node.textContent=text("deleteTrip");
+  node.setAttribute("aria-label",text("deleteTripFor",{title:trip.title}));node.setAttribute("aria-haspopup","dialog");node.dataset.deleteTrip=trip.id;
+  node.addEventListener("click",()=>openDelete(trip));
+  return node;
+}
+function showDialog(dialog) {
+  if (typeof dialog.showModal === "function") { try { dialog.showModal(); return; } catch {} }
+  dialog.setAttribute("open", "");
+}
+// `trip` is the summary the card was rendered from, so its version is the one the owner saw.
+function openDelete(trip) {
+  if (!isOwnerSession() || deleteFlow || busy || !deletableVersion(trip.version)) return;
+  const prior = deleteAttempts.get(trip.id);
+  const flow = { tripId: trip.id, title: String(trip.title ?? ""), version: trip.version,
+    requestId: prior?.version === trip.version ? prior.requestId : newRequestId("delete"),
+    phase: "confirm", sent: false, checking: false, messageKey: "", dialog: null, nodes: {} };
+  const dialog=document.createElement("dialog");dialog.className="delete-dialog";dialog.setAttribute("role","alertdialog");
+  dialog.setAttribute("aria-labelledby","delete-dialog-title");dialog.setAttribute("aria-describedby","delete-dialog-warning");
+  const heading=document.createElement("h2");heading.id="delete-dialog-title";
+  const warning=document.createElement("p");warning.id="delete-dialog-warning";warning.className="delete-warning";
+  const tip=document.createElement("p");tip.className="note";
+  const feedback=document.createElement("p");feedback.className="delete-feedback";feedback.setAttribute("role","alert");
+  const make=(className,handler)=>{const node=document.createElement("button");node.type="button";node.className=className;node.addEventListener("click",handler);return node;};
+  const dismiss=()=>{ if (deleteFlow === flow && flow.phase !== "sending") closeDelete(); };
+  const cancel=make("secondary delete-cancel",dismiss);
+  const check=make("secondary delete-check",checkDelete);
+  const confirm=make("danger delete-confirm",submitDelete);
+  const actions=document.createElement("div");actions.className="actions";actions.append(cancel,check,confirm);
+  dialog.append(heading,warning,tip,feedback,actions);
+  // Escape cancels, except while a request is in flight.
+  const escape=(event)=>{ event.preventDefault(); dismiss(); };
+  dialog.addEventListener("cancel",escape);
+  dialog.addEventListener("keydown",(event)=>{ if (event.key === "Escape") escape(event); });
+  // If the browser closes the dialog while a request is in flight, show it again so the outcome is not lost.
+  dialog.addEventListener("close",()=>{ if (deleteFlow !== flow) return; if (flow.phase === "sending") showDialog(dialog); else closeDelete(); });
+  flow.dialog=dialog;flow.nodes={heading,warning,tip,feedback,cancel,check,confirm};
+  deleteFlow=flow;document.body.append(dialog);renderDeleteDialog();showDialog(dialog);
+  cancel.focus();
+}
+function renderDeleteDialog() {
+  const flow = deleteFlow; if (!flow) return;
+  const { heading, warning, tip, feedback, cancel, check, confirm } = flow.nodes;
+  const sending = flow.phase === "sending";
+  heading.textContent = text("deleteTitle", { title: flow.title });
+  warning.textContent = text("deleteWarning"); tip.textContent = text("deleteTip");
+  feedback.textContent = flow.messageKey ? text(flow.messageKey, { title: flow.title }) : ""; feedback.hidden = !flow.messageKey;
+  // Once something was sent, closing no longer cancels anything.
+  cancel.textContent = text(flow.sent ? "close" : "cancel");
+  check.hidden = !(flow.phase === "uncertain" || flow.checking); check.textContent = text(flow.checking ? "checking" : "deleteCheck");
+  confirm.hidden = flow.phase === "conflict";
+  confirm.textContent = text(sending && !flow.checking ? "deleting" : flow.sent ? "deleteRetry" : "deleteConfirm");
+  for (const node of [cancel, check, confirm]) node.disabled = sending;
+  flow.dialog.setAttribute("aria-busy", String(sending));
+}
+function setDeletePhase(flow, phase, messageKey) { flow.phase = phase; flow.messageKey = messageKey; renderDeleteDialog(); }
+function focusTripsHeading() {
+  const heading = byId("trips").querySelector("h1"); if (!heading || byId("trips").hidden) return;
+  heading.tabIndex = -1; heading.focus();
+}
+function closeDelete({ focus = true } = {}) {
+  const flow = deleteFlow; if (!flow) return;
+  deleteFlow = null;
+  try { if (flow.dialog.open) flow.dialog.close(); } catch {}
+  flow.dialog.remove();
+  if (!focus) return;
+  const origin = [...byId("list").querySelectorAll("[data-delete-trip]")].find((node) => node.dataset.deleteTrip === flow.tripId);
+  if (origin && !origin.disabled) origin.focus(); else focusTripsHeading();
+}
+function clearDeleteState() { deleteAttempts.clear(); closeDelete({ focus: false }); }
+// Never throws. Classifies the single attempt; it is never repeated here.
+async function sendDelete(flow) {
+  try {
+    const current = await hostedApi.session();
+    if (deleteFlow !== flow) return { kind: "stale" };
+    session = current;
+    if (current?.role !== "owner") return { kind: "notOwner" };
+  } catch (error) {
+    if (error?.status === 401) return { kind: "signedOut" };
+    return { kind: flow.sent ? "uncertain" : "notSent" };
+  }
+  flow.sent = true; deleteAttempts.set(flow.tripId, { version: flow.version, requestId: flow.requestId });
+  try {
+    const result = await requestJSON("/api/trips/" + encodeURIComponent(flow.tripId), { method: "DELETE", body: { requestId: flow.requestId, expectedVersion: flow.version }, timeoutMs: WRITE_TIMEOUT_MS });
+    return result?.deleted === true && result?.tripId === flow.tripId ? { kind: "deleted" } : { kind: "uncertain" };
+  } catch (error) {
+    const code = error?.status;
+    if (code === 401) return { kind: "signedOut" };
+    if (code === 403) return { kind: "notOwner" };
+    if (code === 404 || code === 410) return { kind: "gone" };
+    if (code === 409) return { kind: "conflict" };
+    if (!code || code === 408 || code >= 500) return { kind: "uncertain" };
+    return { kind: "failed" };
+  }
+}
+async function applyDeleteOutcome(flow, outcome) {
+  const title = flow.title;
+  switch (outcome.kind) {
+    case "stale": return;
+    case "signedOut": signedOut(); return;
+    case "notOwner": clearDeleteState(); await load(); status(text("deleteOwnerOnly"), true); return;
+    case "deleted": case "gone":
+      deleteAttempts.delete(flow.tripId);
+      summaries = summaries.filter((trip) => trip.id !== flow.tripId);
+      closeDelete({ focus: false }); render(); focusTripsHeading();
+      await load();
+      status(text(outcome.kind === "deleted" ? "deleted" : "deleteGone", { title })); return;
+    case "conflict":
+      // Nothing was deleted; show the latest trip instead of retrying with a newer version.
+      deleteAttempts.delete(flow.tripId);
+      setDeletePhase(flow, "conflict", "deleteConflict"); flow.nodes.cancel.focus();
+      await load(); return;
+    case "uncertain": setDeletePhase(flow, "uncertain", "deleteUncertain"); flow.nodes.check.focus(); return;
+    case "notSent": setDeletePhase(flow, flow.sent ? "uncertain" : "confirm", flow.sent ? "deleteUncertain" : "deleteNotSent"); flow.nodes.confirm.focus(); return;
+    default: setDeletePhase(flow, "failed", "deleteFailed"); flow.nodes.confirm.focus();
+  }
+}
+async function submitDelete() {
+  const flow = deleteFlow;
+  if (!flow || busy || !["confirm", "uncertain", "failed"].includes(flow.phase)) return;
+  if (!isOwnerSession()) { clearDeleteState(); render(); return; }
+  busy = true; flow.phase = "sending"; flow.messageKey = ""; renderDeleteDialog();
+  let outcome;
+  try { outcome = await sendDelete(flow); } finally { busy = false; }
+  if (deleteFlow !== flow) return;
+  await applyDeleteOutcome(flow, outcome);
+}
+// Explicit, read-only status check after an unknown outcome.
+async function checkDelete() {
+  const flow = deleteFlow;
+  if (!flow || busy || flow.phase !== "uncertain") return;
+  if (!isOwnerSession()) { clearDeleteState(); render(); return; }
+  busy = true; flow.phase = "sending"; flow.checking = true; renderDeleteDialog();
+  let trips = null; let failure = null;
+  try { const result = await hostedApi.listTrips(); if (!Array.isArray(result?.trips)) throw new Error("unexpected"); trips = result.trips; }
+  catch (error) { failure = error; }
+  finally { busy = false; }
+  if (deleteFlow !== flow) return;
+  flow.checking = false;
+  if (failure?.status === 401) { signedOut(); return; }
+  if (!trips) { setDeletePhase(flow, "uncertain", "deleteCheckFailed"); flow.nodes.check.focus(); return; }
+  summaries = trips;
+  const current = trips.find((trip) => trip.id === flow.tripId);
+  if (!current) { await applyDeleteOutcome(flow, { kind: "deleted" }); return; }
+  if (current.version !== flow.version) { await applyDeleteOutcome(flow, { kind: "conflict" }); return; }
+  flow.phase = "uncertain"; flow.messageKey = "deleteStillThere"; render(); flow.nodes.confirm.focus();
+}
 function render() {
   document.documentElement.lang = language; byId("language").value = language;
   document.querySelectorAll("[data-text]").forEach((node) => {node.textContent=text(node.dataset.text);});
   const canEdit = loggedIn && sessionCanEdit(session); const canImport = loggedIn && sessionCanImport(session); const canManage = loggedIn && sessionCanManageAccounts(session);
+  // Whole-trip deletion is gated on the owner role itself, not on edit rights.
+  const canDelete = isOwnerSession(); if (!canDelete) clearDeleteState(); else renderDeleteDialog();
   byId("logout").textContent=text("logout"); byId("logout").hidden=!loggedIn;
   byId("login").hidden=loggedIn; byId("trips").hidden=!loggedIn;
   byId("create").hidden=!canEdit; byId("import-control").hidden=!canImport; byId("import").disabled=!canImport;
@@ -192,6 +410,7 @@ function render() {
     if (canEdit) actions.append(button(text("edit"),async()=>{const {trip:full}=await hostedApi.getTrip(trip.id);edit(full);}),
       button(text(trip.archived?"restore":"archive"),async()=>{await hostedApi.applyChanges(trip.id,trip.version,[{type:"archive_trip",archived:!trip.archived}]);await load();}));
     actions.append(button(text("export"),async()=>downloadJSON(await hostedApi.exportTrip(trip.id),exportFilename(trip))));
+    if (canDelete && deletableVersion(trip.version)) actions.append(deleteButton(trip));
     card.append(heading,dates,actions);byId("list").append(card);
   }
 }
@@ -485,8 +704,8 @@ function button(label,action) {
   node.addEventListener("click",()=>run(action));return node;
 }
 // Clears everything protected that is visible or held in page memory (trips, accounts,
-// invitation code, token secret, unsaved owner choices).
-function clearOwnerState() {tokenNotice=null;inviteNotice=null;roleDrafts.clear();tokenPanels.clear();labelDrafts.clear();accountsKey="";}
+// invitation code, token secret, unsaved owner choices, an open or unresolved trip deletion).
+function clearOwnerState() {tokenNotice=null;inviteNotice=null;roleDrafts.clear();tokenPanels.clear();labelDrafts.clear();accountsKey="";clearDeleteState();}
 function signedOut() {loggedIn=false;session=null;summaries=[];directory={accounts:[],invitations:[]};clearOwnerState();render();}
 async function run(action) {
   if(busy)return;busy=true;document.querySelectorAll("button").forEach((b)=>b.disabled=true);

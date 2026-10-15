@@ -6,14 +6,18 @@
 // audited inside the domain transaction (TripService.transact), so the audit never reports a write
 // that did not commit. Refusals are audited best effort after the rollback. Audit events never
 // contain bodies, titles or credentials; see audit.mjs.
+//
+// Permanent trip deletion (deleteTrip, audit action trip.delete) is owner-only: an owner cookie or
+// owner bearer over HTTP, or the offline host-operator CLI (channel "operator"). It is never
+// reachable through MCP and is not a change operation, so content managers cannot delete trips.
 import { DomainError, validationError } from "./domain/errors.mjs";
-import { OWNER, canEditContent } from "./auth/policy.mjs";
+import { OPERATOR, OWNER, canDeleteTrips, canEditContent } from "./auth/policy.mjs";
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const unauthorized = () => new DomainError("unauthorized", 401, "Authentication required.");
 const forbidden = () => new DomainError("forbidden", 403, "This action is not available for this account.");
 
-export const actorOf = (principal) => (!principal ? "anonymous" : principal.role === OWNER ? "owner" : principal.userId);
+export const actorOf = (principal) => (!principal ? "anonymous" : principal.role === OWNER ? (principal.via === OPERATOR ? OPERATOR : "owner") : principal.userId);
 
 function changeAction(changes) {
   if (!Array.isArray(changes) || !changes.length) return "trip.change";
@@ -43,14 +47,19 @@ export class ContentGateway {
   applyTripChanges(context, input) {
     return this.write(context, changeAction(input?.changes), input, (record) => this.service.applyTripChanges(input, record));
   }
+  /** input: { tripId, requestId, expectedVersion }. Owner-only permanent deletion. */
+  deleteTrip(context, input) {
+    return this.write(context, "trip.delete", input, (record) => this.service.deleteTrip(input, record), canDeleteTrips);
+  }
 
-  write({ principal, channel }, action, input, run) {
+  write({ principal, channel }, action, input, run, allowed = canEditContent) {
     const base = { actor: actorOf(principal), channel, action, requestId: isObject(input) ? input.requestId : null, tripId: isObject(input) ? input.tripId : null };
     try {
       if (!principal) throw unauthorized();
-      if (!canEditContent(principal)) throw forbidden();
+      if (!allowed(principal, channel)) throw forbidden();
       if (!isObject(input)) throw validationError("The request body must be a JSON object.");
-      return run((result, replayed) => this.audit.record({ ...base, tripId: result?.trip?.id ?? base.tripId, version: result?.trip?.version, outcome: replayed ? "replayed" : "accepted" }));
+      return run((result, replayed) => this.audit.record({ ...base, tripId: result?.trip?.id ?? result?.tripId ?? base.tripId,
+        version: result?.trip?.version ?? result?.version, outcome: replayed ? "replayed" : "accepted" }));
     } catch (error) {
       this.audit.safeRecord({ ...base, outcome: "refused", reason: error instanceof DomainError ? error.code : "internal_error" });
       if (error instanceof DomainError) error.audited = true;

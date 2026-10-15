@@ -30,12 +30,42 @@ Every account has one role, `viewer` or `content-manager`. The owner is not an a
 
 | Principal | How it authenticates | May do |
 | --- | --- | --- |
-| Owner | `Authorization: Bearer <admin secret>`, or browser **Owner sign-in** with that secret | Everything: trip content plus invitations, approve/revoke, role changes, access tokens, audit. MCP accepts the admin secret **only** as a bearer header, not an owner cookie. |
+| Owner | `Authorization: Bearer <admin secret>`, or browser **Owner sign-in** with that secret | Everything: trip content, permanent trip deletion (HTTP only), invitations, approve/revoke, role changes, access tokens, audit. MCP accepts the admin secret **only** as a bearer header, not an owner cookie. |
 | Approved content manager | Browser username/password sign-in; for MCP, a separate owner-issued access token, or an OAuth grant if this account is the one named by `SHARED_TRIP_OAUTH_USERNAME` | Owner-like trip content work on **every** trip, current and future: read (including protected photos), export, create, edit, delete content, import, archive and restore. No account, invitation, role, token, OAuth-grant, security, or infrastructure administration. |
 | Approved viewer | Browser username/password sign-in | Read and export **every** trip and its protected photos; sign out. No writes, import, account management, or MCP. |
 | Pending or revoked account | Cannot sign in (403 access_denied) | Nothing |
 
-Nobody can permanently purge a trip through the web or MCP; archiving is the removal path. Database restore, backups, secrets, the proxy and the host stay with the owner and whoever operates the server.
+Only the owner can permanently delete a trip (schema v6): with the owner browser session or the admin bearer through `DELETE /api/trips/<id>`, or as a host operator with the [offline CLI](#offline-trip-deletion-host-operator). Content managers, viewers, MCP access tokens, and OAuth grants cannot delete trips. No MCP tool or change operation deletes a trip, even with the admin secret. For everyone else, archiving is still the way to remove a trip. Database restore, backups, secrets, the proxy and the host stay with the owner and whoever operates the server.
+
+### Permanent trip deletion
+
+`DELETE /api/trips/<id>` takes `{requestId, expectedVersion}`. The trip ID comes only from the path. Active and archived trips can be deleted. One transaction does all of the following, or nothing:
+
+- removes the trip row;
+- writes a content-free tombstone (stable trip ID, deleted version, deletion time);
+- rewrites every retry record that could return the trip's content (its change results, and the create or import result that produced it) to minimal deletion metadata, keeping the request ID and fingerprint;
+- stores the deletion's own minimal result;
+- appends a payload-free `trip.delete` audit event. If the audit write fails, the whole deletion rolls back.
+
+Results and errors:
+
+- Success returns 200 `{deleted: true, tripId, version}`, where `version` is the deleted version.
+- A stale `expectedVersion` returns 409 `version_conflict` with `currentVersion`.
+- Repeating the identical request returns the same success, including after a restart.
+- Reusing the request ID with a different trip or version returns 409 `request_id_conflict`.
+- Afterwards, reads, exports, edits and new deletions of that ID return 410 `trip_deleted`.
+- Replaying an earlier create, import or change request for the trip also returns 410 `trip_deleted`, so stale retries cannot return deleted content or recreate the trip.
+- An import whose preferred ID is tombstoned gets a fresh ID with the usual collision warning.
+
+Owner-session deletions need the same Origin as other cookie writes. Non-owner sessions get 403. MCP access tokens and OAuth tokens keep their wrong-route 401.
+
+What deletion does **not** remove:
+
+- Earlier database snapshots, pre-migration and pre-restore copies, exports, and copies held by people who exported the trip. They still contain the trip until you destroy them yourself. Restoring such a snapshot brings the trip back.
+- Photos in `<SHARED_TRIP_DATA_DIR>/photos`. That store is shared between trips and is never cleaned up automatically. Delete unreferenced files by hand if you need to.
+- Audit metadata (trip ID, request ID, version, actor, time).
+
+SQLite runs with `secure_delete` on, so freed pages in the database file are overwritten. Fragments can still remain in the write-ahead log until SQLite checkpoints it, and in filesystem or storage copies. Treat the data directory as private even after deleting a trip.
 
 Onboarding is owner-controlled:
 
@@ -62,7 +92,7 @@ For MCP clients that cannot accept a custom header, such as ChatGPT, the account
 
 The owner can also list and revoke OAuth grants in **Accounts → Show assistant access → Browser connections (OAuth)**. Grant revocation leaves the account's web access and separate credentials intact.
 
-Owner actions on accounts, tokens and OAuth grants are recorded in an owner-only audit log (`GET /api/audit`). Entries are metadata only, never passwords, invitation codes, token secrets or trip payloads. The home page does not display the audit log.
+Owner actions on accounts, tokens, OAuth grants and trip deletions are recorded in an owner-only audit log (`GET /api/audit`), as are content writes. Entries are metadata only, never passwords, invitation codes, token secrets or trip payloads. Channel `operator` (actor `operator`) marks offline host-operator CLI actions. The home page does not display the audit log.
 
 Usernames are 3-32 characters of lowercase letters, digits, `.`, `_` or `-`, starting with a letter or digit (input is trimmed and lowercased). Passwords are 10-128 characters, hashed with Node's built-in scrypt (`scrypt$N$r$p$salt$key`). Limits: 500 accounts, 50 unused unexpired invitations, 10 sessions per viewer.
 
@@ -86,6 +116,7 @@ Domain responses are JSON with Cache-Control: no-store. Errors use `{ "error": {
 | POST | /api/trips | owner, manager | requestId, trip; returns trip |
 | POST | /api/trips/&lt;id&gt;/changes | owner, manager | requestId, expectedVersion, changes; returns trip and generated IDs |
 | POST | /api/import | owner, manager | requestId, data; returns trip and mapping warnings |
+| DELETE | /api/trips/&lt;id&gt; | owner (session or admin bearer) | `{requestId, expectedVersion}`; permanent; returns `{deleted: true, tripId, version}`. See [Permanent trip deletion](#permanent-trip-deletion) |
 | POST | /api/invitations | owner | Optional `{expiresInHours}`; 201 `{invitation: {id, token, expiresAt}}` (token shown once) |
 | GET | /api/users | owner | `{accounts: [{id, username, status, role, createdAt, updatedAt}], invitations: [{id, createdAt, expiresAt}]}` (unused, unexpired only) |
 | POST | /api/users/&lt;id&gt;/approve | owner | `{account}` |
@@ -102,7 +133,7 @@ Domain responses are JSON with Cache-Control: no-store. Errors use `{ "error": {
 | GET, HEAD | /photos/&lt;name&gt; | owner, manager, viewer | Private photo file (see [Private photos](#private-photos)) |
 | POST | /mcp | owner admin bearer, content-manager access token, or OAuth access token | See [mcp.md](mcp.md). Cookies are refused. |
 
-Error codes: 401 `unauthorized` (missing or invalid credentials); 403 `forbidden` (role not permitted), `forbidden_origin`, `forbidden_host`, `access_denied` (pending or revoked account signing in), `invitation_invalid` (invalid, used, or expired code); 404 `account_not_found`; 409 `username_unavailable`, `too_many_invitations`, `too_many_accounts`; 422 `validation_failed`; 429 `rate_limited`. A route not listed for a role is refused for that role; account, invitation, role, token, and audit routes are owner-only.
+Error codes: 401 `unauthorized` (missing or invalid credentials); 403 `forbidden` (role not permitted), `forbidden_origin`, `forbidden_host`, `access_denied` (pending or revoked account signing in), `invitation_invalid` (invalid, used, or expired code); 404 `account_not_found`, `trip_not_found`; 409 `username_unavailable`, `too_many_invitations`, `too_many_accounts`, `version_conflict`, `request_id_conflict`; 410 `trip_deleted` (permanently deleted trip, or a stale retry of a request for it); 422 `validation_failed`; 429 `rate_limited`. A route not listed for a role is refused for that role; account, invitation, role, token, audit, and trip-deletion routes are owner-only.
 
 GET /health reports generic health only. Bodies are limited to 2 MB (8 KB for sign-in, invitation, and redemption); canonical content is bounded to 31 days, 80 plans per day, 80 reminders, and 100 operations per batch. Optional photos, translations, recommendations, and dates do not block a draft.
 
@@ -126,7 +157,7 @@ HTTP and MCP call the same TripService and validators. A batch commits completel
 
 The self-hosted photo store is `<SHARED_TRIP_DATA_DIR>/photos`, outside the source tree and every public directory. Put approved images there as flat files named `[A-Za-z0-9][A-Za-z0-9_-]*` with a `.webp`, `.png`, `.jpg`, or `.jpeg` extension, and reference them from trip content with root-relative URLs such as `/photos/harbor-walk.webp`.
 
-`GET`/`HEAD /photos/<name>` requires an owner, approved content-manager, or approved-viewer session and returns the file with `Cache-Control: no-store`. Anything else (subdirectories, other types, files resolving outside the store, missing files) returns a generic 404 after the access check. Every role can only read photos over HTTP. There is no upload or attachment store: `/attachments/*` always returns 404 after the access check. Database snapshots do not include photos; back the directory up separately.
+`GET`/`HEAD /photos/<name>` requires an owner, approved content-manager, or approved-viewer session and returns the file with `Cache-Control: no-store`. Anything else (subdirectories, other types, files resolving outside the store, missing files) returns a generic 404 after the access check. Every role can only read photos over HTTP. There is no upload or attachment store: `/attachments/*` always returns 404 after the access check. Database snapshots do not include photos; back the directory up separately. Photos can be referenced by several trips, so deleting a trip never deletes photo files.
 
 `/photos/manifest.js` is the public, generic, empty-by-default module used by the shared template. Never put private filenames or mappings into it. The legacy generator and the fictional `docs/` demo keep their existing generated photo assets unchanged.
 
@@ -174,17 +205,34 @@ SHARED_TRIP_DATA_DIR=/absolute/private/trip-data npm run backup -- /absolute/pri
 SHARED_TRIP_DATA_DIR=/absolute/private/restored-data npm run restore -- /absolute/private/backups/trips-<timestamp>.sqlite
 ~~~
 
-Backup uses SQLite's online backup API and validates the snapshot; it can run while the service is active and does not take ownership. Targets must not already exist, so snapshots are never overwritten. Copying a live SQLite main file alone is not this method. A snapshot contains trips, IDs, versions, archive state, retry records, accounts (password hashes, status and role), invitation digests, MCP access-token records, OAuth client registrations and grant records with token digests (schema v5), and the audit log: store it as a secret. Photos are not included. Same-server snapshots are not off-site protection.
+Backup uses SQLite's online backup API and validates the snapshot; it can run while the service is active and does not take ownership. Targets must not already exist, so snapshots are never overwritten. Copying a live SQLite main file alone is not this method. A snapshot contains trips, IDs, versions, archive state, retry records, deletion tombstones (schema v6), accounts (password hashes, status and role), invitation digests, MCP access-token records, OAuth client registrations and grant records with token digests (schema v5), and the audit log: store it as a secret. Photos are not included. Same-server snapshots are not off-site protection. A snapshot taken before a trip was deleted still contains that trip.
 
 Restore takes data-directory ownership before writing anything and holds it for the whole operation: it validates and migrates a staging replacement, validates it again, snapshots an existing target (`shared-trip.sqlite.before-restore-<time>`), and swaps it in. If a running service or another restore owns the directory, restore exits without touching the target. First restore into separate storage and compare IDs, versions, content, and accounts.
 
 Restoring signs everyone out. The account state is the snapshot's: accounts revoked after the snapshot become approved again, role changes made after it are undone, MCP tokens revoked after it become valid again until they expire, and invitations redeemed after it become usable again until they expire. OAuth grants also return to their state at snapshot time. A grant revoked after the snapshot can work again until its absolute expiry. A client whose refresh token rotated after the snapshot has to reconnect and consent again. Immediately after a restore, review *Accounts*, each content manager's tokens, and the OAuth grants, then revoke or change roles again as needed.
 
-Run maintenance commands with Node 24 and private storage access. The container also contains server/cli/backup.mjs and server/cli/restore.mjs; mount a separate backup directory when running them in a maintenance container.
+Run maintenance commands with Node 24 and private storage access. The container also contains server/cli/backup.mjs, server/cli/restore.mjs and server/cli/delete-trip.mjs; mount a separate backup directory when running them in a maintenance container.
+
+### Offline trip deletion (host operator)
+
+An authorized host operator can delete a trip without handling the owner's admin secret:
+
+~~~bash
+SHARED_TRIP_DATA_DIR=/absolute/private/trip-data npm run delete-trip -- <trip-id> <expected-version> <request-id> /absolute/private/backups/before-delete-<timestamp>.sqlite
+~~~
+
+The command reads only `SHARED_TRIP_DATA_DIR` and never the admin secret or any other credential setting, and it generates no credentials. It runs these steps in order:
+
+1. Takes [data-directory ownership](#data-directory-ownership). It refuses, changing nothing, while the service, a restore or another maintenance command uses the directory, so stop the service first.
+2. Writes the new private snapshot to the given file, which must not exist and must be outside the checkout, and validates it. Nothing is deleted unless this succeeds.
+3. Applies any pending schema migration, with its own validated snapshot.
+4. Deletes through the same gateway and domain logic as `DELETE /api/trips/<id>`: the same exact version check, tombstone, retry-record redaction and audit rollback.
+
+The audit event uses actor and channel `operator`. Running it again with the same trip, version and request ID (and another new backup file), after an interruption or restart, reports the earlier deletion without changing anything. The web endpoint replays the same request ID too. Output is one fixed message without trip content, paths or environment values. Read the trip's current version from the app or an export before running it. Keep or destroy the backup deliberately, because it still contains the trip.
 
 ### Data-directory ownership
 
-The service and restore claim a data directory through two files:
+The service, restore and the offline delete-trip command claim a data directory through two files:
 
 - `server-ownership.sqlite`: the authority. A persistent, normally zero-byte SQLite database, separate from `shared-trip.sqlite`. The owner opens it in rollback-journal mode and keeps a `BEGIN EXCLUSIVE` transaction open for its lifetime without writing. That is an OS-held byte-range lock, which the OS releases when the process exits for any reason. While an owner holds it, `server-ownership.sqlite-journal` also exists; after a hard kill it may remain and is cleaned up by SQLite on the next acquisition. Never delete or edit either file.
 - `server.lock`: a compatibility marker whose first line is the owner's PID (so older PID-lock releases refuse to start) and whose second line tags it as a `shared-trip-ownership-v1` marker for this ownership database. It is created, replaced, or removed only while the SQLite lock is held; it is never treated as ownership.
@@ -215,12 +263,15 @@ Schemas use PRAGMA user_version:
 - v3: adds the `users` and `invitations` tables. Trip rows, IDs, versions, archive state, and retry records are untouched.
 - v4: the content-manager release adds the account role, MCP access-token records, and the audit log. Existing accounts migrate as `viewer`, so nobody gains write access by upgrading; the owner promotes accounts explicitly afterwards. Trips and existing accounts are otherwise untouched.
 - v5: the OAuth release adds OAuth client, grant, and token-digest tables. It only adds to the schema. Trips, accounts, roles, content-manager tokens, and the audit log are untouched, and OAuth stays denied until `SHARED_TRIP_OAUTH_USERNAME` is set.
+- v6: the owner-deletion release adds the empty `trip_tombstones` table only (trip ID, deleted version, deletion time). Every existing trip, retry record, account, credential, OAuth grant and audit row is untouched. The audit log gains the `trip.delete` action and the `operator` channel.
 
 Before migrating an older database, the service writes a snapshot named for the target schema, such as `shared-trip.sqlite.before-v3-<time>`, beside it with VACUUM INTO and never deletes it automatically. The migration runs in one transaction. Newer-than-supported schemas are rejected ("Database requires a newer application").
 
 Back up before upgrading. Stop the service and any restore, replace its image/code while retaining data/configuration, restart, and verify reading, editing, viewer sign-in and, if used, content-manager sign-in, MCP tokens, and OAuth metadata and grants. Test fictional prior-version data first. To roll back across a schema change, stop the new service and restore the pre-upgrade snapshot into separate storage for the old code; never open a newer schema with older code. Accounts, role changes and MCP tokens created after the upgrade are not in that snapshot; an older release has no content-manager role, so its accounts are viewers again and every issued MCP access token stops working (only the admin bearer remains).
 
 Rolling back from v5 to v4: keep the upgraded v5 directory untouched. It preserves trip writes and OAuth grants made after the upgrade, for analysis or a later roll-forward. Export any trip edited since the upgrade. Then restore the `before-v5` snapshot into separate storage, run the old image against that storage, and import the exports there if needed. The v4 release has no OAuth, so OAuth clients stop working while the other credentials keep working. If you roll forward to the kept v5 directory, its grants still apply until their absolute expiry.
+
+Rolling back from v6 to v5 works the same way with the `before-v6` snapshot. That snapshot predates every deletion made after the upgrade, so trips deleted since then reappear in the v5 storage. Delete them again after rolling forward, or remove them from the rollback copy before use. The v5 release cannot read tombstones and has no deletion route.
 
 ## Verification and limits
 

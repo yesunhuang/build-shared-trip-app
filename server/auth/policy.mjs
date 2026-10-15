@@ -1,5 +1,6 @@
 // Server-side role policy. The owner (admin bearer token or an owner browser session) may do
-// everything; MCP additionally requires a bearer credential. Approved viewers get an explicit
+// everything, including permanent trip deletion (DELETE /api/trips/<id>, owner-only and never
+// on any allowlist below); MCP additionally requires a bearer credential. Approved viewers get an explicit
 // allowlist of read-only routes. Approved content managers get the viewer allowlist plus trip
 // creation, import and trip changes (edit, delete content, replace content, archive/unarchive) for
 // all current and future trips. Everything not on an allowlist is refused, so a new owner route is
@@ -15,6 +16,19 @@ export const VIEWER = "viewer";
 export const CONTENT_MANAGER = "content-manager";
 
 export const canEditContent = (principal) => principal?.role === OWNER || principal?.role === CONTENT_MANAGER;
+/**
+ * Permanent trip deletion (schema v6) is owner-only: the owner browser session or owner admin bearer
+ * over HTTP, or the offline host-operator CLI (server/cli/delete-trip.mjs, channel "operator").
+ * Content managers, viewers, MCP credentials, OAuth tokens and every MCP call are refused; there is
+ * deliberately no MCP deletion tool or change operation.
+ */
+export const OPERATOR = "operator";
+export function canDeleteTrips(principal, channel) {
+  if (principal?.role !== OWNER) return false;
+  if (channel === "http") return principal.via === "cookie" || principal.via === "bearer";
+  if (channel === OPERATOR) return principal.via === OPERATOR;
+  return false;
+}
 /** Non-owner bearer principals that exist only at /mcp. */
 export const isMcpOnlyPrincipal = (principal) => principal?.role === CONTENT_MANAGER && (principal.via === "mcp-token" || principal.via === "oauth");
 

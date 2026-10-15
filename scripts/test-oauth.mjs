@@ -947,17 +947,18 @@ try {
   await stop(v4);
   const v4File = path.join(temporary, "schema-v4", "shared-trip.sqlite");
   const downgrade = new DatabaseSync(v4File);
-  downgrade.exec("DROP TABLE oauth_tokens; DROP TABLE oauth_codes; DROP TABLE oauth_grants; DROP TABLE oauth_clients; PRAGMA user_version=4");
+  // Schema maintenance: later releases add tables (v6 trip_tombstones); drop them too for a genuine v4 fixture.
+  downgrade.exec("DROP TABLE IF EXISTS trip_tombstones; DROP TABLE oauth_tokens; DROP TABLE oauth_codes; DROP TABLE oauth_grants; DROP TABLE oauth_clients; PRAGMA user_version=4");
   const v4Rows = (db) => JSON.stringify(["trips", "request_log", "users", "invitations", "mcp_tokens", "audit_log"].map((table) => db.prepare("SELECT * FROM " + table + " ORDER BY rowid").all()));
   const priorRows = v4Rows(downgrade);
   assert.equal(downgrade.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name LIKE 'oauth_%'").get().n, 0, "fixture is a genuine v4 schema");
   downgrade.close();
   validateSnapshot(v4File);
   const upgraded = await start("schema-v4");
-  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION); assert.equal(SCHEMA_VERSION, 5);
+  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION); assert.ok(SCHEMA_VERSION >= 5, "current schema includes the v5 OAuth tables");
   assert.ok(v4Rows(upgraded.db) === priorRows, "every v4 row (trips, retry log, accounts, invitations, MCP credentials, audit) is preserved");
   assert.equal(upgraded.db.prepare("SELECT COUNT(*) AS n FROM oauth_clients").get().n, 0, "OAuth tables start empty");
-  const preV5 = () => fs.readdirSync(path.join(temporary, "schema-v4")).filter((file) => /^shared-trip\.sqlite\.before-v5-\d+$/.test(file));
+  const preV5 = () => fs.readdirSync(path.join(temporary, "schema-v4")).filter((file) => new RegExp("^shared-trip\\.sqlite\\.before-v" + SCHEMA_VERSION + "-\\d+$").test(file));
   assert.equal(preV5().length, 1, "one pre-migration snapshot");
   const retainedFile = path.join(temporary, "schema-v4", preV5()[0]);
   const retained = new DatabaseSync(retainedFile, { readOnly: true });
@@ -973,7 +974,7 @@ try {
   await v4Session.close();
   await stop(upgraded);
   const again = await start("schema-v4");
-  assert.ok(again.db.prepare("PRAGMA user_version").get().user_version === 5 && preV5().length === 1, "migration is idempotent and does not re-snapshot");
+  assert.ok(again.db.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION && preV5().length === 1, "migration is idempotent and does not re-snapshot");
   await stop(again);
   // Rollback: the retained copy is a complete v4 database that can replace the upgraded file.
   const rollbackDir = path.join(temporary, "rollback"); fs.mkdirSync(rollbackDir);
@@ -985,7 +986,7 @@ try {
   const fromV4 = path.join(temporary, "restored-from-v4");
   execFileSync(process.execPath, ["server/cli/restore.mjs", retainedFile], { cwd: repoRoot, env: { ...process.env, SHARED_TRIP_DATA_DIR: fromV4 }, stdio: "pipe" });
   const restoredV4 = await start("restored-from-v4");
-  assert.ok(restoredV4.db.prepare("PRAGMA user_version").get().user_version === 5 && v4Rows(restoredV4.db) === priorRows, "a restored v4 snapshot upgrades with every row preserved");
+  assert.ok(restoredV4.db.prepare("PRAGMA user_version").get().user_version === SCHEMA_VERSION && v4Rows(restoredV4.db) === priorRows, "a restored v4 snapshot upgrades with every row preserved");
   await stop(restoredV4);
   // A pre-migration snapshot that fails validation stops the upgrade and changes nothing.
   const brokenDir = path.join(temporary, "broken-v4"); fs.mkdirSync(brokenDir);

@@ -128,7 +128,28 @@ Before using real data, revoke the fictional account and archive the fictional t
 5. **Approve the account.** Approval applies the role to **every** trip. There is no per-trip membership.
 6. **Revoke or change roles when needed.** Either action immediately invalidates that account's active sessions and MCP tokens. Approving the account again lets it sign in afresh; it does not revive old sessions or tokens.
 
-Neither role can manage accounts, invitations, roles, tokens, security, backups, restores, or this host, and nobody can permanently purge a trip through the app. Viewers cannot write, import, or use MCP. Restarting the service or running a restore signs everyone out, but accounts and MCP access tokens persist in the database.
+Neither role can manage accounts, invitations, roles, tokens, security, backups, restores, or this host, or permanently delete a trip. Viewers cannot write, import, or use MCP.
+
+**Permanent trip deletion (owner only, schema v6).** The owner deletes a trip with `DELETE /api/trips/<id>`, using the owner session or the admin bearer. MCP has no deletion tool. A host operator who should not handle the admin secret can use the offline CLI instead. It reads only `SHARED_TRIP_DATA_DIR`, refuses while the app runs, and first writes and validates a new backup:
+
+```bash
+dc stop app
+TAG=local   # the SHARED_TRIP_IMAGE_TAG currently in your env file
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+sudo docker run --rm --network none --read-only --tmpfs /tmp --user 1000:1000 \
+  -e SHARED_TRIP_DATA_DIR=/data \
+  --mount "type=bind,src=/PRIVATE/shared-trips/data,dst=/data" \
+  --mount "type=bind,src=/PRIVATE/shared-trips/backups,dst=/backups" \
+  "shared-trips:$TAG" node server/cli/delete-trip.mjs <trip-id> <expected-version> <request-id> "/backups/before-delete-${stamp}.sqlite"
+dc up -d app
+```
+
+Deletion removes the trip from the app and its retry records, and keeps a content-free tombstone so that the ID is never reused. Some copies stay until you remove them deliberately:
+
+- earlier backups (including the CLI's new backup), pre-migration and pre-restore snapshots, off-site copies and exports still contain the trip;
+- private photos are shared between trips and are never deleted.
+
+See [self-hosted.md § Permanent trip deletion](../references/self-hosted.md#permanent-trip-deletion). Restarting the service or running a restore signs everyone out, but accounts and MCP access tokens persist in the database.
 
 **Content-manager MCP tokens (owner only).** On the content manager's row choose **Show assistant access**, enter a label, and choose **Issue token**. The secret is shown once, has a fixed 90-day lifetime, and works only at `/mcp`. Copy it with the explicit **Copy** button directly into the AI client's private credential store on a machine you control, then choose **Done, hide token**. Never send it through chat or put it in this checkout, the env file, or a script. A failed issuance is not retried; check the list before issuing again. To renew, issue a replacement, update the client, confirm it connects, then revoke the old token. Owner-only `GET /api/audit` lists metadata about these actions, without secrets or payloads. See [mcp.md](../references/mcp.md#provisioning-a-content-managers-token-owner-only).
 
@@ -153,7 +174,7 @@ photos="/PRIVATE/shared-trips/backups/photos-${stamp}.tar"
 sudo test ! -e "$photos" && sudo tar -C /PRIVATE/shared-trips/data -cf "$photos" photos
 ```
 
-The CLI uses SQLite's online backup while the service runs and validates the snapshot. The snapshot contains trips, IDs, versions, archive state, the retry log, accounts (with password hashes and roles), invitation digests, MCP access-token records, OAuth client and grant records with token digests (schema v5), and the audit log. Treat it as a credential-bearing secret.
+The CLI uses SQLite's online backup while the service runs and validates the snapshot. The snapshot contains trips, IDs, versions, archive state, the retry log, deletion tombstones (schema v6), accounts (with password hashes and roles), invitation digests, MCP access-token records, OAuth client and grant records with token digests (schema v5), and the audit log. Treat it as a credential-bearing secret. A snapshot taken before a trip was deleted still contains that trip; restoring it brings the trip back.
 
 The backup command needs no input. Redirecting stdin prevents Compose from consuming later commands when this recipe runs inside a script.
 
@@ -212,7 +233,7 @@ The restored database has the account state from snapshot time. Accounts revoked
 
 ## 9. Unclean stops and data-directory ownership
 
-The app and the restore CLI claim the data directory through `server-ownership.sqlite`. This is a persistent, normally zero-byte SQLite database on which the owner holds an OS-level EXCLUSIVE transaction for its whole lifetime. A tagged `server.lock` marker beside it stops older PID-lock releases from starting.
+The app, the restore CLI and the delete-trip CLI claim the data directory through `server-ownership.sqlite`. This is a persistent, normally zero-byte SQLite database on which the owner holds an OS-level EXCLUSIVE transaction for its whole lifetime. A tagged `server.lock` marker beside it stops older PID-lock releases from starting.
 
 On a clean stop (SIGTERM within `stop_grace_period`), the owner rolls back, closes the database, and removes its marker. After a kill, OOM, or crash, the OS drops the lock. The next start then takes ownership and, while holding it, atomically replaces the stale marker that it can attribute to this ownership database. `restart: unless-stopped` can therefore restart the app without manual steps. A `server-ownership.sqlite-journal` left behind is removed by SQLite itself.
 
@@ -236,6 +257,8 @@ Never run older and newer releases against one data directory. Docker named or b
 **Schema v4** adds account roles, MCP access-token records and the audit log to schema v3's viewer accounts and invitations. The first start on an older database writes `shared-trip.sqlite.before-v4-<time>` into the data directory and migrates in one transaction. Trips, IDs, versions, archive state, retry records and account approval states are preserved. Existing accounts become viewers; promote content managers explicitly afterwards. The pre-migration snapshot is never deleted automatically. Copy it to your backups.
 
 **Schema v5** adds OAuth client, grant, and token-digest tables. It only adds to the schema. The first start writes `shared-trip.sqlite.before-v5-<time>` and migrates in one transaction. Trips, accounts, roles, content-manager tokens, and the audit log are unchanged. The admin bearer and existing 90-day tokens keep working. OAuth stays denied until `SHARED_TRIP_OAUTH_USERNAME` is set. No real data is imported automatically.
+
+**Schema v6** adds only the empty `trip_tombstones` table for owner-only permanent deletion. The first start writes `shared-trip.sqlite.before-v6-<time>`, validates it, and migrates in one transaction. Every existing trip, retry record, account, credential, grant and audit row is unchanged. Rolling back to v5 restores the `before-v6` snapshot, so trips deleted after the upgrade reappear there.
 
 **Rollback:** if no schema migration happened, set the old tag and run `dc up -d --no-build app`. Older code refuses a newer schema. In that case:
 

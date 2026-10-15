@@ -3,7 +3,14 @@ import { normalizeContent, applyParsedPlaces, assertSafePayload, isValidId } fro
 import { applyContentRules } from "./content-rules.mjs";
 import { applyOperations, newId, deriveStart, deriveEnd } from "./operations.mjs";
 import { importContent } from "./legacy.mjs";
-import { conflict, notFound, validationError } from "./errors.mjs";
+import { conflict, notFound, tripDeleted, validationError } from "./errors.mjs";
+
+const DELETE_KEYS = new Set(["tripId", "requestId", "expectedVersion"]);
+const isPlainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+// Retry records of a permanently deleted trip are rewritten to this minimal marker. The request ID and
+// fingerprint stay, so an identical stale replay is refused (410 trip_deleted) instead of returning
+// deleted content or recreating the trip, and a changed payload still gets 409 request_id_conflict.
+const deletionMarker = (tripId, version) => JSON.stringify({ deletedTrip: { tripId, version } });
 
 function ordered(value) {
   if (Array.isArray(value)) return value.map(ordered);
@@ -34,9 +41,12 @@ export class TripService {
   getTrip(id) {
     if (!isValidId(id)) throw notFound();
     const row = this.db.prepare("SELECT data FROM trips WHERE id=?").get(id);
-    if (!row) throw notFound();
+    if (!row) throw this.isDeleted(id) ? tripDeleted() : notFound();
     return { trip: withAliases(JSON.parse(row.data)) };
   }
+  isDeleted(id) { return Boolean(this.db.prepare("SELECT 1 AS hit FROM trip_tombstones WHERE id=?").get(id)); }
+  /** A stable trip ID is unavailable while a live trip or a deletion tombstone holds it. */
+  idTaken(id) { return Boolean(this.db.prepare("SELECT id FROM trips WHERE id=?").get(id)) || this.isDeleted(id); }
   // record(result, replayed), when given, runs inside the same transaction just before COMMIT (used for
   // payload-free audit metadata). If it throws, the whole write rolls back, so an audit entry never
   // claims a write that did not commit and no committed write lacks its entry.
@@ -50,6 +60,7 @@ export class TripService {
       if (prior) {
         if (prior.fingerprint !== fingerprint) throw conflict("request_id_conflict", "This request identifier was already used for different input.");
         const replay = JSON.parse(prior.result);
+        if (replay?.deletedTrip) throw tripDeleted();
         record?.(replay, true);
         this.db.exec("COMMIT");
         return replay;
@@ -63,7 +74,11 @@ export class TripService {
   }
   insert(content, preferredId, restored = {}) {
     let id = preferredId;
-    if (!isValidId(id) || this.db.prepare("SELECT id FROM trips WHERE id=?").get(id)) id = newId("trip");
+    // Existing or deleted (tombstoned) IDs are never reused: the import gets a fresh ID instead.
+    for (let attempt = 0; !isValidId(id) || this.idTaken(id); attempt++) {
+      if (attempt >= 8) throw new Error("Could not allocate a trip identifier.");
+      id = newId("trip");
+    }
     const at = new Date().toISOString();
     if (restored.version !== undefined && (!Number.isSafeInteger(restored.version) || restored.version < 1)) throw validationError("Export version must be a positive safe integer.");
     if (restored.archived !== undefined && typeof restored.archived !== "boolean") throw validationError("Export archive state must be a boolean.");
@@ -96,6 +111,39 @@ export class TripService {
       const result = this.insert(content, preferredId, data.format ? data.trip : {});
       if (preferredId && result.trip.id !== preferredId) warnings.push("The incoming trip ID was unavailable or invalid; created a new trip instead of overwriting.");
       return { ...result, warnings };
+    }, record);
+  }
+  /**
+   * Owner-only permanent deletion (authorization is enforced by ContentGateway). input is exactly
+   * { tripId, requestId, expectedVersion }. In one transaction: removes the trip row (active or
+   * archived), writes a content-free tombstone, redacts every retry record that could return the
+   * trip's content (its per-trip change results and the create/import results that produced it),
+   * stores this request's minimal result and runs record() (the audit entry). Any failure rolls all
+   * of it back. Shared photos and backups are not touched.
+   */
+  deleteTrip(input, record) {
+    if (!isPlainObject(input)) throw validationError("The request body must be a JSON object.");
+    const unknown = Object.keys(input).filter((key) => !DELETE_KEYS.has(key));
+    if (unknown.length) throw validationError("Deletion accepts only requestId and expectedVersion.");
+    const { tripId, requestId, expectedVersion } = input;
+    if (!isValidId(tripId)) throw notFound();
+    if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw validationError("expectedVersion must be a positive safe integer.");
+    return this.transact("delete", requestId, { tripId, expectedVersion }, () => {
+      const row = this.db.prepare("SELECT version FROM trips WHERE id=?").get(tripId);
+      if (!row) throw this.isDeleted(tripId) ? tripDeleted() : notFound();
+      if (row.version !== expectedVersion) throw conflict("version_conflict", "The trip changed. Read the latest version before retrying.", { currentVersion: row.version });
+      const removed = this.db.prepare("DELETE FROM trips WHERE id=? AND version=?").run(tripId, expectedVersion);
+      if (removed.changes !== 1) throw new Error("Trip deletion did not apply.");
+      this.db.prepare("INSERT INTO trip_tombstones (id,deleted_version,deleted_at) VALUES (?,?,?)").run(tripId, expectedVersion, new Date().toISOString());
+      const marker = deletionMarker(tripId, expectedVersion);
+      this.db.prepare("UPDATE request_log SET result=? WHERE scope=?").run(marker, "trip:" + tripId);
+      const redact = this.db.prepare("UPDATE request_log SET result=? WHERE scope=? AND request_id=?");
+      for (const prior of this.db.prepare("SELECT scope,request_id,result FROM request_log WHERE scope IN ('create','import')").all()) {
+        let stored = null;
+        try { stored = JSON.parse(prior.result); } catch { stored = null; }
+        if (stored?.trip?.id === tripId) redact.run(marker, prior.scope, prior.request_id);
+      }
+      return { deleted: true, tripId, version: expectedVersion };
     }, record);
   }
   exportTrip(id) {

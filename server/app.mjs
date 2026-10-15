@@ -313,6 +313,15 @@ export async function startServer(config) {
           requireOwner();
           const id = decodeSegment(oauthGrant[1]); const grantId = decodeSegment(oauthGrant[2]);
           result = await administer("oauth.grant.revoke", grantId, () => oauthStore.revokeGrant(id, grantId, clock()));
+        } else if (trip && !trip[2] && req.method === "DELETE") {
+          // Owner-only permanent deletion. Non-owner sessions were already refused by the route
+          // allowlist (403) and non-owner bearers never reach here (401); requireOwner is explicit
+          // defense in depth. The trip ID comes only from the path.
+          requireOwner();
+          const body = await readJSON(req, SMALL_BODY);
+          if (!isObject(body)) throw validationError("The request body must be a JSON object.");
+          if (Object.hasOwn(body, "tripId")) throw validationError("The trip ID comes from the URL; omit tripId from the body.");
+          result = gateway.deleteTrip(context, { ...body, tripId: decodeSegment(trip[1]) });
         } else if (trip) {
           const tripId = decodeURIComponent(trip[1]);
           if (!trip[2] && req.method === "GET") result = gateway.getTrip(context, tripId);

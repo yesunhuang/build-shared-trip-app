@@ -23,6 +23,11 @@ export function notFound(code = "trip_not_found", message = "Trip not found.") {
   return new DomainError(code, 404, message);
 }
 
+// The trip was permanently deleted by the owner (schema v6 tombstone). Carries no trip content.
+export function tripDeleted() {
+  return new DomainError("trip_deleted", 410, "This trip was permanently deleted.");
+}
+
 export function conflict(code, message, extra = {}) {
   return new DomainError(code, 409, message, extra);
 }
