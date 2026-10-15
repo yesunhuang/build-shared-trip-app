@@ -36,4 +36,3 @@ Next: build the immutable image, validate Linux execution and migration against 
 ## comment
 
 Reserved for continuation instructions from the user or authorized coordinator.
-
