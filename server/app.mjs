@@ -11,10 +11,12 @@ import { serveStatic } from "./static.mjs";
 import { AccountStore, INVITATION_TOKEN_PATTERN, invitationInvalid } from "./auth/accounts.mjs";
 import { boundedPassword, dummyVerify, hashPassword, normalizeUsername, passwordProblem, verifyPassword } from "./auth/passwords.mjs";
 import { AttemptLimiter, SESSION_COOKIE, SESSION_TTL_MS, SessionStore } from "./auth/sessions.mjs";
-import { CONTENT_MANAGER, OWNER, capabilitiesFor, isProtectedMediaPath, mayAccess } from "./auth/policy.mjs";
+import { CONTENT_MANAGER, OWNER, capabilitiesFor, isMcpOnlyPrincipal, isProtectedMediaPath, mayAccess } from "./auth/policy.mjs";
 import { McpTokenStore } from "./auth/mcp-tokens.mjs";
 import { AuditLog } from "./audit.mjs";
 import { ContentGateway, actorOf } from "./content-access.mjs";
+import { OAUTH_ACCESS_PATTERN, OAuthStore } from "./auth/oauth.mjs";
+import { createOAuth } from "./oauth-http.mjs";
 
 // Private trip photos live in <dataDir>/photos, outside the checkout and every static directory, and
 // are served only by the authenticated media handler below.
@@ -43,7 +45,13 @@ export function readConfig(env = process.env) {
   }
   const host = env.SHARED_TRIP_HOST || "127.0.0.1";
   if (!["127.0.0.1","localhost","::1"].includes(host) && !origin) throw new Error("Non-loopback binding requires SHARED_TRIP_ORIGIN.");
-  return { token, dataDir, host, port, origin };
+  // OAuth: the single account that may approve connected applications. Omitted => nobody can.
+  let oauthUsername = "";
+  if (env.SHARED_TRIP_OAUTH_USERNAME !== undefined && env.SHARED_TRIP_OAUTH_USERNAME !== "") {
+    oauthUsername = normalizeUsername(env.SHARED_TRIP_OAUTH_USERNAME);
+    if (!oauthUsername) throw new Error("SHARED_TRIP_OAUTH_USERNAME must be an existing account's username (3-32 lowercase letters, digits, dots, hyphens or underscores).");
+  }
+  return { token, dataDir, host, port, origin, oauthUsername };
 }
 function sameSecret(a,b) {
   const hash = (s) => crypto.createHash("sha256").update(String(s || "")).digest();
@@ -69,8 +77,12 @@ const decodeSegment = (value) => { try { return decodeURIComponent(value); } cat
 // Photos default to <config.dataDir>/photos. config.photoDir is an optional, code-only override
 // (tests may use a disposable directory). config.clock is an optional, code-only millisecond clock for
 // credential expiry and audit timestamps (tests inject one). Neither is read from the environment.
+// config.oauthRedirectUris is an optional, code-only list of exact test callbacks (HTTPS or HTTP
+// loopback) allowed in addition to the fixed production callback; it is never read from the environment.
 export async function startServer(config) {
   const clock = typeof config.clock === "function" ? config.clock : Date.now;
+  const oauthUsername = config.oauthUsername ? normalizeUsername(config.oauthUsername) : "";
+  if (config.oauthUsername && !oauthUsername) throw new Error("Invalid OAuth username.");
   // Data-directory ownership (crash-recoverable SQLite-based ownership) is defined in data-lock.mjs,
   // not here. Startup never deletes a foreign or legacy server.lock: if ownership cannot be taken it
   // fails closed and leaves the data untouched.
@@ -86,6 +98,10 @@ export async function startServer(config) {
   const sessions = new SessionStore();
   const loginLimiter = new AttemptLimiter({ limit: 10, windowMs: 60_000, message: "Try signing in again later." });
   const inviteLimiter = new AttemptLimiter({ limit: 10, windowMs: 15 * 60_000, message: "Try again later." });
+  const oauthStore = new OAuthStore(db, { audit, username: oauthUsername });
+  let oauth;
+  try { oauth = createOAuth({ store: oauthStore, accounts, audit, loginLimiter, clock, redirectUris: config.oauthRedirectUris }); }
+  catch (error) { try { db.close(); } finally { lock.release(); } throw error; }
   const photoDir = path.resolve(config.photoDir || path.join(config.dataDir, PHOTO_SUBDIR));
   const send = (res,status,payload) => { res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}); res.end(JSON.stringify(payload)); };
 
@@ -103,14 +119,18 @@ export async function startServer(config) {
   // Owner bearer first (unchanged and compatible). Any other bearer is tried as a content-manager MCP
   // credential, which yields a principal only at /mcp. A presented but unusable bearer never falls
   // back to a cookie session.
-  function principalFromBearer(value, pathname, protectedPath) {
+  // OAuth access tokens are likewise accepted only at /mcp, with content-manager permissions, and
+  // are re-checked against grant, resource, scope and the account on every request.
+  function principalFromBearer(value, pathname, protectedPath, allowedOrigin) {
     if (value && sameSecret(value, config.token)) return { role: OWNER, via: "bearer" };
     const atMcp = pathname === "/mcp";
-    const credential = value ? tokens.authenticate(value, clock(), { touch: atMcp }) : null;
+    const isOAuth = Boolean(value) && OAUTH_ACCESS_PATTERN.test(value);
+    const credential = !value ? null : isOAuth ? oauth.authenticateAccess(value, { pathname, allowedOrigin }) : tokens.authenticate(value, clock(), { touch: atMcp });
     if (!credential) return null;
     const refuse = (reason) => { if (protectedPath) audit.safeRecord({ actor: credential.userId, channel: atMcp ? "mcp" : "http", action: "auth.refused", outcome: "refused", reason }); return null; };
     if (!credential.ok) return refuse(credential.reason);
-    if (!atMcp) return refuse("mcp_token_wrong_route");
+    if (!atMcp) return refuse(isOAuth ? "oauth_token_wrong_route" : "mcp_token_wrong_route");
+    if (isOAuth) return { role: CONTENT_MANAGER, via: "oauth", userId: credential.userId, username: credential.username, grantId: credential.grantId };
     return { role: CONTENT_MANAGER, via: "mcp-token", userId: credential.userId, username: credential.username, tokenId: credential.tokenId };
   }
 
@@ -157,6 +177,10 @@ export async function startServer(config) {
       const configuredHost = new URL(allowedOrigin).host;
       if (host !== configuredHost && !(config.origin && host === config.host + ":" + server.address().port)) throw new DomainError("forbidden_host",403,"Host is not allowed.");
       const origin = req.headers.origin;
+      // OAuth metadata/endpoints apply their own Origin rules (public-client CORS only on the
+      // credential-free JSON endpoints; same-origin for the browser forms). Everything else keeps
+      // the global guard below.
+      if (await oauth.handle(req, res, { url, pathname: url.pathname, allowedOrigin, origin, client: req.socket.remoteAddress || "local", secure: allowedOrigin.startsWith("https:") })) return;
       if (origin && origin !== allowedOrigin) throw new DomainError("forbidden_origin",403,"Origin is not allowed.");
       const pathname = url.pathname;
       if (pathname === "/health" && req.method === "GET") { send(res,200,{status:"ok"}); return; }
@@ -169,8 +193,11 @@ export async function startServer(config) {
       const media = isProtectedMediaPath(pathname);
       const protectedPath = pathname === "/mcp" || pathname.startsWith("/api/") || media;
       // A presented but wrong bearer token never falls back to a cookie session.
-      const principal = /^Bearer\s/i.test(authorization) ? principalFromBearer(match?.[1], pathname, protectedPath) : principalFromCookie(cookie, now);
-      if (principal) { deniedActor = actorOf(principal); deniedChannel = principal.via === "mcp-token" ? "mcp" : "http"; }
+      const bearerPresented = /^Bearer\s/i.test(authorization);
+      const principal = bearerPresented ? principalFromBearer(match?.[1], pathname, protectedPath, allowedOrigin) : principalFromCookie(cookie, now);
+      if (principal) { deniedActor = actorOf(principal); deniedChannel = principal.via === "mcp-token" || principal.via === "oauth" ? "mcp" : "http"; }
+      // /mcp 401 responses advertise the protected-resource metadata and the only scope (RFC 9728).
+      const mcpUnauthorized = () => { res.setHeader("WWW-Authenticate", oauth.challenge(allowedOrigin, bearerPresented)); return unauthorized(); };
       const unsafe = !["GET","HEAD","OPTIONS"].includes(req.method);
       const client = req.socket.remoteAddress || "local";
       const issueSession = (data) => {
@@ -222,7 +249,8 @@ export async function startServer(config) {
       if (protectedPath) {
         // Browser sessions (owner or account) never authorize MCP; only the owner bearer or a valid
         // content-manager credential does.
-        if (!principal || (pathname === "/mcp" && principal.via === "cookie")) throw unauthorized();
+        if (pathname === "/mcp" && (!principal || principal.via === "cookie")) throw mcpUnauthorized();
+        if (!principal) throw unauthorized();
         if (unsafe && principal.via === "cookie" && origin !== allowedOrigin) throw new DomainError("forbidden_origin",403,"Same-origin browser request required.");
         if (principal.role !== OWNER && !mayAccess(principal, req.method, pathname)) throw forbidden();
       }
@@ -237,7 +265,7 @@ export async function startServer(config) {
         send(res,200,{authenticated:false}); return;
       }
       if (pathname === "/mcp") {
-        if (!(principal.role === OWNER && principal.via === "bearer") && !(principal.role === CONTENT_MANAGER && principal.via === "mcp-token")) throw unauthorized();
+        if (!(principal.role === OWNER && principal.via === "bearer") && !isMcpOnlyPrincipal(principal)) throw mcpUnauthorized();
         if (req.method !== "POST") { res.setHeader("Allow","POST"); send(res,405,{error:{code:"method_not_allowed",message:"Stateless MCP supports POST."}}); return; }
         await handleMcp(req,res,await readJSON(req),gateway,principal); return;
       }
@@ -253,6 +281,8 @@ export async function startServer(config) {
         const account = /^\/api\/users\/([^/]+)\/(approve|revoke|role)$/.exec(pathname);
         const credentials = /^\/api\/users\/([^/]+)\/mcp-tokens$/.exec(pathname);
         const credential = /^\/api\/users\/([^/]+)\/mcp-tokens\/([^/]+)\/revoke$/.exec(pathname);
+        const oauthGrants = /^\/api\/users\/([^/]+)\/oauth-grants$/.exec(pathname);
+        const oauthGrant = /^\/api\/users\/([^/]+)\/oauth-grants\/([^/]+)\/revoke$/.exec(pathname);
         const trip = /^\/api\/trips\/([^/]+)(?:\/(changes|export))?$/.exec(pathname);
         if (account && req.method === "POST") {
           requireOwner();
@@ -275,6 +305,14 @@ export async function startServer(config) {
           requireOwner();
           const id = decodeSegment(credential[1]); const tokenId = decodeSegment(credential[2]);
           result = await administer("token.revoke", tokenId, () => tokens.revoke(id, tokenId, clock()));
+        } else if (oauthGrants && req.method === "GET") {
+          // Owner-only, metadata only: never codes, tokens or digests.
+          requireOwner();
+          result = oauthStore.listGrants(decodeSegment(oauthGrants[1]), clock());
+        } else if (oauthGrant && req.method === "POST") {
+          requireOwner();
+          const id = decodeSegment(oauthGrant[1]); const grantId = decodeSegment(oauthGrant[2]);
+          result = await administer("oauth.grant.revoke", grantId, () => oauthStore.revokeGrant(id, grantId, clock()));
         } else if (trip) {
           const tripId = decodeURIComponent(trip[1]);
           if (!trip[2] && req.method === "GET") result = gateway.getTrip(context, tripId);
@@ -295,7 +333,7 @@ export async function startServer(config) {
   try { await new Promise((resolve,reject) => {server.once("error",reject); server.listen(config.port,config.host,resolve);}); }
   catch (error) { try { db.close(); } finally { lock.release(); } throw error; }
   let closing;
-  return { server, service, accounts, tokens, audit, db, url: config.origin || "http://" + config.host + ":" + server.address().port,
+  return { server, service, accounts, tokens, audit, db, oauth: oauthStore, url: config.origin || "http://" + config.host + ":" + server.address().port,
     close: () => closing ??= (async () => {
       await new Promise((resolve) => server.close(() => resolve()));
       try { db.close(); } finally { lock.release(); }

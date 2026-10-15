@@ -35,8 +35,9 @@ const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true,
 const ADDITIVE = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
 
-// gateway: ContentGateway (content-access.mjs). principal: the owner bearer or a valid content-manager
-// MCP credential; app.mjs authenticates before calling this. The same six content tools exist for
+// gateway: ContentGateway (content-access.mjs). principal: the owner bearer, a valid content-manager
+// MCP credential or an OAuth access token (content-manager permissions); app.mjs authenticates
+// before calling this. The same six content tools exist for
 // both; there are deliberately no account, credential, audit or other administrative tools.
 export async function handleMcp(req, res, body, gateway, principal) {
   const context = { principal, channel: "mcp" };

@@ -215,6 +215,14 @@ export const hostedApi = Object.freeze({
     `/api/users/${encodeURIComponent(accountId)}/mcp-tokens/${encodeURIComponent(tokenId)}/revoke`,
     { method: "POST", body: {}, timeoutMs: WRITE_TIMEOUT_MS }
   ),
+  // Owner only. Browser (OAuth) connections for an account: {grants:[metadata]}.
+  // No credential is returned; the home page keeps only its display-field whitelist.
+  listOAuthGrants: (accountId) => requestJSON(`/api/users/${encodeURIComponent(accountId)}/oauth-grants`),
+  // Owner only. Returns {grant}. Single-shot: a failed revocation is reported, never retried automatically.
+  revokeOAuthGrant: (accountId, grantId) => requestJSON(
+    `/api/users/${encodeURIComponent(accountId)}/oauth-grants/${encodeURIComponent(grantId)}/revoke`,
+    { method: "POST", body: {}, timeoutMs: WRITE_TIMEOUT_MS }
+  ),
   logout: () => requestJSON("/api/logout", { method: "POST", body: {}, timeoutMs: 8000 }),
   listTrips: () => requestJSON("/api/trips"),
   getTrip: (tripId) => requestJSON(`/api/trips/${encodeURIComponent(tripId)}`),

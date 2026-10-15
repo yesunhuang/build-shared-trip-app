@@ -42,6 +42,10 @@ export class AccountStore {
 
   revokeCredentials(id, at) {
     this.db.prepare("UPDATE mcp_tokens SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL").run(at, id);
+    // Schema v5: OAuth grants and every token in them end with the account change as well (the
+    // per-request epoch check already refuses them; this makes the state durable and visible).
+    this.db.prepare("UPDATE oauth_tokens SET revoked_at=? WHERE revoked_at IS NULL AND grant_id IN (SELECT id FROM oauth_grants WHERE user_id=?)").run(at, id);
+    this.db.prepare("UPDATE oauth_grants SET revoked_at=?, revoked_reason='account_changed' WHERE user_id=? AND revoked_at IS NULL").run(at, id);
   }
 
   atomically(action) {

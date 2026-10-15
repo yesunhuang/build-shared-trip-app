@@ -26,9 +26,9 @@ Treat every trip as clean-room data. Never carry itinerary content, travelers, I
 
 - The owner's admin token (`SHARED_TRIP_ADMIN_TOKEN`) is private and authorizes everything, including account administration and MCP. Never share it with companions, and never write it into files, logs, or reports.
 - Companions get accounts. The owner creates a single-use, expiring invitation code and shares only that code. The invitee enters it on the home page with a username and password they choose privately, which creates a **pending viewer** account. The account is usable only after the owner approves it.
-- Each account is a **viewer** (read and export all trips) or, if the owner assigns it, a **content manager** (owner-like content editing, import, export, archive and restore on **all** trips, current and future). Neither role can manage accounts, invitations, roles, tokens, security, backups, or the server, and nobody can permanently purge a trip. Revocation or a role change ends that account's sessions and MCP tokens immediately. Reapproval does not revive them.
-- MCP accepts the owner's admin bearer or an owner-issued content-manager access token (fixed 90 days, `/mcp` only, shown once). Browser cookies never authorize MCP. If you act through a content-manager token, you have no account or security authority; do not ask for the admin token to gain it. Only the owner issues, renews (issue replacement, update client, revoke old), or revokes tokens and configures clients. Never request, accept, print, or store a token secret in chat, files, or reports.
-- There is no anonymous sharing, per-trip membership, OAuth, self-service access, or offline write queue. Do not describe or promise them.
+- Each account is a **viewer** (read and export all trips) or, if the owner assigns it, a **content manager** (owner-like content editing, import, export, archive and restore on **all** trips, current and future). Neither role can manage accounts, invitations, roles, tokens, OAuth grants, security, backups, or the server, and nobody can permanently purge a trip. Revocation or a role change ends that account's sessions, MCP tokens, and OAuth grants immediately. Reapproval does not revive them.
+- MCP accepts the owner's admin bearer, an owner-issued content-manager access token (fixed 90 days, `/mcp` only, shown once), or, in the schema v5 release, an OAuth access token for clients such as ChatGPT that cannot send a custom key. Browser cookies never authorize MCP. OAuth is denied unless the owner names one approved content manager in `SHARED_TRIP_OAUTH_USERNAME`. That account holder then signs in and consents explicitly, and the grant ends at most 90 days later ([mcp.md § OAuth](references/mcp.md#oauth-for-clients-without-custom-headers)). If you act through a content-manager token or OAuth grant, you have no account or security authority; do not ask for the admin token to gain it. Only the owner issues, renews (issue replacement, update client, revoke old), or revokes tokens and grants, and configures clients. Never request, accept, print, or store a token secret, refresh token, authorization code, client secret, or password in chat, files, or reports.
+- There is no anonymous sharing, per-trip membership, self-service access, automatic account enrollment or approval through OAuth, or offline write queue. Do not describe or promise them. Do not claim that an OAuth client connection works until an actual client sign-in and consent has been recorded.
 
 ## Authoring rules
 
@@ -58,7 +58,7 @@ node scripts/test-content-manager-ui.mjs   # content-manager and owner token UI 
 node scripts/build-docs-demo.mjs
 ```
 
-Then repeat the responsive QA. The manifest identity (`id`, `start_url`, and `scope` all `/`) must stay stable. The self-hosted service worker must never cache `/api`, `/mcp`, `/photos/*`, protected trip pages, or trip payloads. Self-hosted private photos belong in `SHARED_TRIP_DATA_DIR/photos`, never in source or public directories. Never add private filename mappings to the public, generic `photos/manifest.js`.
+Then repeat the responsive QA. The manifest identity (`id`, `start_url`, and `scope` all `/`) must stay stable. The self-hosted service worker must never cache `/api`, `/mcp`, `/oauth/*`, `/.well-known/oauth-*`, `/photos/*`, protected trip pages, or trip payloads. Self-hosted private photos belong in `SHARED_TRIP_DATA_DIR/photos`, never in source or public directories. Never add private filename mappings to the public, generic `photos/manifest.js`.
 
 ## Legacy static generator (opt-in)
 
@@ -94,4 +94,4 @@ Report:
 - which MCP client was used, if any (for example the official SDK smoke test, not a third-party AI app unless that was actually exercised);
 - assumptions or traveler facts still awaiting confirmation.
 
-Do not claim synchronization, offline behavior, installation, MCP client compatibility, viewer or content-manager access control, token issuance or expiry, backups, crash recovery, map-tile availability, or deployment were verified unless they were actually exercised.
+Do not claim synchronization, offline behavior, installation, MCP client compatibility, viewer or content-manager access control, token issuance or expiry, OAuth discovery, consent or grant expiry, backups, crash recovery, map-tile availability, or deployment were verified unless they were actually exercised.

@@ -1,4 +1,4 @@
-import { getGooglePlaceLinks } from "./google-place-links.js?v=v-a8b9801b5189";
+import { getGooglePlaceLinks } from "./google-place-links.js?v=v-b339dc016940";
 import {
   createTripPoller,
   downloadJSON,
@@ -16,11 +16,11 @@ import {
   sessionCanEdit,
   toRenderTrip,
   tripIdFromPath
-} from "./hosted-client.js?v=v-a8b9801b5189";
-import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-a8b9801b5189";
-import { optimizedPhotoUrl } from "./photo-assets.js?v=v-a8b9801b5189";
-import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-a8b9801b5189";
-import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-a8b9801b5189";
+} from "./hosted-client.js?v=v-b339dc016940";
+import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-b339dc016940";
+import { optimizedPhotoUrl } from "./photo-assets.js?v=v-b339dc016940";
+import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-b339dc016940";
+import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-b339dc016940";
 import {
   getInitialLanguage,
   languageStorageKey,
@@ -28,7 +28,7 @@ import {
   localizeTrip,
   saveLanguage,
   ui
-} from "./i18n.js?v=v-a8b9801b5189";
+} from "./i18n.js?v=v-b339dc016940";
 import {
   DAY_FORECAST_LOCATIONS,
   fetchTripForecast,
@@ -36,9 +36,9 @@ import {
   localizeForecastLocation,
   weatherCodeIcon,
   weatherCodeKey
-} from "./weather-forecast.js?v=v-a8b9801b5189";
-import { getFlightBookings } from "./flight-bookings.js?v=v-a8b9801b5189";
-import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-a8b9801b5189";
+} from "./weather-forecast.js?v=v-b339dc016940";
+import { getFlightBookings } from "./flight-bookings.js?v=v-b339dc016940";
+import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-b339dc016940";
 
 const FIREBASE_SDK_VERSION = "12.15.0";
 // Self-hosted mode is decided before any Firebase code path. It never loads the
@@ -50,7 +50,7 @@ let firebaseConfig = {};
 let tripDocumentPath = "";
 const firebaseConfigPromise = HOSTED
   ? Promise.resolve()
-  : import("./firebase-config.js?v=v-a8b9801b5189")
+  : import("./firebase-config.js?v=v-b339dc016940")
     .then((module) => {
       firebaseConfig = module.firebaseConfig || {};
       tripDocumentPath = module.tripDocumentPath || "";

@@ -2,14 +2,15 @@
 
 The authenticated /mcp endpoint uses official @modelcontextprotocol/sdk 1.32.1, stateless Streamable HTTP, and JSON responses. Its tested protocol revision is 2025-11-25. Sources: [official transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports), [server SDK](https://ts.sdk.modelcontextprotocol.io/server), and [client SDK](https://ts.sdk.modelcontextprotocol.io/client).
 
-Every request needs a bearer header. Two credentials are accepted:
+Every request needs a bearer header. Three credentials are accepted:
 
 | Credential | Header | Scope |
 | --- | --- | --- |
-| Owner admin secret | `Authorization: Bearer <SHARED_TRIP_ADMIN_TOKEN>` | All tools. Still supported for compatibility; it is also the master credential for everything else, so prefer a content-manager token for day-to-day AI editing. |
-| Content-manager access token | `Authorization: Bearer <owner-issued token>` | All tools, acting as that approved content manager on every trip. Valid **only** at `/mcp`, for a fixed 90 days, until revoked, or until the account is revoked or changes role. |
+| Owner admin secret | `Authorization: Bearer <SHARED_TRIP_ADMIN_TOKEN>` | All tools. Still supported for compatibility; it is also the master credential for everything else, so prefer a content-manager credential for day-to-day AI editing. |
+| Content-manager access token | `Authorization: Bearer <owner-issued token>` | All tools, acting as that approved content manager on every trip. Valid **only** at `/mcp`, for a fixed 90 days, until revoked, or until the account is revoked or changes role. For clients that accept a custom header. |
+| OAuth access token (schema v5 release) | `Authorization: Bearer <token obtained by the client>` | All tools, acting as the single configured content manager. Scope `trips:manage`, bound to the `/mcp` resource. For clients such as ChatGPT that cannot accept a custom API key. See [OAuth](#oauth-for-clients-without-custom-headers). |
 
-Browser session cookies are refused at /mcp with 401, including owner, content-manager and viewer sessions. Viewer accounts never get MCP access; do not give a viewer the admin secret or a token to work around this. No tool manages accounts, invitations, roles, tokens, backups, or the server, and none permanently purges a trip. Origin headers, when present, must match the configured origin. GET/DELETE return 405; each message uses POST, and notifications receive 202. A reverse proxy must forward the Authorization header and pass POST/202 responses unbuffered. Legacy SSE, stdio-only transport, OAuth discovery, draft revisions, and external AI client compatibility are not claimed.
+Browser session cookies are refused at /mcp with 401, including owner, content-manager and viewer sessions. Viewer accounts never get MCP access; do not give a viewer the admin secret or a token to work around this. No tool manages accounts, invitations, roles, tokens, OAuth grants, credentials, security, backups, databases, or the server, and none permanently purges a trip. Origin headers, when present, must match the configured origin. GET/DELETE return 405; each message uses POST, and notifications receive 202. A reverse proxy must forward the Authorization header and pass POST/202 responses unbuffered. Legacy SSE, stdio-only transport, draft revisions, and named external AI-client compatibility are not claimed.
 
 ## Tools
 
@@ -54,7 +55,7 @@ For clients supporting Streamable HTTP with custom headers:
 }
 ~~~
 
-Keep the actual secret in private client storage. Configuration field names and environment expansion depend on the client. The supported transport is Streamable HTTP with a custom `Authorization` header, as used by the official SDK client; OAuth is not implemented, and OAuth-only clients need additional work. No named AI client is claimed to be compatible: verify any external client separately.
+Keep the actual secret in private client storage. Configuration field names and environment expansion depend on the client. This custom-header path is what the official SDK client uses. Clients that cannot send a custom header use [OAuth](#oauth-for-clients-without-custom-headers) instead. No named AI client is claimed to be compatible: verify any external client separately.
 
 ### Provisioning a content manager's token (owner only)
 
@@ -65,6 +66,57 @@ Keep the actual secret in private client storage. Configuration field names and 
 5. Renew before the 90-day expiry: issue a replacement, update the client's private configuration, confirm it connects, then revoke the old token. Revoke immediately if a token may have leaked.
 
 The person's account identity persists across token renewals; only the token expires. Revoking the account or changing its role invalidates every token issued for it.
+
+## OAuth for clients without custom headers
+
+Some clients, including ChatGPT, cannot be given a custom API key. For them the schema v5 release adds an OAuth 2.1 authorization server and protected-resource metadata in the same service, following the [MCP 2025-11-25 authorization specification](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization). OpenAI's requirements are in [Plugin authentication](https://developers.openai.com/plugins/build/auth) and [Plugin submission](https://developers.openai.com/plugins/deploy/submission). The admin bearer and the 90-day content-manager token above are unchanged.
+
+**Eligibility.** OAuth is off by default. Only the one approved content-manager account named by `SHARED_TRIP_OAUTH_USERNAME` (for example `sample-editor`) can approve a grant. If the variable is unset, every grant is denied. Nobody is enrolled, approved, or promoted automatically; the owner still controls invitations, approval, and the role. The owner's admin secret cannot be used to sign in at `/oauth/authorize`, and the owner is never an OAuth principal.
+
+**Authority.** An OAuth grant has scope `trips:manage`. It gives exactly the content-manager rights over the same six tools and nothing else: no account, invitation, role, token, grant, credential, security, infrastructure, database, admin, or purge operation. Every request re-checks the account's current approval, role, and session epoch, and also checks that the grant is current.
+
+### Endpoints and metadata
+
+All values use the configured `SHARED_TRIP_ORIGIN`; `https://trips.example.org` is fictional.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp` | Protected-resource metadata (RFC 9728): `resource` is `https://trips.example.org/mcp`; `authorization_servers` is `["https://trips.example.org"]`. |
+| GET | `/.well-known/oauth-authorization-server` | Authorization-server metadata (RFC 8414): `issuer` is exactly the origin, `code_challenge_methods_supported` is only `S256`, and `authorization_response_iss_parameter_supported` is `true`. |
+| POST | `/oauth/register` | Dynamic client registration for public clients only (token endpoint authentication `none`), with the authorization-code and refresh-token grant types. The only accepted redirect URI is exactly `https://chatgpt.com/connector_platform_oauth_redirect`. Client ID metadata documents (CIMD) are not supported. |
+| GET/POST | `/oauth/authorize` | The eligible account signs in explicitly with its username and password, then explicitly approves or denies. An existing browser session is not consent. |
+| POST | `/oauth/token` | Exchanges a code or refresh token. Returns an opaque access token (at most 15 minutes) and a rotating refresh token. |
+| POST | `/oauth/revoke` | Token revocation, bound to the client that holds the token. |
+
+Security properties:
+
+- Codes are single-use, expire within 5 minutes, and are bound to the client, redirect URI, resource, and PKCE S256 verifier. Access tokens are bound to the `/mcp` resource and are refused by `/api/*`.
+- Each grant has an absolute 90-day lifetime from consent. Refreshing never extends it. After that date, the account holder must give a new explicit consent.
+- Refresh tokens rotate on use. Replaying an old refresh token revokes the whole token family and its access tokens.
+- The database stores only digests of codes, access tokens, and refresh tokens, never their values.
+- Revoking the account, changing its role, or revoking the grant through the owner API ends OAuth access immediately.
+
+Owner-only grant administration (metadata only, never token values):
+
+On the home page, open **Accounts → Show assistant access → Browser connections (OAuth)** to list or revoke that account's connections. This panel is available only to the owner. The same operations have these API routes:
+
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `/api/users/<id>/oauth-grants` | Grant metadata for that account |
+| POST | `/api/users/<id>/oauth-grants/<grantId>/revoke` | Revokes that grant and its tokens |
+
+### Connecting an OAuth client (owner-controlled)
+
+1. Make sure the intended account (for example `sample-editor`) is approved with the **Content manager** role ([self-hosted.md](self-hosted.md#accounts-and-access)).
+2. In the private env file, set `SHARED_TRIP_OAUTH_USERNAME=<approved-content-manager-username>` and restart the service. Never put this setting, or any real host name, in the repository.
+3. In the client, add the MCP server URL `https://<your-origin>/mcp` and choose OAuth. The client discovers the metadata and registers itself. There is no client secret, and nothing needs to be pasted.
+4. In the sign-in window that opens, the account holder enters that account's username and password, checks that the request is for this service, and chooses approve or deny.
+5. Confirm that the client lists the six tools and that a read-only `list_trips` works.
+6. Never paste access tokens, refresh tokens, authorization codes, passwords, or redirect URLs containing a `code` or `state` value into chats, issues, logs, screenshots, or a plugin package.
+
+**ChatGPT plugin packages.** Update the existing private plugin in place, preserving its identity and audience. In root `mcp.json`, set the server's `extensions.com.openai.auth.type` to `oauth`, `client.mode` to `dcr`, and `baseScopes` to `["trips:manage"]`. Discovery supplies the endpoints; `resource`, if specified, must exactly match the MCP resource. These fields follow OpenAI's [MCP authentication configuration reference](https://developers.openai.com/plugins/build/plugins#oauth-configuration-reference). Do not create a duplicate or publish workspace, app, plugin, or connector identifiers. A package must never contain a token or client secret. Public submission ([submission guide](https://developers.openai.com/plugins/deploy/submission)) remains a separate decision for the owner.
+
+**Ending or renewing.** To stop access, revoke the grant through the owner API, or revoke or change the role of the account. Also unset `SHARED_TRIP_OAUTH_USERNAME` so that no new grant can be approved. When the 90-day grant ends, reconnect from the client and give a new explicit consent.
 
 ## Reproducible protocol checks
 
@@ -79,3 +131,5 @@ node scripts/mcp-smoke.mjs http://127.0.0.1:4173/mcp
 Alternatively set SHARED_TRIP_MCP_URL and run npm run mcp:smoke. This initializes MCP, discovers tools, creates a fictional trip, adds a day/reminder, and reads them back. The test trip remains in that storage; use a disposable instance.
 
 The automated server suite covers editing in both HTTP/MCP directions, authentication, account negative-access checks, isolation, conflicts, atomicity, retries, persistence, and restore. Only the official SDK client over local HTTP has been verified locally; the earlier fictional live HTTPS trial used the owner admin bearer and predates content-manager tokens, import_trip and export_trip. Content-manager tokens over public HTTPS, proxy behavior, and third-party AI clients remain separate checks.
+
+OAuth local acceptance: the complete server suite, official SDK OAuth provider (including automatic refresh), migration/restore and fictional Chrome sign-in/consent checks passed; see [checkpoint 008](../doc/Progress/progress_2026_10_15_cpx008_codex_b.md). Deployment and an actual ChatGPT connection remain pending. The owner must sign in and consent through the actual client before its compatibility is claimed.

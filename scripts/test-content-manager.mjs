@@ -8,7 +8,7 @@
 // injected clock; role-change and revocation invalidation and re-approval non-revival; owner and
 // viewer compatibility; digest-only credential persistence; payload-free audit with atomic write
 // semantics; conflicts, atomic rollback and durable identical retries; restart persistence,
-// snapshot validation and a fictional schema-v3 -> v4 upgrade.
+// snapshot validation and a fictional schema-v3 -> current (SCHEMA_VERSION) upgrade.
 //
 // Credential safety: generated secrets, cookies and passwords are never passed to assertion messages
 // or compared with assert.equal/deepEqual; assertions use booleans, statuses and generic labels.
@@ -22,8 +22,34 @@ import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { readConfig, startServer } from "../server/app.mjs";
-import { snapshotDatabase, validateSnapshot } from "../server/db.mjs";
+import { SCHEMA_VERSION, snapshotDatabase, validateSnapshot } from "../server/db.mjs";
 import { MAX_AUDIT_EVENTS } from "../server/audit.mjs";
+
+// Current-version assertions follow the exported schema constant; the v3 fixture keeps its old version.
+assert.ok(Number.isInteger(SCHEMA_VERSION) && SCHEMA_VERSION >= 4, "exported SCHEMA_VERSION is a current schema number");
+const preUpgradeSnapshotPattern = new RegExp("^shared-trip\\.sqlite\\.before-v" + SCHEMA_VERSION + "-\\d+$");
+
+// Fixture-only downgrade helper for disposable test databases: drops every table a newer schema added
+// under the oauth_ prefix (discovered from sqlite_master, never guessed) so the fixture is a genuine
+// old schema. Foreign keys are suspended only for these drops and then restored to their prior setting.
+const OAUTH_TABLE = /^oauth_[a-z_]+$/;
+const oauthTables = (db) => db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name).filter((name) => OAUTH_TABLE.test(name));
+function dropOAuthTablesForFixture(db) {
+  const names = oauthTables(db);
+  if (names.length === 0) return;
+  const foreignKeys = db.prepare("PRAGMA foreign_keys").get().foreign_keys;
+  db.exec("PRAGMA foreign_keys=OFF");
+  try {
+    for (const name of names) db.exec("DROP TABLE IF EXISTS \"" + name.replaceAll("\"", "\"\"") + "\"");
+    if (db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'").get().n) {
+      const forget = db.prepare("DELETE FROM sqlite_sequence WHERE name=?");
+      for (const name of names) forget.run(name);
+    }
+  } finally {
+    db.exec("PRAGMA foreign_keys=" + (foreignKeys ? "ON" : "OFF"));
+  }
+  assert.deepEqual(oauthTables(db), [], "fixture downgrade removed every oauth_ table");
+}
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "shared-trip-manager-"));
@@ -574,10 +600,10 @@ try {
   assert.throws(() => validateSnapshot(tamper("orphan-token.sqlite", "PRAGMA foreign_keys=OFF; UPDATE mcp_tokens SET user_id='usr_missing000000' WHERE id=(SELECT id FROM mcp_tokens LIMIT 1)")), /Invalid credential/);
   assert.throws(() => validateSnapshot(tamper("bad-audit.sqlite", "UPDATE audit_log SET action='shell.exec' WHERE seq=(SELECT MAX(seq) FROM audit_log)")), /Invalid audit/);
   assert.throws(() => validateSnapshot(tamper("bad-role.sqlite", "PRAGMA ignore_check_constraints=ON; UPDATE users SET role='owner' WHERE id=(SELECT id FROM users LIMIT 1)")), /Invalid account role/);
-  console.log("Snapshots: v4 validation accepts live backups, restore preserves roles/credentials/audit, and tampered credentials, roles or audit rows are rejected.");
+  console.log("Snapshots: current-schema (v" + SCHEMA_VERSION + ") validation accepts live backups, restore preserves roles/credentials/audit, and tampered credentials, roles or audit rows are rejected.");
 
   // ---------------------------------------------------------------------------------------------
-  // Fictional schema-v3 -> v4 upgrade.
+  // Fictional schema-v3 -> current schema (SCHEMA_VERSION) upgrade.
   const v3 = await start("schema-v3");
   const old = client(v3.url);
   const legacyTrip = check(await old.owner("/api/trips", { method: "POST", body: { requestId: "v3-create", trip: { title: TITLES[6] } } }), 201, "v3 create").trip;
@@ -596,6 +622,7 @@ try {
   await stop(v3);
   const v3File = path.join(temporary, "schema-v3", "shared-trip.sqlite");
   const downgrade = new DatabaseSync(v3File);
+  dropOAuthTablesForFixture(downgrade);
   downgrade.exec("DROP TABLE mcp_tokens; DROP TABLE audit_log; DELETE FROM sqlite_sequence WHERE name='audit_log'; ALTER TABLE users DROP COLUMN role; PRAGMA user_version=3");
   const v3Rows = (db) => JSON.stringify({
     trips: db.prepare("SELECT id,version,archived,data FROM trips ORDER BY id").all(),
@@ -609,10 +636,10 @@ try {
   validateSnapshot(v3File);
   const upgraded = await start("schema-v3");
   const now4 = client(upgraded.url);
-  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version, 4);
+  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
   assert.ok(v3Rows(upgraded.db) === priorRows, "trips, versions, archive state, retry log, account IDs/statuses/hashes/epochs and invitations are unchanged");
   assert.ok(upgraded.db.prepare("SELECT role FROM users").all().every((row) => row.role === "viewer"), "migrated accounts default to viewer");
-  const preUpgrade = () => fs.readdirSync(path.join(temporary, "schema-v3")).filter((file) => /^shared-trip\.sqlite\.before-v4-\d+$/.test(file));
+  const preUpgrade = () => fs.readdirSync(path.join(temporary, "schema-v3")).filter((file) => preUpgradeSnapshotPattern.test(file));
   assert.equal(preUpgrade().length, 1, "one pre-upgrade snapshot");
   const retained = new DatabaseSync(path.join(temporary, "schema-v3", preUpgrade()[0]), { readOnly: true });
   assert.equal(retained.prepare("PRAGMA user_version").get().user_version, 3); assert.ok(v3Rows(retained) === priorRows, "pre-upgrade snapshot holds the v3 data"); retained.close();
@@ -628,7 +655,7 @@ try {
   check(await now4.owner("/api/users/" + legacyReturning.id + "/role", { method: "POST", body: { role: "content-manager" } }), 200, "promote a migrated account");
   const legacyManagerCookie = await now4.login(legacyReturning);
   const legacyCurrent = await now4.trip(legacyTrip.id);
-  check(await now4.as(legacyManagerCookie, "/api/trips/" + legacyTrip.id + "/changes", { method: "POST", body: { requestId: "v4-manager-edit", expectedVersion: legacyCurrent.version, changes: [{ type: "update_trip", fields: { shortName: "Legacy" } }] } }), 200, "migrated manager edits a pre-upgrade trip");
+  check(await now4.as(legacyManagerCookie, "/api/trips/" + legacyTrip.id + "/changes", { method: "POST", body: { requestId: "upgraded-manager-edit", expectedVersion: legacyCurrent.version, changes: [{ type: "update_trip", fields: { shortName: "Legacy" } }] } }), 200, "migrated manager edits a pre-upgrade trip");
   const upgradedToken = await now4.issue(legacyReturning.id, "Fictional upgraded");
   assert.equal(await now4.mcpStatus({ Authorization: "Bearer " + upgradedToken.secret }), 200, "credentials work after upgrade");
   const password = newPassword();
@@ -636,22 +663,22 @@ try {
   assert.equal((await now4.accounts()).find((a) => a.username === "legacy.newcomer").role, "viewer", "new accounts after upgrade default to viewer");
   await stop(upgraded);
   const again = await start("schema-v3");
-  assert.equal(again.db.prepare("PRAGMA user_version").get().user_version, 4);
-  assert.equal(preUpgrade().length, 1, "migration is idempotent and does not re-snapshot v4");
+  assert.equal(again.db.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
+  assert.equal(preUpgrade().length, 1, "migration is idempotent and does not re-snapshot the current schema");
   assert.equal((await client(again.url).accounts()).find((a) => a.id === legacyReturning.id).role, "content-manager", "role persists across restart");
   assert.equal(await client(again.url).mcpStatus({ Authorization: "Bearer " + upgradedToken.secret }), 200, "credential persists across restart");
-  const liveV4 = path.join(temporary, "v4-live.sqlite");
-  await snapshotDatabase(path.join(temporary, "schema-v3", "shared-trip.sqlite"), liveV4);
-  validateSnapshot(liveV4);
+  const liveCurrent = path.join(temporary, "current-live.sqlite");
+  await snapshotDatabase(path.join(temporary, "schema-v3", "shared-trip.sqlite"), liveCurrent);
+  validateSnapshot(liveCurrent);
   await stop(again);
   const fromV3 = path.join(temporary, "restored-from-v3");
   execFileSync(process.execPath, ["server/cli/restore.mjs", path.join(temporary, "schema-v3", preUpgrade()[0])], { cwd: repoRoot, env: { ...process.env, SHARED_TRIP_DATA_DIR: fromV3 }, stdio: "pipe" });
   const restoredV3 = await start("restored-from-v3");
-  assert.equal(restoredV3.db.prepare("PRAGMA user_version").get().user_version, 4);
+  assert.equal(restoredV3.db.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
   assert.ok(restoredV3.db.prepare("SELECT role FROM users").all().every((row) => row.role === "viewer"), "a restored v3 snapshot upgrades with viewer roles");
   assert.equal((await client(restoredV3.url).trip(legacyArchived.id)).archived, true);
   await stop(restoredV3);
-  console.log("Fictional schema-v3 database upgrades to v4 idempotently with a retained snapshot, preserved IDs/state/retry log and viewer defaults; v3 snapshots restore into v4.");
+  console.log("Fictional schema-v3 database upgrades to the current schema (v" + SCHEMA_VERSION + ") idempotently with a retained snapshot, preserved IDs/state/retry log and viewer defaults; v3 snapshots restore into the current schema.");
 
   // ---------------------------------------------------------------------------------------------
   // Bounded audit retention and field sanitation (store level).

@@ -25,7 +25,7 @@
 	# and /attachments/* are authenticated private media (attachments are
 	# always 404 after the access check); /resources.html and /trips/* are
 	# trip-specific shells whose data loads only after sign-in.
-	@protected path /api/* /mcp /mcp/* /trips/* /photos/* /attachments/* /resources.html
+	@protected path /api/* /mcp /mcp/* /oauth/* /.well-known/oauth-* /trips/* /photos/* /attachments/* /resources.html
 	header @protected {
 		Cache-Control "no-store"
 		CDN-Cache-Control "no-store"

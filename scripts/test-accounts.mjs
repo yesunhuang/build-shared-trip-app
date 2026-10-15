@@ -1,8 +1,8 @@
 // Owner-managed viewer accounts: real HTTP requests against the actual service with fictional data.
 // Covers unauthenticated, pending, approved read-only, revoked-active-session and owner paths, MCP
 // refusal, invitations (single use, expiry), logout, protected media and cache headers, rate
-// limits, the default <dataDir>/photos media store, the referrer policy, schema v2 -> v4 upgrade and
-// backup/restore preservation of account state.
+// limits, the default <dataDir>/photos media store, the referrer policy, schema v2 -> current
+// (SCHEMA_VERSION) upgrade and backup/restore preservation of account state.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -14,7 +14,33 @@ import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { readConfig, startServer } from "../server/app.mjs";
-import { snapshotDatabase, validateSnapshot } from "../server/db.mjs";
+import { SCHEMA_VERSION, snapshotDatabase, validateSnapshot } from "../server/db.mjs";
+
+// Current-version assertions follow the exported schema constant; the v2 fixture keeps its old version.
+assert.ok(Number.isInteger(SCHEMA_VERSION) && SCHEMA_VERSION >= 4, "exported SCHEMA_VERSION is a current schema number");
+const preUpgradeSnapshotPattern = new RegExp("^shared-trip\\.sqlite\\.before-v" + SCHEMA_VERSION + "-\\d+$");
+
+// Fixture-only downgrade helper for disposable test databases: drops every table a newer schema added
+// under the oauth_ prefix (discovered from sqlite_master, never guessed) so the fixture is a genuine
+// old schema. Foreign keys are suspended only for these drops and then restored to their prior setting.
+const OAUTH_TABLE = /^oauth_[a-z_]+$/;
+const oauthTables = (db) => db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name).filter((name) => OAUTH_TABLE.test(name));
+function dropOAuthTablesForFixture(db) {
+  const names = oauthTables(db);
+  if (names.length === 0) return;
+  const foreignKeys = db.prepare("PRAGMA foreign_keys").get().foreign_keys;
+  db.exec("PRAGMA foreign_keys=OFF");
+  try {
+    for (const name of names) db.exec("DROP TABLE IF EXISTS \"" + name.replaceAll("\"", "\"\"") + "\"");
+    if (db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='sqlite_sequence'").get().n) {
+      const forget = db.prepare("DELETE FROM sqlite_sequence WHERE name=?");
+      for (const name of names) forget.run(name);
+    }
+  } finally {
+    db.exec("PRAGMA foreign_keys=" + (foreignKeys ? "ON" : "OFF"));
+  }
+  assert.deepEqual(oauthTables(db), [], "fixture downgrade removed every oauth_ table");
+}
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "shared-trip-accounts-"));
@@ -335,7 +361,7 @@ try {
   await stop(defaults);
   console.log("Default photo store lives in <dataDir>/photos outside the checkout: unauthenticated, pending and revoked access is refused, approved viewers and the owner read it, the public manifest stays generic, and the referrer policy sends only the origin cross-origin.");
 
-  // --- Fictional schema v2 -> v4 upgrade ---
+  // --- Fictional schema v2 -> current schema (SCHEMA_VERSION) upgrade ---
   const v2 = await start("schema-v2");
   const old = client(v2.url);
   const v2Trip = expect(await old.owner("/api/trips", { method: "POST", body: { requestId: "v2-create", trip: { title: "Fictional Prior Coast" } } }), 201, "v2 create").trip;
@@ -346,14 +372,15 @@ try {
   await stop(v2);
   const v2File = path.join(temporary, "schema-v2", "shared-trip.sqlite");
   const downgrade = new DatabaseSync(v2File);
+  dropOAuthTablesForFixture(downgrade);
   downgrade.exec("DROP TABLE users; DROP TABLE invitations; PRAGMA user_version=2");
   const rows = (db) => JSON.stringify({ trips: db.prepare("SELECT id,version,archived,data FROM trips ORDER BY id").all(), log: db.prepare("SELECT scope,request_id,fingerprint,result FROM request_log ORDER BY scope,request_id").all() });
   const priorRows = rows(downgrade); downgrade.close();
   const upgraded = await start("schema-v2");
   const now3 = client(upgraded.url);
-  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version, 4);
+  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
   assert.equal(rows(upgraded.db), priorRows, "trip rows, IDs, versions, archive state and retry records are unchanged");
-  const snapshots = () => fs.readdirSync(path.join(temporary, "schema-v2")).filter((file) => /^shared-trip\.sqlite\.before-v4-\d+$/.test(file));
+  const snapshots = () => fs.readdirSync(path.join(temporary, "schema-v2")).filter((file) => preUpgradeSnapshotPattern.test(file));
   assert.equal(snapshots().length, 1);
   const preUpgrade = new DatabaseSync(path.join(temporary, "schema-v2", snapshots()[0]), { readOnly: true });
   assert.equal(preUpgrade.prepare("PRAGMA user_version").get().user_version, 2); assert.equal(rows(preUpgrade), priorRows); preUpgrade.close();
@@ -363,17 +390,17 @@ try {
   expect(await now3.accept(upgradeInvite.token, "upgrade.viewer", viewerSecret), 201, "accounts work after upgrade");
   await stop(upgraded);
   const again = await start("schema-v2");
-  assert.equal(again.db.prepare("PRAGMA user_version").get().user_version, 4);
-  assert.equal(snapshots().length, 1, "the migration is idempotent and does not re-snapshot a v4 database");
+  assert.equal(again.db.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
+  assert.equal(snapshots().length, 1, "the migration is idempotent and does not re-snapshot a current-schema database");
   assert.equal(expect(await client(again.url).owner("/api/users"), 200, "after restart").accounts[0].username, "upgrade.viewer");
   await stop(again);
   const fromOld = path.join(temporary, "restored-from-v2");
   execFileSync(process.execPath, ["server/cli/restore.mjs", path.join(temporary, "schema-v2", snapshots()[0])], { cwd: repoRoot, env: { ...process.env, SHARED_TRIP_DATA_DIR: fromOld }, stdio: "pipe" });
   const restoredOld = await start("restored-from-v2");
-  assert.equal(restoredOld.db.prepare("PRAGMA user_version").get().user_version, 4);
+  assert.equal(restoredOld.db.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
   assert.equal(expect(await client(restoredOld.url).owner("/api/trips/" + v2Archived.id), 200, "restored v2").trip.archived, true);
   await stop(restoredOld);
-  console.log("Fictional schema-v2 database upgrades to v4 idempotently with a retained pre-upgrade snapshot; a v2 snapshot restores into v4.");
+  console.log("Fictional schema-v2 database upgrades to the current schema (v" + SCHEMA_VERSION + ") idempotently with a retained pre-upgrade snapshot; a v2 snapshot restores into the current schema.");
 } finally {
   for (const item of running.reverse()) await item.close().catch(() => {});
   fs.rmSync(temporary, { recursive: true, force: true });

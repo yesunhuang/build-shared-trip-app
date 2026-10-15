@@ -15,14 +15,17 @@ Placeholders: `trips.example.org` is fictional. `/PRIVATE/shared-trips/...` stan
 | Variable (private env file) | Used by | Meaning |
 | --- | --- | --- |
 | SHARED_TRIP_ADMIN_TOKEN | app only | Owner-only bearer secret of 32-512 characters. It is the master credential, including MCP. Content-manager MCP tokens are issued from the home page and stored in the database, not in this file. |
-| SHARED_TRIP_ORIGIN | app | `https://<public host>`. The app rejects any other Host or Origin value. |
+| SHARED_TRIP_ORIGIN | app | `https://<public host>`. The app rejects any other Host or Origin value. It is also the exact OAuth issuer, and `<origin>/mcp` is the OAuth resource. |
+| SHARED_TRIP_OAUTH_USERNAME | app only, optional | `<approved-content-manager-username>` (for example `sample-editor`). It names the one account allowed to approve OAuth grants (schema v5 release). Leave it unset to deny all OAuth. It is not a secret, but it is deployment-specific, so keep it in the private file. |
 | SHARED_TRIP_DOMAIN | Caddy only | Same hostname as the origin |
 | SHARED_TRIP_DATA_PATH | app `/data` | Data directory owned by UID 1000 on a local filesystem |
 | SHARED_TRIP_BACKUP_PATH | app `/backups` | Separate snapshot storage, owned by UID 1000 |
 | CADDY_DATA_PATH / CADDY_CONFIG_PATH | Caddy `/data`, `/config` | Certificates, keys, and ACME account data |
 | SHARED_TRIP_IMAGE_TAG / CADDY_IMAGE | images | App rollback tag; pinned Caddy image |
 
-The data directory holds `shared-trip.sqlite` (trips, retry log, accounts and roles, invitations, MCP access-token records, audit log), the ownership files described in [section 9](#9-unclean-stops-and-data-directory-ownership), pre-migration snapshots, and the optional private `photos/` store. Compose refuses to start when a variable is missing, and it does not create missing host directories. Neither the app port nor the Caddy admin API is published.
+The app container receives only the variables listed in `deploy/compose.yaml`. Before relying on OAuth, check that your reviewed release passes `SHARED_TRIP_OAUTH_USERNAME` through. If it does not, OAuth stays denied.
+
+The data directory holds `shared-trip.sqlite` (trips, retry log, accounts and roles, invitations, MCP access-token records, OAuth client and grant records with token digests, audit log), the ownership files described in [section 9](#9-unclean-stops-and-data-directory-ownership), pre-migration snapshots, and the optional private `photos/` store. Compose refuses to start when a variable is missing, and it does not create missing host directories. Neither the app port nor the Caddy admin API is published.
 
 ## 1. Inspect the host before installing anything
 
@@ -72,7 +75,7 @@ Point the hostname at the server. Caddy automatic HTTPS (https://caddyserver.com
 
 The default HTTP-01 challenge needs origin ports 80 and 443 to be reachable through the configured hostname. Edge redirects, firewall rules, or WAF rules that block port 80 or `/.well-known/acme-challenge/` can prevent issuance or renewal. Check `dc logs caddy` after the first start rather than assuming success. DNS-01 requires a custom Caddy build and is outside this template. Certificates persist in CADDY_DATA_PATH, so keep it across upgrades.
 
-Do not add "cache everything" rules for this host. CDN request limits and bot or WAF features can affect MCP clients and sign-in, so verify them.
+Do not add "cache everything" rules for this host. CDN request limits and bot or WAF features can affect MCP clients, OAuth discovery and token requests, and sign-in, so verify them. The bundled Caddyfile's `@protected` matcher must cover `/oauth/*` and `/.well-known/oauth-*`. If the matcher in your reviewed release does not list them, add them before enabling OAuth.
 
 ## 4. Build and start
 
@@ -93,6 +96,10 @@ done
 curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' \
   --data '{}' https://trips.example.org/mcp                                     # 401
 curl -sS -D - -o /dev/null https://trips.example.org/api/trips                  # no-store headers
+# OAuth release (schema v5): public metadata, no secrets involved
+curl -sS https://trips.example.org/.well-known/oauth-protected-resource/mcp     # resource = origin + /mcp
+curl -sS https://trips.example.org/.well-known/oauth-authorization-server       # issuer = origin, S256 only
+curl -sS -D - -o /dev/null https://trips.example.org/.well-known/oauth-authorization-server   # no-store headers
 curl -sS -o /dev/null -w '%{http_code}\n' --resolve trips.example.org:443:127.0.0.1 \
   https://trips.example.org/health   # from the server: origin cert must verify (no -k)
 ```
@@ -107,7 +114,8 @@ Exercise the account flows with fictional accounts in separate private browser w
 - An approved viewer sees trips read-only and has no create, import, edit, or account controls.
 - An approved content manager (for example `sample-editor`) can create, edit, import, archive and restore trips and has no *Accounts* section or token controls.
 - `/mcp` rejects every browser session, and a fictional content-manager token works at `/mcp` but is refused at `/api/trips`.
-- After you revoke an account or change its role, its next refresh signs it out and its tokens stop working.
+- After you revoke an account or change its role, its next refresh signs it out and its tokens and OAuth grants stop working.
+- With `SHARED_TRIP_OAUTH_USERNAME` unset, an OAuth authorization attempt is denied. With it set to the fictional content manager, only that account can approve, and the admin secret is not accepted at the sign-in page.
 
 Before using real data, revoke the fictional account and archive the fictional trip. Alternatively, switch SHARED_TRIP_DATA_PATH to a new empty directory and keep the trial directory.
 
@@ -124,6 +132,16 @@ Neither role can manage accounts, invitations, roles, tokens, security, backups,
 
 **Content-manager MCP tokens (owner only).** On the content manager's row choose **Show assistant access**, enter a label, and choose **Issue token**. The secret is shown once, has a fixed 90-day lifetime, and works only at `/mcp`. Copy it with the explicit **Copy** button directly into the AI client's private credential store on a machine you control, then choose **Done, hide token**. Never send it through chat or put it in this checkout, the env file, or a script. A failed issuance is not retried; check the list before issuing again. To renew, issue a replacement, update the client, confirm it connects, then revoke the old token. Owner-only `GET /api/audit` lists metadata about these actions, without secrets or payloads. See [mcp.md](../references/mcp.md#provisioning-a-content-managers-token-owner-only).
 
+**OAuth for clients without custom headers (schema v5 release).** ChatGPT and similar clients cannot be given a token to paste.
+
+1. Approve the intended account as a content manager.
+2. Add `SHARED_TRIP_OAUTH_USERNAME=<approved-content-manager-username>` to the private env file with `sudoedit`, then run `dc up -d app`.
+3. In the client, add `https://<your-origin>/mcp` and choose OAuth. The client registers itself as a public client; there is no client secret.
+4. The account holder signs in on the service's `/oauth/authorize` page with that account's username and password, then approves or denies.
+5. List grants with owner-only `GET /api/users/<id>/oauth-grants`, using the private header file described in section 5.
+
+Grants end after at most 90 days, and refresh never extends them, so reconnect with a new consent after that. Revoke a grant with `POST /api/users/<id>/oauth-grants/<grantId>/revoke`, or by revoking the account or changing its role. Unset the variable to block new grants. Update an existing private ChatGPT plugin in place in its private workspace, and keep its identifiers out of this checkout. Details and the OpenAI and MCP references are in [mcp.md § OAuth](../references/mcp.md#oauth-for-clients-without-custom-headers).
+
 ## 7. Online backup
 
 ```bash
@@ -135,7 +153,7 @@ photos="/PRIVATE/shared-trips/backups/photos-${stamp}.tar"
 sudo test ! -e "$photos" && sudo tar -C /PRIVATE/shared-trips/data -cf "$photos" photos
 ```
 
-The CLI uses SQLite's online backup while the service runs and validates the snapshot. The snapshot contains trips, IDs, versions, archive state, the retry log, accounts (with password hashes and roles), invitation digests, MCP access-token records, and the audit log. Treat it as a credential-bearing secret.
+The CLI uses SQLite's online backup while the service runs and validates the snapshot. The snapshot contains trips, IDs, versions, archive state, the retry log, accounts (with password hashes and roles), invitation digests, MCP access-token records, OAuth client and grant records with token digests (schema v5), and the audit log. Treat it as a credential-bearing secret.
 
 The backup command needs no input. Redirecting stdin prevents Compose from consuming later commands when this recipe runs inside a script.
 
@@ -179,7 +197,7 @@ for (const t of Object.keys(spec)) {
 process.exitCode = diff ? 1 : 0;' /drill/input/snapshot.sqlite /drill/data/shared-trip.sqlite
 ```
 
-The drill never touches live data or the backup directory, needs no secret, and prints only counts. A snapshot from schema v1 is normalized during restore, so trip differences are then expected; review them. A v2 snapshot gains empty account tables.
+The drill never touches live data or the backup directory, needs no secret, and prints only counts. It compares trips, retry records, users, and invitations. It does not compare token or OAuth tables, so review those through the owner API after a real recovery. A snapshot from schema v1 is normalized during restore, so trip differences are then expected; review them. A v2 snapshot gains empty account tables.
 
 **Real recovery:**
 
@@ -188,9 +206,9 @@ The drill never touches live data or the backup directory, needs no secret, and 
 3. If you use private photos, extract the matching photo archive into the new directory.
 4. Point SHARED_TRIP_DATA_PATH at the new directory and run `dc up -d app`.
 5. Keep the previous directory untouched.
-6. Open *Accounts* and revoke again anyone whose access was revoked after the snapshot was taken, reapply later role changes, and revoke again any MCP token revoked after the snapshot.
+6. Open *Accounts* and revoke again anyone whose access was revoked after the snapshot was taken, reapply later role changes, and revoke again any MCP token or OAuth grant revoked after the snapshot.
 
-The restored database has the account state from snapshot time. Accounts revoked later are approved again, later role changes are undone, MCP tokens revoked later become valid again until they expire, and invitations redeemed later become usable again until they expire.
+The restored database has the account state from snapshot time. Accounts revoked later are approved again, later role changes are undone, MCP tokens and OAuth grants revoked later become valid again until they expire, and invitations redeemed later become usable again until they expire. An OAuth client whose refresh token rotated after the snapshot has to reconnect and consent again.
 
 ## 9. Unclean stops and data-directory ownership
 
@@ -213,9 +231,11 @@ Never run older and newer releases against one data directory. Docker named or b
 2. Take and validate a backup ([section 7](#7-online-backup)) and copy it off-site.
 3. Update the checkout to the reviewed version. Set a new SHARED_TRIP_IMAGE_TAG in the env file; the previous image keeps its old tag.
 4. Run `dc stop app` and confirm that no other container or host process uses the data directory. A graceful stop of an older PID-lock release removes its own lock. A leftover legacy lock is handled as in [section 9](#9-unclean-stops-and-data-directory-ownership).
-5. Run `dc build app && dc up -d app`, then check `dc ps`, the logs, reading, editing, viewer sign-in and, if used, content-manager sign-in and MCP tokens. Data and configuration mounts are unchanged. If deploy/Caddyfile changed, run `dc up -d --force-recreate caddy`, because a single-file mount otherwise keeps the old file.
+5. Run `dc build app && dc up -d app`, then check `dc ps`, the logs, reading, editing, viewer sign-in and, if used, content-manager sign-in, MCP tokens, and OAuth metadata and grants. Data and configuration mounts are unchanged. If deploy/Caddyfile changed, run `dc up -d --force-recreate caddy`, because a single-file mount otherwise keeps the old file.
 
 **Schema v4** adds account roles, MCP access-token records and the audit log to schema v3's viewer accounts and invitations. The first start on an older database writes `shared-trip.sqlite.before-v4-<time>` into the data directory and migrates in one transaction. Trips, IDs, versions, archive state, retry records and account approval states are preserved. Existing accounts become viewers; promote content managers explicitly afterwards. The pre-migration snapshot is never deleted automatically. Copy it to your backups.
+
+**Schema v5** adds OAuth client, grant, and token-digest tables. It only adds to the schema. The first start writes `shared-trip.sqlite.before-v5-<time>` and migrates in one transaction. Trips, accounts, roles, content-manager tokens, and the audit log are unchanged. The admin bearer and existing 90-day tokens keep working. OAuth stays denied until `SHARED_TRIP_OAUTH_USERNAME` is set. No real data is imported automatically.
 
 **Rollback:** if no schema migration happened, set the old tag and run `dc up -d --no-build app`. Older code refuses a newer schema. In that case:
 
@@ -223,7 +243,7 @@ Never run older and newer releases against one data directory. Docker named or b
 2. With the old image, restore the pre-upgrade snapshot into a new directory ([section 8](#8-restore-drill-into-separate-storage)).
 3. Point SHARED_TRIP_DATA_PATH at the new directory, set the old tag, and start with `--no-build`.
 
-Keep the upgraded directory for analysis. Edits, accounts, role changes and MCP tokens created after the upgrade are not in that snapshot, so export trips first if needed. After rolling back past the content-manager release, every account is a viewer again and only the admin bearer works at `/mcp`; remove the old tokens from AI clients. Restore into fresh storage and preserve any foreign or legacy ownership marker for diagnosis.
+Keep the upgraded directory for analysis. Edits, accounts, role changes and MCP tokens created after the upgrade are not in that snapshot, so export trips first if needed. After rolling back past the content-manager release, every account is a viewer again and only the admin bearer works at `/mcp`; remove the old tokens from AI clients. After rolling back from v5 to v4, OAuth clients stop working, while the admin bearer and the 90-day tokens in the snapshot keep working. The kept v5 directory still holds the post-upgrade writes and OAuth grants. Export the trips you need from it, or roll forward to it later; its grants still expire on their original dates. Restore into fresh storage and preserve any foreign or legacy ownership marker for diagnosis.
 
 Restoring a snapshot also restores its approval and credential-revocation state. Before reconnecting clients, review credentials that were revoked after the snapshot and revoke them again where needed.
 
@@ -250,12 +270,15 @@ The proxy must:
 
 - preserve Host, Origin, Authorization, and Cookie;
 - pass POST requests, including 202 responses, without buffering, caching, or short response timeouts;
-- add the CDN no-store headers for `/api/*`, `/mcp`, `/trips/*`, `/photos/*`, `/attachments/*`, `/resources.html`, and its own errors;
+- add the CDN no-store headers for `/api/*`, `/mcp`, `/oauth/*`, `/.well-known/oauth-*`, `/trips/*`, `/photos/*`, `/attachments/*`, `/resources.html`, and its own errors;
+- forward `/oauth/*` and `/.well-known/oauth-*` unchanged, without redirects or path rewrites, so the issuer and resource match the origin exactly;
 - serve a publicly trusted certificate for Full (strict).
 
 ## Access model
 
-The owner-held admin secret authorizes everything: every trip, writes, import, account, role and token management, the audit log, and MCP (bearer only). Approved accounts sign in with a username and password. Viewers can read and export every trip. Content managers can also create, edit, import, archive and restore every trip, and can use MCP only with an owner-issued, 90-day, `/mcp`-only token; they cannot administer accounts, security or this host. No one can access trip data anonymously.
+The owner-held admin secret authorizes everything: every trip, writes, import, account, role and token management, the audit log, and MCP (bearer only). Approved accounts sign in with a username and password. Viewers can read and export every trip. Content managers can also create, edit, import, archive and restore every trip, and can use MCP only with an owner-issued, 90-day, `/mcp`-only token or, for the one account named in `SHARED_TRIP_OAUTH_USERNAME`, an explicitly consented OAuth grant with the same rights. They cannot administer accounts, security or this host. No one can access trip data anonymously.
+
+Public OAuth metadata (`/.well-known/oauth-*`) contains no trip data or secrets.
 
 Generic shells (sign-in page, scripts, styles, the empty photo manifest) and `/health` are public and carry no trip data. Publishing this code or template grants no trip access.
 
@@ -270,3 +293,4 @@ The app sends `Referrer-Policy: strict-origin-when-cross-origin`, so external ma
 - The running app can write to the backup mount, so off-site copies are the real protection.
 - Desktop and phone-width Chrome interactions and direct Cache Storage/local-storage inspection passed in the observed trial profile; see the [cache completion report](../doc/Progress/progress_2026_10_14_cpx005_codex_b.md). Physical-phone installation, full pointer/touch regression and named external AI-client integration remain separate checks. Real-data migration requires its own authorization and preservation plan.
 - The content-manager release passed isolated Linux production-image tests, preservation checks on restored storage and an authorized app upgrade; [checkpoint 007](../doc/Progress/progress_2026_10_15_cpx007_codex_b.md) records the evidence. Anonymous HTTPS access remained protected. Live content-manager credential authentication over the public proxy/CDN and the actual external AI client still require owner-controlled provisioning and verification.
+- The OAuth release (schema v5) has no recorded local test, upgrade, or deployment evidence yet. An actual ChatGPT connection, with the eligible account's sign-in and consent through the public proxy/CDN, is pending. Progress reports will record what actually ran.

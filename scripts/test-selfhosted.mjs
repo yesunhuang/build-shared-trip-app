@@ -8,7 +8,11 @@ import { DatabaseSync } from "node:sqlite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { readConfig, startServer } from "../server/app.mjs";
-import { snapshotDatabase, validateSnapshot } from "../server/db.mjs";
+import { SCHEMA_VERSION, snapshotDatabase, validateSnapshot } from "../server/db.mjs";
+
+// Current-version assertions follow the exported schema constant; fixtures below keep their old versions.
+assert.ok(Number.isInteger(SCHEMA_VERSION) && SCHEMA_VERSION >= 4, "exported SCHEMA_VERSION is a current schema number");
+const preUpgradeSnapshotPattern = new RegExp("^shared-trip\\.sqlite\\.before-v" + SCHEMA_VERSION + "-\\d+$");
 
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(),"shared-trip-integration-"));
 const token = crypto.randomBytes(32).toString("base64url");
@@ -149,13 +153,13 @@ try {
   const upgraded=await startServer(readConfig({SHARED_TRIP_ADMIN_TOKEN:token,SHARED_TRIP_DATA_DIR:priorDir,SHARED_TRIP_PORT:"0"}));all.push(upgraded);
   const oldRead=ok(await api("/api/trips/prior-trip",{base:upgraded.url})).trip;
   assert.equal(oldRead.id,oldTrip.id);assert.equal(oldRead.version,3);assert.equal(oldRead.days[0].slots[0].id,"prior-plan");
-  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version,4);
-  const priorSnapshot=fs.readdirSync(priorDir).find((file)=>/^shared-trip\.sqlite\.before-v4-\d+$/.test(file));
+  assert.equal(upgraded.db.prepare("PRAGMA user_version").get().user_version,SCHEMA_VERSION);
+  const priorSnapshot=fs.readdirSync(priorDir).find((file)=>preUpgradeSnapshotPattern.test(file));
   assert.ok(priorSnapshot);
   const retained=new DatabaseSync(path.join(priorDir,priorSnapshot),{readOnly:true});
   assert.equal(retained.prepare("PRAGMA user_version").get().user_version,1);retained.close();
   assert.deepEqual(ok(await api("/api/users",{base:upgraded.url})),{accounts:[],invitations:[]});
-  console.log("Fictional schema-v1 upgrade to v4 preserves trip/item identity, adds empty account tables and keeps a pre-migration snapshot.");
+  console.log("Fictional schema-v1 upgrade to the current schema (v"+SCHEMA_VERSION+") preserves trip/item identity, adds empty account tables and keeps a pre-migration snapshot.");
   const navigation=await fetch(runtime.url+"/trips/"+a.id,{headers:{Authorization:"Bearer "+token}});
   const html=await navigation.text();assert.equal(navigation.headers.get("cache-control"),"no-store");assert.ok(!html.includes(a.title));assert.ok(html.includes("/hosted-bootstrap.js"));
   const manifest=await (await fetch(runtime.url+"/manifest.webmanifest")).json();assert.equal(manifest.id,"/");assert.equal(manifest.scope,"/");assert.equal(manifest.start_url,"/");

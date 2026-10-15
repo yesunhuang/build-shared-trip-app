@@ -5,8 +5,9 @@
 // all current and future trips. Everything not on an allowlist is refused, so a new owner route is
 // never accidentally exposed to viewers or content managers.
 //
-// A content manager's per-account MCP credential (principal.via "mcp-token") is accepted only at
-// /mcp; app.mjs never builds such a principal for any other route. A browser session (via "cookie")
+// A content manager's per-account MCP credential (principal.via "mcp-token") and an OAuth access
+// token (principal.via "oauth", content-manager permissions only) are accepted only at /mcp;
+// app.mjs never builds such a principal for any other route. A browser session (via "cookie")
 // never authorizes /mcp.
 
 export const OWNER = "owner";
@@ -14,6 +15,8 @@ export const VIEWER = "viewer";
 export const CONTENT_MANAGER = "content-manager";
 
 export const canEditContent = (principal) => principal?.role === OWNER || principal?.role === CONTENT_MANAGER;
+/** Non-owner bearer principals that exist only at /mcp. */
+export const isMcpOnlyPrincipal = (principal) => principal?.role === CONTENT_MANAGER && (principal.via === "mcp-token" || principal.via === "oauth");
 
 export function capabilitiesFor(principal) {
   const owner = principal?.role === OWNER;
@@ -21,7 +24,7 @@ export function capabilitiesFor(principal) {
   return {
     readTrips: Boolean(principal), exportTrips: Boolean(principal),
     editTrips: editor, importTrips: editor, manageAccounts: owner,
-    mcp: (owner && principal.via === "bearer") || (principal?.role === CONTENT_MANAGER && principal.via === "mcp-token")
+    mcp: (owner && principal.via === "bearer") || isMcpOnlyPrincipal(principal)
   };
 }
 
@@ -36,8 +39,8 @@ export function viewerMayAccess(method, pathname) {
 
 /** Non-owner route allowlist. The owner is never checked here. */
 export function mayAccess(principal, method, pathname) {
-  if (pathname === "/mcp") return principal?.role === CONTENT_MANAGER && principal.via === "mcp-token";
-  if (principal?.via === "mcp-token") return false;
+  if (pathname === "/mcp") return isMcpOnlyPrincipal(principal);
+  if (principal?.via === "mcp-token" || principal?.via === "oauth") return false;
   if (principal?.role === VIEWER) return viewerMayAccess(method, pathname);
   if (principal?.role === CONTENT_MANAGER) return viewerMayAccess(method, pathname) || (method === "POST" && MANAGER_WRITE_ROUTES.some((route) => route.test(pathname)));
   return false;

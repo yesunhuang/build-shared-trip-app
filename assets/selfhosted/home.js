@@ -6,6 +6,10 @@ import { hostedApi, newRequestId, downloadJSON, exportFilename, safeNextPath, LA
 // as plain text until the owner dismisses it. It is never put in storage, a URL, an attribute or
 // a status message, never copied without an explicit click, and it is cleared on sign-out,
 // Refresh, page reload, and when that account is revoked, changes role or the token is revoked.
+// Browser (OAuth) connections are owner-only metadata: only whitelisted fields are kept (safeGrant),
+// the client name is plain text, and no token, digest, client id or redirect URI is shown or entered.
+// Revocation happens only on an explicit click and is never retried automatically. Responses that
+// arrive after sign-out, a role/session change or a newer reload are discarded.
 const words = {
   en: ["Sign in","Admin token","Your trips","Create trip","Show archived","Import JSON","Refresh","Sign out","Edit","Archive","Restore","Export","Title","Time zone","Country","Route","Save","Cancel","No trips yet.","Changes could not be saved. Refresh and try again.",
     "Sign in","Username","Password","Owner sign-in","Have an invitation?","Invitation code","Request access","Access requested. You can sign in after the owner approves your account.","Read-only access: you can view and export trips.","Accounts","Create invitation","Share this single-use code privately. It is shown only once and expires {time}.","Approve","Revoke","Pending approval","Approved","Revoked","No accounts yet.","Unused invitations: {count}"],
@@ -41,7 +45,16 @@ const more = {
     tokenOnceTitle: "New assistant access token",
     tokenOnce: "Token “{label}” for {name}. Copy it now into a private, owner-controlled settings store; it will not be shown again and expires {time}. Never paste it into a chat or a repository.",
     copy: "Copy", copied: "Copied. Store it privately, then choose Done.", copyUnavailable: "Copy is not available here. Select the token and copy it manually.",
-    dismiss: "Done, hide token"
+    dismiss: "Done, hide token",
+    grants: "Browser connections (OAuth)", grantsFor: "Browser connections for {name}",
+    grantsNote: "An AI assistant can also connect through the browser: this account signs in on this site and approves the consent screen, so no secret is copied or pasted. Each connection lasts at most 90 days, and revoking it ends it immediately.",
+    grantsLoading: "Loading browser connections…", grantsFailed: "Browser connections could not be loaded.", retryGrants: "Try loading browser connections again",
+    noGrants: "No browser connections yet.", unnamedClient: "Unnamed assistant app",
+    "grant-active": "Active", "grant-expired": "Expired", "grant-revoked": "Revoked",
+    grantCreated: "Connected {time}", grantEnds: "Ends {time}", grantEnded: "Ended {time}", grantRevokedAt: "Revoked {time}",
+    revokeGrant: "Revoke browser connection {name}",
+    grantRevokedNote: "Browser connection revoked. The assistant must sign in and approve again to reconnect.",
+    grantRevokeFailed: "The browser connection was not revoked. It was not retried automatically; check the list before trying again."
   },
   "zh-Hans": {
     managerNote: "内容管理者权限：你可以创建、编辑、导入、导出、归档和恢复所有旅行。账户和安全设置仍由所有者管理。",
@@ -64,7 +77,16 @@ const more = {
     tokenOnceTitle: "新的助手访问令牌",
     tokenOnce: "{name} 的令牌“{label}”。请立即复制到由所有者控制的私密设置中；它不会再次显示，将于 {time} 过期。切勿粘贴到聊天或代码仓库中。",
     copy: "复制", copied: "已复制。请私密保存，然后选择“完成”。", copyUnavailable: "此处无法复制。请选中令牌后手动复制。",
-    dismiss: "完成，隐藏令牌"
+    dismiss: "完成，隐藏令牌",
+    grants: "浏览器连接（OAuth）", grantsFor: "{name} 的浏览器连接",
+    grantsNote: "AI 助手也可以通过浏览器连接：此账户在本站登录并在授权页面同意，无需复制或粘贴任何密钥。每个连接最长有效 90 天，撤销后立即失效。",
+    grantsLoading: "正在加载浏览器连接…", grantsFailed: "无法加载浏览器连接。", retryGrants: "重新加载浏览器连接",
+    noGrants: "还没有浏览器连接。", unnamedClient: "未命名的助手应用",
+    "grant-active": "有效", "grant-expired": "已过期", "grant-revoked": "已撤销",
+    grantCreated: "连接于 {time}", grantEnds: "到期：{time}", grantEnded: "已于 {time} 结束", grantRevokedAt: "撤销于 {time}",
+    revokeGrant: "撤销浏览器连接 {name}",
+    grantRevokedNote: "浏览器连接已撤销。助手需要重新登录并同意才能再次连接。",
+    grantRevokeFailed: "浏览器连接未能撤销，系统没有自动重试。请先检查列表再重试。"
   },
   "zh-Hant": {
     managerNote: "內容管理者權限：你可以建立、編輯、匯入、匯出、封存和還原所有旅行。帳戶和安全設定仍由擁有者管理。",
@@ -87,7 +109,16 @@ const more = {
     tokenOnceTitle: "新的助理存取權杖",
     tokenOnce: "{name} 的權杖「{label}」。請立即複製到由擁有者控制的私密設定中；它不會再次顯示，將於 {time} 到期。切勿貼到聊天或程式碼儲存庫中。",
     copy: "複製", copied: "已複製。請私密保存，然後選擇「完成」。", copyUnavailable: "此處無法複製。請選取權杖後手動複製。",
-    dismiss: "完成，隱藏權杖"
+    dismiss: "完成，隱藏權杖",
+    grants: "瀏覽器連線（OAuth）", grantsFor: "{name} 的瀏覽器連線",
+    grantsNote: "AI 助理也可以透過瀏覽器連線：此帳戶在本站登入並在授權頁面同意，不需要複製或貼上任何密鑰。每個連線最長有效 90 天，撤銷後立即失效。",
+    grantsLoading: "正在載入瀏覽器連線…", grantsFailed: "無法載入瀏覽器連線。", retryGrants: "重新載入瀏覽器連線",
+    noGrants: "尚無瀏覽器連線。", unnamedClient: "未命名的助理應用程式",
+    "grant-active": "有效", "grant-expired": "已過期", "grant-revoked": "已撤銷",
+    grantCreated: "連線於 {time}", grantEnds: "到期：{time}", grantEnded: "已於 {time} 結束", grantRevokedAt: "撤銷於 {time}",
+    revokeGrant: "撤銷瀏覽器連線 {name}",
+    grantRevokedNote: "瀏覽器連線已撤銷。助理需要重新登入並同意才能再次連線。",
+    grantRevokeFailed: "瀏覽器連線未能撤銷，系統沒有自動重試。請先檢查清單再重試。"
   },
   ja: {
     managerNote: "コンテンツ管理者：すべての旅行の作成・編集・インポート・エクスポート・アーカイブ・復元ができます。アカウントとセキュリティの設定はオーナーが管理します。",
@@ -110,10 +141,22 @@ const more = {
     tokenOnceTitle: "新しいアシスタント用アクセストークン",
     tokenOnce: "{name} のトークン「{label}」。今すぐオーナーが管理する非公開の設定保存先にコピーしてください。再表示されず、{time} に期限切れになります。チャットやリポジトリには絶対に貼り付けないでください。",
     copy: "コピー", copied: "コピーしました。非公開で保存してから「完了」を選んでください。", copyUnavailable: "ここではコピーできません。トークンを選択して手動でコピーしてください。",
-    dismiss: "完了（トークンを隠す）"
+    dismiss: "完了（トークンを隠す）",
+    grants: "ブラウザー接続（OAuth）", grantsFor: "{name} のブラウザー接続",
+    grantsNote: "AI アシスタントはブラウザー経由でも接続できます。このアカウントでこのサイトにサインインして同意画面で承認するだけで、秘密の値をコピーしたり貼り付けたりする必要はありません。各接続の有効期間は最長 90 日で、取り消すとすぐに終了します。",
+    grantsLoading: "ブラウザー接続を読み込み中…", grantsFailed: "ブラウザー接続を読み込めませんでした。", retryGrants: "ブラウザー接続を再読み込み",
+    noGrants: "ブラウザー接続はまだありません。", unnamedClient: "名前のないアシスタントアプリ",
+    "grant-active": "有効", "grant-expired": "期限切れ", "grant-revoked": "取り消し済み",
+    grantCreated: "接続：{time}", grantEnds: "期限：{time}", grantEnded: "終了：{time}", grantRevokedAt: "取り消し：{time}",
+    revokeGrant: "ブラウザー接続「{name}」を取り消す",
+    grantRevokedNote: "ブラウザー接続を取り消しました。再接続するには、アシスタントで再度サインインして承認する必要があります。",
+    grantRevokeFailed: "ブラウザー接続を取り消せませんでした。自動では再試行していません。一覧を確認してから再度お試しください。"
   }
 };
 const LABEL_MAX = 60;
+const CLIENT_NAME_MAX = 80; const GRANT_LIST_MAX = 100; const GRANT_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+// Latest browser-connection load per open panel; older responses are discarded.
+const grantLoads = new WeakMap(); let grantSeq = 0;
 let language = "en";
 try { language = localStorage.getItem(LANGUAGE_STORAGE_KEY) || "en"; } catch {}
 let summaries = []; let loggedIn = false; let busy = false; let pollTimer; let failures = 0;
@@ -225,7 +268,9 @@ function tokenSection(account) {
   const regionId="tokens-"+account.id;
   const toggle=button(text(open?"hideTokens":"showTokens"),async()=>{
     if (tokenPanels.has(account.id)) { tokenPanels.delete(account.id); render(); return; }
-    tokenPanels.set(account.id,{status:"loading",tokens:null}); render(); await loadTokens(account.id);
+    tokenPanels.set(account.id,{status:"loading",tokens:null,grantStatus:"loading",grants:null}); render();
+    // Independent of the token list: a slow or failing connection list never blocks token controls.
+    loadGrants(account.id); await loadTokens(account.id);
   });
   toggle.className="token-toggle";toggle.setAttribute("aria-expanded",String(open));toggle.setAttribute("aria-controls",regionId);toggle.dataset.focusKey="tokens:"+account.id;
   wrap.append(toggle);
@@ -255,8 +300,117 @@ function tokenSection(account) {
   const issue=document.createElement("button");issue.type="submit";issue.textContent=text("issueToken");issue.dataset.focusKey="token-issue:"+account.id;
   form.append(label,issue);
   form.addEventListener("submit",(event)=>{event.preventDefault();run(()=>issueToken(account,input.value));});
-  region.append(form);wrap.append(region);
+  region.append(form,grantSection(account,panel));wrap.append(region);
   return wrap;
+}
+const isoOrEmpty = (value) => typeof value === "string" && value.length <= 64 && !Number.isNaN(Date.parse(value)) ? value : "";
+// Client names come from the connecting app: plain text only, with control, zero-width and
+// bidirectional-override characters removed and a bounded length.
+const unsafeCodePoint = (code) => code <= 0x1f || (code >= 0x7f && code <= 0x9f) || code === 0xad || (code >= 0x200b && code <= 0x200f) || (code >= 0x2028 && code <= 0x202e) || (code >= 0x2060 && code <= 0x2069) || code === 0xfeff;
+function clientLabel(value) {
+  if (typeof value !== "string") return "";
+  const clean = Array.from(value.slice(0, 1000), (char) => unsafeCodePoint(char.codePointAt(0)) ? " " : char).join("").replace(/\s+/g, " ").trim();
+  const chars = Array.from(clean);
+  return chars.length > CLIENT_NAME_MAX ? chars.slice(0, CLIENT_NAME_MAX - 1).join("").trimEnd() + "…" : clean;
+}
+// Whitelist: everything else in a grant record (client id, scope, reason or any unexpected
+// field) is dropped before it reaches page state or the DOM.
+function safeGrant(grant) {
+  return {
+    id: typeof grant?.id === "string" && GRANT_ID_PATTERN.test(grant.id) ? grant.id : "",
+    name: clientLabel(grant?.clientName),
+    createdAt: isoOrEmpty(grant?.createdAt), expiresAt: isoOrEmpty(grant?.expiresAt),
+    revoked: Boolean(grant?.revokedAt), revokedAt: isoOrEmpty(grant?.revokedAt),
+    lastUsedAt: isoOrEmpty(grant?.lastUsedAt), active: grant?.active === true
+  };
+}
+// Fail closed: only a server-active, unrevoked grant with a valid future expiry is shown as active.
+function grantState(grant) {
+  if (grant.revoked) return "revoked";
+  return grant.active && Date.parse(grant.expiresAt) > Date.now() ? "active" : "expired";
+}
+const grantPanelCurrent = (accountId, panel) => loggedIn && sessionCanManageAccounts(session) && tokenPanels.get(accountId) === panel;
+function grantSection(account,panel) {
+  const box=document.createElement("section");box.className="grant-section";box.setAttribute("aria-label",text("grantsFor",{name:account.username}));
+  const heading=document.createElement("h4");heading.textContent=text("grants");heading.tabIndex=-1;heading.dataset.focusKey="grants:"+account.id;
+  const note=document.createElement("p");note.className="note";note.textContent=text("grantsNote");
+  box.append(heading,note);
+  if (panel.grantStatus==="loading") { const loading=document.createElement("p");loading.className="note";loading.setAttribute("role","status");loading.textContent=text("grantsLoading");box.append(loading); }
+  if (panel.grantStatus==="failed") {
+    const failed=document.createElement("p");failed.className="grant-error";failed.setAttribute("role","alert");failed.textContent=text("grantsFailed");
+    // Manual only: a failed list is not re-requested in the background.
+    const retry=button(text("tryAgain"),()=>{loadGrants(account.id);focusByKey("grants:"+account.id);});
+    retry.className="grant-retry";retry.setAttribute("aria-label",text("retryGrants"));retry.dataset.focusKey="grants-retry:"+account.id;
+    box.append(failed,retry);
+  }
+  if (Array.isArray(panel.grants)) {
+    const list=document.createElement("ul");list.className="grant-list";
+    if (!panel.grants.length) { const empty=document.createElement("li");empty.className="note";empty.textContent=text("noGrants");list.append(empty); }
+    for (const grant of panel.grants) list.append(grantRow(account,grant));
+    box.append(list);
+  }
+  return box;
+}
+function grantRow(account,grant) {
+  const state=grantState(grant); const name=grant.name||text("unnamedClient");
+  const item=document.createElement("li");item.className="grant-row";item.dataset.state=state;if(grant.id)item.dataset.grantId=grant.id;
+  const title=document.createElement("strong");title.className="grant-name";title.textContent=name;
+  const badge=document.createElement("span");badge.className="grant-state";badge.textContent=text("grant-"+state);
+  const details=document.createElement("span");details.className="grant-dates";
+  const parts=[];
+  if (grant.createdAt) parts.push(text("grantCreated",{time:when(grant.createdAt)}));
+  if (state==="revoked") { if (grant.revokedAt) parts.push(text("grantRevokedAt",{time:when(grant.revokedAt)})); }
+  else if (grant.expiresAt && (state==="active" || Date.parse(grant.expiresAt)<=Date.now())) parts.push(text(state==="active"?"grantEnds":"grantEnded",{time:when(grant.expiresAt)}));
+  parts.push(grant.lastUsedAt?text("lastUsed",{time:when(grant.lastUsedAt)}):text("neverUsed"));
+  details.textContent=parts.join(" · ");
+  item.append(title,badge,details);
+  if (state==="active" && grant.id) {
+    const revoke=button(text("revoke"),()=>revokeGrant(account,grant));
+    revoke.setAttribute("aria-label",text("revokeGrant",{name}));revoke.dataset.focusKey="grant-revoke:"+grant.id;
+    item.append(revoke);
+  }
+  return item;
+}
+// Never throws. Missing client support (older stubs), failures and stale responses stay inside
+// this section and never affect token controls.
+async function loadGrants(accountId) {
+  const panel=tokenPanels.get(accountId); if(!panel||!sessionCanManageAccounts(session))return;
+  const seq=++grantSeq; grantLoads.set(panel,seq);
+  if(!Array.isArray(panel.grants)){panel.grantStatus="loading";render();}
+  let grants=null;
+  try {
+    if(typeof hostedApi.listOAuthGrants!=="function")throw new Error("unavailable");
+    const result=await hostedApi.listOAuthGrants(accountId);
+    if(!Array.isArray(result?.grants))throw new Error("unexpected response");
+    grants=result.grants.filter((grant)=>grant&&typeof grant==="object").slice(0,GRANT_LIST_MAX).map(safeGrant);
+  } catch(error) {
+    if(!grantPanelCurrent(accountId,panel)||grantLoads.get(panel)!==seq)return;
+    if(error?.status===401){signedOut();return;}
+    panel.grantStatus="failed";render();return;
+  }
+  if(!grantPanelCurrent(accountId,panel)||grantLoads.get(panel)!==seq)return;
+  panel.grants=grants;panel.grantStatus="ready";render();
+}
+// Single attempt on an explicit owner click; a failure only re-reads the list.
+async function revokeGrant(account,grant) {
+  if(!sessionCanManageAccounts(session))return;
+  const panel=tokenPanels.get(account.id); if(!panel)return;
+  let result;
+  try {
+    if(typeof hostedApi.revokeOAuthGrant!=="function")throw new Error("unavailable");
+    result=await hostedApi.revokeOAuthGrant(account.id,grant.id);
+  } catch(error) {
+    if(error?.status===401)throw error;
+    if(!grantPanelCurrent(account.id,panel))return "";
+    loadGrants(account.id);
+    throw new Error(text("grantRevokeFailed"));
+  }
+  if(!grantPanelCurrent(account.id,panel))return "";
+  const updated=result?.grant&&typeof result.grant==="object"?safeGrant(result.grant):null;
+  if(updated?.id===grant.id&&Array.isArray(panel.grants))panel.grants=panel.grants.map((item)=>item.id===grant.id?updated:item);
+  render();focusByKey("grants:"+account.id);
+  loadGrants(account.id);
+  return text("grantRevokedNote");
 }
 function tokenRow(account,token) {
   const state=token.revokedAt?"revoked":Date.parse(token.expiresAt)<=Date.now()?"expired":"active";
@@ -369,6 +523,8 @@ async function load() {
     failures=0;status("");render();
     for(const id of [...tokenPanels.keys()])await loadTokens(id);
     if(!loggedIn)return;
+    // Only already-loaded connection lists refresh in the background; a failed list waits for Try again.
+    for(const [id,panel] of [...tokenPanels])if(Array.isArray(panel.grants))loadGrants(id);
     pollTimer=setTimeout(load,20000);
   } catch(error) {
     if(error.status===401||signoutPending())signedOut();
