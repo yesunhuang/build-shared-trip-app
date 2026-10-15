@@ -11,7 +11,8 @@ import { serveStatic } from "./static.mjs";
 import { AccountStore, INVITATION_TOKEN_PATTERN, invitationInvalid } from "./auth/accounts.mjs";
 import { boundedPassword, dummyVerify, hashPassword, normalizeUsername, passwordProblem, verifyPassword } from "./auth/passwords.mjs";
 import { AttemptLimiter, SESSION_COOKIE, SESSION_TTL_MS, SessionStore } from "./auth/sessions.mjs";
-import { CONTENT_MANAGER, OWNER, capabilitiesFor, isMcpOnlyPrincipal, isProtectedMediaPath, mayAccess } from "./auth/policy.mjs";
+import { CONTENT_MANAGER, LOOKUP_ROUTE, OWNER, capabilitiesFor, isMcpOnlyPrincipal, isProtectedMediaPath, mayAccess } from "./auth/policy.mjs";
+import { LookupService, readLookupConfig } from "./lookups.mjs";
 import { McpTokenStore } from "./auth/mcp-tokens.mjs";
 import { AuditLog } from "./audit.mjs";
 import { ContentGateway, actorOf } from "./content-access.mjs";
@@ -51,7 +52,10 @@ export function readConfig(env = process.env) {
     oauthUsername = normalizeUsername(env.SHARED_TRIP_OAUTH_USERNAME);
     if (!oauthUsername) throw new Error("SHARED_TRIP_OAUTH_USERNAME must be an existing account's username (3-32 lowercase letters, digits, dots, hyphens or underscores).");
   }
-  return { token, dataDir, host, port, origin, oauthUsername };
+  // Public place/photo lookups: disabled unless SHARED_TRIP_LOOKUPS_ENABLED=1 with an identifying
+  // SHARED_TRIP_LOOKUP_USER_AGENT (see lookups.mjs). Disabled => no provider is ever contacted.
+  const lookups = readLookupConfig(env);
+  return { token, dataDir, host, port, origin, oauthUsername, lookups };
 }
 function sameSecret(a,b) {
   const hash = (s) => crypto.createHash("sha256").update(String(s || "")).digest();
@@ -79,6 +83,10 @@ const decodeSegment = (value) => { try { return decodeURIComponent(value); } cat
 // credential expiry and audit timestamps (tests inject one). Neither is read from the environment.
 // config.oauthRedirectUris is an optional, code-only list of exact test callbacks (HTTPS or HTTP
 // loopback) allowed in addition to the fixed production callback; it is never read from the environment.
+// config.lookups comes from readConfig (opt-in). config.lookupFetch, config.lookupClock,
+// config.lookupSleep and config.lookupTimeoutMs are optional, code-only test hooks for the lookup
+// service (injected provider fetch, clock, delay and a shorter abort timeout); none is read from the
+// environment and none changes the production rate limits.
 export async function startServer(config) {
   const clock = typeof config.clock === "function" ? config.clock : Date.now;
   const oauthUsername = config.oauthUsername ? normalizeUsername(config.oauthUsername) : "";
@@ -99,8 +107,12 @@ export async function startServer(config) {
   const loginLimiter = new AttemptLimiter({ limit: 10, windowMs: 60_000, message: "Try signing in again later." });
   const inviteLimiter = new AttemptLimiter({ limit: 10, windowMs: 15 * 60_000, message: "Try again later." });
   const oauthStore = new OAuthStore(db, { audit, username: oauthUsername });
-  let oauth;
-  try { oauth = createOAuth({ store: oauthStore, accounts, audit, loginLimiter, clock, redirectUris: config.oauthRedirectUris }); }
+  let oauth; let lookups;
+  try {
+    oauth = createOAuth({ store: oauthStore, accounts, audit, loginLimiter, clock, redirectUris: config.oauthRedirectUris });
+    lookups = new LookupService({ ...(config.lookups?.enabled === true ? config.lookups : { enabled: false }), dataDir: config.dataDir,
+      fetch: config.lookupFetch, clock: config.lookupClock || clock, sleep: config.lookupSleep, timeoutMs: config.lookupTimeoutMs });
+  }
   catch (error) { try { db.close(); } finally { lock.release(); } throw error; }
   const photoDir = path.resolve(config.photoDir || path.join(config.dataDir, PHOTO_SUBDIR));
   const send = (res,status,payload) => { res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}); res.end(JSON.stringify(payload)); };
@@ -284,7 +296,15 @@ export async function startServer(config) {
         const oauthGrants = /^\/api\/users\/([^/]+)\/oauth-grants$/.exec(pathname);
         const oauthGrant = /^\/api\/users\/([^/]+)\/oauth-grants\/([^/]+)\/revoke$/.exec(pathname);
         const trip = /^\/api\/trips\/([^/]+)(?:\/(changes|export))?$/.exec(pathname);
-        if (account && req.method === "POST") {
+        const lookup = LOOKUP_ROUTE.exec(pathname);
+        if (lookup && req.method === "POST") {
+          // Explicit, editor-only public place/photo search for one existing trip. The provider URL
+          // is fixed server configuration; the body carries only { query, refresh? }. Nothing is
+          // written to the trip; a chosen result is saved with an ordinary change request.
+          gateway.lookupTarget(context, decodeSegment(lookup[1]));
+          const body = await readJSON(req, SMALL_BODY);
+          result = await lookups.search(lookup[2] === "places" ? "place" : "photo", actorOf(principal), body);
+        } else if (account && req.method === "POST") {
           requireOwner();
           const id = decodeSegment(account[1]);
           if (account[2] === "role") {
@@ -342,7 +362,7 @@ export async function startServer(config) {
   try { await new Promise((resolve,reject) => {server.once("error",reject); server.listen(config.port,config.host,resolve);}); }
   catch (error) { try { db.close(); } finally { lock.release(); } throw error; }
   let closing;
-  return { server, service, accounts, tokens, audit, db, oauth: oauthStore, url: config.origin || "http://" + config.host + ":" + server.address().port,
+  return { server, service, accounts, tokens, audit, db, oauth: oauthStore, lookups, url: config.origin || "http://" + config.host + ":" + server.address().port,
     close: () => closing ??= (async () => {
       await new Promise((resolve) => server.close(() => resolve()));
       try { db.close(); } finally { lock.release(); }

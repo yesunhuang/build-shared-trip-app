@@ -30,7 +30,11 @@ const nativeClear=globalThis.clearTimeout;
 const nativeFetch=globalThis.fetch;
 const timers=new Set();
 globalThis.setTimeout=(fn,delay,...args)=>{
-  const timer=nativeTimeout(()=>{timers.delete(timer);fn(...args);},Math.min(delay,100));timers.add(timer);timer.unref();return timer;
+  // Accelerate reconnect/poll waits, while keeping actual HTTP deadlines realistic.
+  // Clamping a 20-second write deadline to 100 ms makes valid local writes fail under load.
+  // The poller's named tick also uses 20 seconds; keep that wait accelerated.
+  const requestDeadline=fn.name!=="tick"&&[8000,12000,20000].includes(delay);
+  const timer=nativeTimeout(()=>{timers.delete(timer);fn(...args);},requestDeadline?delay:Math.min(delay,100));timers.add(timer);timer.unref();return timer;
 };
 globalThis.clearTimeout=(timer)=>{timers.delete(timer);nativeClear(timer);};
 for(const key of ["window","document","location","localStorage","sessionStorage","FormData","HTMLElement","HTMLInputElement","HTMLSelectElement","HTMLDialogElement","Node","Element"]){

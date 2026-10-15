@@ -19,7 +19,7 @@ const changes = z.array(z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("update_trip"), fields: z.strictObject(Object.fromEntries(CONTENT_KEYS.filter((k) => !["days", "reminders"].includes(k)).map((k) => [k, z.unknown().optional()]))) }),
   z.strictObject({ type: z.literal("upsert_day"), day: day.describe("Create or merge one day. Dates use YYYY-MM-DD; nested slots require stable IDs.") }),
   z.strictObject({ type: z.literal("delete_day"), dayId: id }),
-  z.strictObject({ type: z.literal("upsert_plan"), dayId: id, plan: plan.describe("Create or merge a plan. New plans require a name; source text changes invalidate dependent translations; mapped fields are derived.") }),
+  z.strictObject({ type: z.literal("upsert_plan"), dayId: id, plan: plan.describe("Create or merge a plan. New plans require a name; source text changes invalidate dependent translations; mapped fields are derived. An optional place (a selected OpenStreetMap result) owns lat/lng/address; send null to remove it.") }),
   z.strictObject({ type: z.literal("delete_plan"), dayId: id, planId: id }),
   z.strictObject({ type: z.literal("upsert_reminder"), reminder: reminder.describe("Create or merge a reminder. New reminders require item text; dueDate is optional YYYY-MM-DD and done is boolean.") }),
   z.strictObject({ type: z.literal("delete_reminder"), reminderId: id }),

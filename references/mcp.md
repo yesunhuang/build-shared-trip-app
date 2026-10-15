@@ -39,6 +39,10 @@ Read before editing. Use the returned version, a fresh requestId, and the operat
 
 On conflict, read again and reconcile with a new requestId. After an uncertain response, retry the identical payload and requestId or read its outcome; do not infer success.
 
+**Places and photos.** `apply_trip_changes` (`upsert_plan`) can save the same selected OpenStreetMap `place` and Wikimedia Commons `photo` objects as the browser editor. The shapes are in [input-schema.md](input-schema.md#selected-openstreetmap-place-self-hosted), and the plan's `lat`/`lng`/`address` must stay consistent with the place. MCP has no search tool. The tool set is still the six tools above, and no MCP call contacts Nominatim or Commons. Do not invent OSM IDs, coordinates or photo licences. Save only values that a user chose in the editor or that you confirmed on the OSM object page or Commons file page. If you do research them, follow the provider policies in [place-and-photo-lookups.md](place-and-photo-lookups.md#provider-evaluation-checked-2026-10-15): no bulk or systematic queries, and no confidential text in queries. Keep a Commons photo labelled as representative unless the user confirms it shows the place.
+
+When switching a selected OSM place to a Google Maps URL, send `place: null` together with the new `googleMapsUrl`. A stored place otherwise remains the location source. Clearing the place can restore a retained Google URL; clear that URL too when removing the location entirely.
+
 ## Client configuration
 
 For clients supporting Streamable HTTP with custom headers:

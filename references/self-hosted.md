@@ -21,6 +21,9 @@ Generate a secret with a password manager or Node crypto.randomBytes(32).toStrin
 | SHARED_TRIP_PORT | 4173 | Choose an unused listen port |
 | SHARED_TRIP_ORIGIN | Local listen origin | External HTTPS origin behind a proxy; no credentials, path, query, or fragment. It is also the OAuth issuer. |
 | SHARED_TRIP_OAUTH_USERNAME | Unset (OAuth denied) | Username of the one approved content manager who may approve OAuth grants for MCP clients that cannot send custom headers (schema v5 release). See [mcp.md § OAuth](mcp.md#oauth-for-clients-without-custom-headers). |
+| SHARED_TRIP_LOOKUPS_ENABLED | Unset (off) | `1` enables explicit public place (OpenStreetMap/Nominatim) and photo (Wikimedia Commons) search in the plan editor. See [Place and photo lookups](#place-and-photo-lookups-opt-in). |
+| SHARED_TRIP_LOOKUP_USER_AGENT | None | Required when lookups are enabled: application name and version plus the owner's contact email or URL |
+| SHARED_TRIP_NOMINATIM_URL | `https://nominatim.openstreetmap.org/search` when enabled | Optional HTTPS Nominatim-compatible search endpoint |
 
 All trips share the manifest identity, start URL, and scope /. Trip pages are /trips/&lt;id&gt;. Every trip URL requires an owner or approved-account sign-in. Anonymous sharing, per-trip membership, and self-registration that grants access are not implemented. OAuth exists only as the scoped MCP path for one configured content manager; it is not a general sign-in or account-enrollment method.
 
@@ -116,6 +119,8 @@ Domain responses are JSON with Cache-Control: no-store. Errors use `{ "error": {
 | POST | /api/trips | owner, manager | requestId, trip; returns trip |
 | POST | /api/trips/&lt;id&gt;/changes | owner, manager | requestId, expectedVersion, changes; returns trip and generated IDs |
 | POST | /api/import | owner, manager | requestId, data; returns trip and mapping warnings |
+| POST | /api/trips/&lt;id&gt;/places/search | owner, manager (same origin) | Only when lookups are enabled. `{query, refresh?}`; returns `{results, cached}`. Changes nothing. See [Place and photo lookups](#place-and-photo-lookups-opt-in) |
+| POST | /api/trips/&lt;id&gt;/photos/search | owner, manager (same origin) | Only when lookups are enabled. `{query, refresh?}`; returns `{results, cached}`. Changes nothing |
 | DELETE | /api/trips/&lt;id&gt; | owner (session or admin bearer) | `{requestId, expectedVersion}`; permanent; returns `{deleted: true, tripId, version}`. See [Permanent trip deletion](#permanent-trip-deletion) |
 | POST | /api/invitations | owner | Optional `{expiresInHours}`; 201 `{invitation: {id, token, expiresAt}}` (token shown once) |
 | GET | /api/users | owner | `{accounts: [{id, username, status, role, createdAt, updatedAt}], invitations: [{id, createdAt, expiresAt}]}` (unused, unexpired only) |
@@ -149,7 +154,7 @@ GET /health reports generic health only. Bodies are limited to 2 MB (8 KB for si
 | archive_trip | archived boolean |
 | replace_content | Full snapshot with matching id and version |
 
-See [input-schema.md](input-schema.md) for content fields. Upserts merge existing values; null removes optional fields. IDs never change. Archived trips remain readable/exportable and must be restored before editing.
+See [input-schema.md](input-schema.md) for content fields, including the selected OpenStreetMap `place` and Commons `photo` objects. Upserts merge existing values; null removes optional fields. IDs never change. Archived trips remain readable/exportable and must be restored before editing.
 
 HTTP and MCP call the same TripService and validators. A batch commits completely or rolls back. Stale versions return 409/version_conflict. Repeating an identical requestId and payload returns its original result, including after a restart; changed payloads return 409/request_id_conflict. Source edits invalidate unchanged dependent translations. Time edits reconcile sort metadata and actual ordering.
 
@@ -163,6 +168,20 @@ The self-hosted photo store is `<SHARED_TRIP_DATA_DIR>/photos`, outside the sour
 
 Responses send `Referrer-Policy: strict-origin-when-cross-origin`, so third-party requests such as map tiles receive only the site origin, never private trip paths. OpenStreetMap tile use is subject to https://operations.osmfoundation.org/policies/tiles/; tile availability is not guaranteed by this service.
 
+A Commons photo chosen in the editor is a remote image with saved attribution. It is not copied into this store, and there is no upload or mirroring API for it.
+
+## Place and photo lookups (opt-in)
+
+Off by default. With `SHARED_TRIP_LOOKUPS_ENABLED=1` and a valid `SHARED_TRIP_LOOKUP_USER_AGENT`, owners and content managers can press **Search** in the plan editor to look up a public place through Nominatim, choose the exact candidate, separately search Wikimedia Commons for a representative photo, and save both as snapshots in the plan. The full contract and the provider review are in [place-and-photo-lookups.md](place-and-photo-lookups.md). The main points are:
+
+- **Explicit only.** No autocomplete, no background refresh, no bulk or periodic lookups. **Cancel** changes nothing. **Save** uses the existing versioned content-change path with `expectedVersion` and `requestId`.
+- **No lookups on display.** Opening the editor or a trip page, reloading, polling and unrelated edits render the saved snapshots and make no place or photo search calls. Displaying saved remote images and map tiles still makes normal browser requests to those hosts.
+- **Who.** Owner and content managers only, with the usual same-origin checks. Viewers cannot search or spend upstream requests. No role gains any new privilege.
+- **Outbound.** The server contacts only the configured Nominatim endpoint and the Commons API. It sends one request at a time, at least 1,100 ms apart, with timeouts and size limits, never to a client-supplied URL, and it does not follow redirects. Query text goes to the provider, so do not search for confidential material.
+- **Cache.** Successful results are cached privately, with bounded size, under `SHARED_TRIP_DATA_DIR`. **Refresh** bypasses the cache. The cache is non-essential and can be discarded; saved snapshots in SQLite are the trip content.
+- **Costs and terms.** The default public endpoints need no API key, billing or account, but they come with no SLA and their usage policies apply. Review them before enabling, and choose an endpoint whose terms allow retaining results. Enabling the feature creates no credentials.
+- **Google.** The new search does not use Google. Full Google Maps place URLs keep working as before.
+
 ## Synchronization and connection failures
 
 Trip pages poll every 20 seconds. Errors use bounded retries; Reconnect and online/focus/visibility events resume them. Home lists also refresh. An open page retains authenticated content in memory during brief outages; fresh offline navigation shows a generic connection page. A revoked account's next refresh, or the next refresh after its role changes, returns 401, which clears the page.
@@ -175,7 +194,7 @@ Sign-out clears content and revokes the session. During an outage, a non-secret 
 
 Import accepts structured authoring JSON, a runtime trip object, or a shared-trip-export file. Compatible IDs and localization are retained. Available incoming trip IDs are preserved; importing again creates another trip rather than overwriting. Retrying the same requestId creates nothing twice. The owner and approved content managers can import; every approved role can export. The same import and export are also available as the MCP tools `import_trip` and `export_trip`, sharing validation and storage with HTTP.
 
-Safe unmapped fields are retained in compatibility content and reported. Legacy transport configuration is inert; import never contacts Firebase. Validation errors reject the whole import. Export restores content, IDs, versions, and archive state into empty storage. Database snapshots also retain retry records and account state.
+Safe unmapped fields are retained in compatibility content and reported. Legacy transport configuration is inert; import never contacts Firebase. Selected `place` and `photo` snapshots travel with import and export unchanged. Neither operation performs a place or photo lookup. Validation errors reject the whole import. Export restores content, IDs, versions, and archive state into empty storage. Database snapshots also retain retry records and account state.
 
 ## Deploy on a small VPS
 
@@ -192,7 +211,7 @@ docker run --name shared-trips --restart unless-stopped \
   shared-trips
 ~~~
 
-The private env file supplies the admin secret and SHARED_TRIP_ORIGIN=https://trips.example.org, and, only when you want OAuth, SHARED_TRIP_OAUTH_USERNAME=&lt;approved-content-manager-username&gt;. The image listens internally on port 4173 and stores data (and private photos in /data/photos) in /data. Prepare the private mount for container UID 1000 on local storage; keep backups separate. Choose another host port if needed.
+The private env file supplies the admin secret and SHARED_TRIP_ORIGIN=https://trips.example.org, and, only when you want OAuth, SHARED_TRIP_OAUTH_USERNAME=&lt;approved-content-manager-username&gt;. Add the lookup settings only after reviewing [place-and-photo-lookups.md](place-and-photo-lookups.md). Lookups also need outbound HTTPS from the container. The image listens internally on port 4173 and stores data (and private photos in /data/photos) in /data. Prepare the private mount for container UID 1000 on local storage; keep backups separate. Choose another host port if needed.
 
 Add a dedicated virtual host that preserves Host, Origin, Authorization, and Cookie headers, passes MCP POST/202 responses without buffering, adds no-store CDN headers for `/api/*`, `/mcp`, `/oauth/*`, `/.well-known/oauth-*`, `/trips/*`, `/photos/*`, `/attachments/*`, and `/resources.html`, and forwards to the chosen loopback port. Do not rewrite or redirect the OAuth paths, because the issuer and resource must match the origin exactly. Preserve other services' configuration. The OAuth server is built in, so no external OAuth provider is needed. Normal use needs no Firebase account and no live AI call.
 
@@ -265,6 +284,8 @@ Schemas use PRAGMA user_version:
 - v5: the OAuth release adds OAuth client, grant, and token-digest tables. It only adds to the schema. Trips, accounts, roles, content-manager tokens, and the audit log are untouched, and OAuth stays denied until `SHARED_TRIP_OAUTH_USERNAME` is set.
 - v6: the owner-deletion release adds the empty `trip_tombstones` table only (trip ID, deleted version, deletion time). Every existing trip, retry record, account, credential, OAuth grant and audit row is untouched. The audit log gains the `trip.delete` action and the `operator` channel.
 
+The place and photo lookup feature adds only optional JSON fields to trip content (`plan.place` and the extended Commons `plan.photo`). No schema migration is planned for it. A release that predates these fields may reject edits or imports of trips that contain them, so export affected trips before rolling back across it.
+
 Before migrating an older database, the service writes a snapshot named for the target schema, such as `shared-trip.sqlite.before-v3-<time>`, beside it with VACUUM INTO and never deletes it automatically. The migration runs in one transaction. Newer-than-supported schemas are rejected ("Database requires a newer application").
 
 Back up before upgrading. Stop the service and any restore, replace its image/code while retaining data/configuration, restart, and verify reading, editing, viewer sign-in and, if used, content-manager sign-in, MCP tokens, and OAuth metadata and grants. Test fictional prior-version data first. To roll back across a schema change, stop the new service and restore the pre-upgrade snapshot into separate storage for the old code; never open a newer schema with older code. Accounts, role changes and MCP tokens created after the upgrade are not in that snapshot; an older release has no content-manager role, so its accounts are viewers again and every issued MCP access token stops working (only the admin bearer remains).
@@ -278,3 +299,5 @@ Rolling back from v6 to v5 works the same way with the `before-v6` snapshot. Tha
 Run npm test for regression, HTTP/MCP integration, account and ownership checks, and DOM simulation. The [implementation plan](../doc/implementation-plan.md) and progress reports record which checks actually ran.
 
 The full suite includes content-manager and owner-control DOM simulations, plus local HTTP and official SDK OAuth/automatic-refresh tests. Fictional Chrome sign-in, consent, denial and owner revocation passed at desktop and phone widths. Production-image Linux tests, migration/restore and live HTTPS discovery/privacy checks also passed; see [checkpoint 008](../doc/Progress/progress_2026_10_15_cpx008_codex_b.md) and [checkpoint 009](../doc/Progress/progress_2026_10_15_cpx009_codex_b.md). Actual ChatGPT sign-in, consent and its first read-only tool result remain pending. Browser emulation does not establish physical installation, device gestures or third-party account connectivity. Earlier reports record separate ownership-lock crash recovery and deployment checks.
+
+Place and photo lookups are specified here and in [place-and-photo-lookups.md](place-and-photo-lookups.md). This document records no result for them. Automated checks should use stubbed providers, not live Nominatim or Commons requests. Any browser or live-provider check must be recorded separately before anyone claims it passed.

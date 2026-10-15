@@ -43,7 +43,10 @@ export function capabilitiesFor(principal) {
 }
 
 const VIEWER_READ_ROUTES = [/^\/api\/session$/, /^\/api\/trips$/, /^\/api\/trips\/[^/]+$/, /^\/api\/trips\/[^/]+\/export$/];
-const MANAGER_WRITE_ROUTES = [/^\/api\/trips$/, /^\/api\/import$/, /^\/api\/trips\/[^/]+\/changes$/];
+// The opt-in public place/photo lookups (POST .../places/search and .../photos/search) are editing
+// aids, so they are content-manager routes and never viewer routes.
+export const LOOKUP_ROUTE = /^\/api\/trips\/([^/]+)\/(places|photos)\/search$/;
+const MANAGER_WRITE_ROUTES = [/^\/api\/trips$/, /^\/api\/import$/, /^\/api\/trips\/[^/]+\/changes$/, LOOKUP_ROUTE];
 
 export function viewerMayAccess(method, pathname) {
   if (method === "POST" && pathname === "/api/logout") return true;

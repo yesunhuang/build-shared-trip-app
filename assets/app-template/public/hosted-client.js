@@ -240,7 +240,17 @@ export const hostedApi = Object.freeze({
     body: { requestId, data },
     timeoutMs: WRITE_TIMEOUT_MS
   }),
-  exportTrip: (tripId) => requestJSON(`/api/trips/${encodeURIComponent(tripId)}/export`, { timeoutMs: WRITE_TIMEOUT_MS })
+  exportTrip: (tripId) => requestJSON(`/api/trips/${encodeURIComponent(tripId)}/export`, { timeoutMs: WRITE_TIMEOUT_MS }),
+  // Owner/content manager only, and only from an explicit Search or Refresh action in
+  // the plan editor. The body carries just the typed public name. Returns {results, cached}.
+  searchPlaces: (tripId, query, refresh = false) => requestJSON(
+    `/api/trips/${encodeURIComponent(tripId)}/places/search`,
+    { method: "POST", body: refresh === true ? { query, refresh: true } : { query }, timeoutMs: WRITE_TIMEOUT_MS }
+  ),
+  searchPhotos: (tripId, query, refresh = false) => requestJSON(
+    `/api/trips/${encodeURIComponent(tripId)}/photos/search`,
+    { method: "POST", body: refresh === true ? { query, refresh: true } : { query }, timeoutMs: WRITE_TIMEOUT_MS }
+  )
 });
 
 // Extracts and verifies a trip from a {trip} response. A response for any other

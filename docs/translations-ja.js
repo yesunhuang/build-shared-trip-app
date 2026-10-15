@@ -89,7 +89,7 @@ export const UI_JA = Object.freeze({
   timePlaceholder: "09:30〜11:00",
   googleMapsLink: "Google マップの完全なリンク · 任意",
   googleMapsLinkPlaceholder: "https://www.google.com/maps/place/…/@latitude,longitude",
-  googleMapsLinkHint: "タイムラインだけの仮予定なら空欄にできます。地図に表示する場合は、パソコンのブラウザから正確な場所の完全なURLを貼り付けてください。「共有」の短縮リンクは使えません。",
+  googleMapsLinkHint: "選択した場所は地図に表示されます。正確な場所の Google Maps の完全なURLも使えます。場所を空欄にすると予定表のみの表示になります。「共有」の短縮リンクは使えません。",
   googleMapsLinkInvalid: "/maps/place/ と座標を含む完全なGoogle マップの場所リンクを貼り付けてください。",
   placeReady: "場所を確認しました",
   whatToKnow: "概要",

@@ -1,6 +1,6 @@
-import { UI_ZH_HANT } from "./translations-zh-hant.js?v=v-b339dc016940";
-import { UI_ZH_HANS } from "./translations-zh-hans.js?v=v-b339dc016940";
-import { UI_JA } from "./translations-ja.js?v=v-b339dc016940";
+import { UI_ZH_HANT } from "./translations-zh-hant.js?v=v-5e4ebe3cf6e1";
+import { UI_ZH_HANS } from "./translations-zh-hans.js?v=v-5e4ebe3cf6e1";
+import { UI_JA } from "./translations-ja.js?v=v-5e4ebe3cf6e1";
 
 const seedTrip = readSeedTrip();
 // Self-hosted pages share one non-sensitive language preference across trips.
@@ -83,7 +83,7 @@ export const UI_EN = {
   everyone: "Everyone",
   googleMapsLink: "Full Google Maps link · optional",
   googleMapsLinkPlaceholder: "https://www.google.com/maps/place/…/@latitude,longitude",
-  googleMapsLinkHint: "Leave blank for a timeline-only placeholder. To add a map marker, paste the exact full place URL from a computer browser; short Share links do not work.",
+  googleMapsLinkHint: "A selected place supplies the map marker. You can also paste an exact full Google Maps place URL. Leave the location empty for a timeline-only plan; short Share links do not work.",
   googleMapsLinkInvalid: "Paste a full Google Maps place link containing /maps/place/ and coordinates.",
   placeReady: "Location ready",
   whatToKnow: "What to know",

@@ -5,7 +5,7 @@ description: Plan, import, edit, and verify multilingual trips in a self-hosted 
 
 # Build Shared Trip App
 
-Turn a trip's source material into a trip on the included self-hosted service. The service is one Node.js process with one SQLite database. It serves a single installable PWA (`/` lists trips, `/trips/<id>` opens one) and a remote MCP endpoint. Each trip keeps the included interface: four languages, a day-by-day map, a date-flexible checklist, an all-dates weather slider with hourly dialogs, expandable bookings and POIs, optional nearby ideas, optional exact Google Maps place links, credited photos, and the phone swipe-sheet planner.
+Turn a trip's source material into a trip on the included self-hosted service. The service is one Node.js process with one SQLite database. It serves a single installable PWA (`/` lists trips, `/trips/<id>` opens one) and a remote MCP endpoint. Each trip keeps the included interface: four languages, a day-by-day map, a date-flexible checklist, an all-dates weather slider with hourly dialogs, expandable bookings and POIs, optional nearby ideas, optional exact Google Maps place links or selected OpenStreetMap places, credited photos, and the phone swipe-sheet planner.
 
 Read [agent-setup.md](references/agent-setup.md) for a fresh environment. The whole repository is required, not only this file. Keep real trip inputs, exports, backups, and the data directory outside the checkout. Screenshots are visual references only.
 
@@ -35,14 +35,15 @@ Treat every trip as clean-room data. Never carry itinerary content, travelers, I
 These apply to self-hosted data and to legacy generator input.
 
 - Put flights and stays in chronological plans. They are itinerary POIs, not a separate booking page.
-- When a plan has a meaningful location, derive its address, label, and marker from a full Google Maps browser place URL. A deliberately locationless placeholder may omit the URL and stays timeline-only. Whenever a URL is supplied, reject Share short links and viewport-only coordinates.
-- Never invent a Google Maps place identifier, or build `/maps/place/name/@coordinates` as though it were a verified venue. A named-search fallback does not verify an exact place.
+- When a plan has a meaningful location, derive its address, label, and marker from a verified source. For legacy generator input that source is a full Google Maps browser place URL. On the self-hosted service, it is either such a URL or a selected OpenStreetMap `place` snapshot ([input-schema.md](references/input-schema.md#selected-openstreetmap-place-self-hosted)) with mirrored `lat`/`lng`/`address`. A deliberately locationless placeholder may omit both and stays timeline-only. Whenever a Google URL is supplied, reject Share short links and viewport-only coordinates.
+- Never invent a Google Maps place identifier, OSM ID, or coordinates, or build `/maps/place/name/@coordinates` as though it were a verified venue. A named-search fallback does not verify an exact place. A coordinate-based navigation link for an OSM place is not a Google venue link.
+- Self-hosted place and photo lookups are off unless the operator enables them ([place-and-photo-lookups.md](references/place-and-photo-lookups.md)). Only the owner and content managers can search, never viewers. A lookup runs only on an explicit user **Search** or **Refresh**, and the user chooses the result. Never put confidential text in a query, because it is sent to the provider. Never enable them, change live configuration, or create provider accounts or keys for the user. MCP has no search tool; `apply_trip_changes` saves the same chosen objects. The new search does not use Google, so never scrape Google content to fill it.
 - Give checklist items an explicit `dueDate`, which may fall before, during, or after the trip. Items due on a trip date also appear near the top of that day's itinerary.
 - When you edit a plan's time, keep its `sortTime`/`sortOrder` consistent with it. The server recomputes or clears stale ordering, so do not send contradictory values.
 - When you change a source name, notes, or description, its dependent translations are invalidated. Supply fresh reviewed translations or leave them to fall back to the source text.
 - Record ratings with their provider and `ratingCheckedAt` date. Do not invent ratings.
 - Use participant groups. If everyone attends, omit participant groups from that plan.
-- Use credited, reusable photos when you add photos. Prefer bounded thumbnails or local previews over multi-megabyte originals.
+- Use credited, reusable photos when you add photos. Prefer bounded thumbnails or local previews over multi-megabyte originals. Keep a Commons photo's author, source, license and license URL, and treat it as representative until the user confirms it shows the place.
 - Never store reservation codes, confirmation numbers, ticket numbers, passport data, payment-card data, service accounts, private keys, tokens, or private document links in trip content.
 - Keep user-facing copy traveler-focused. Do not add implementation notes, account-model prose, citations in content cards, or developer notes to the interface.
 - Keep the desktop map spacious and sticky, and preserve the phone map-background/swipe-sheet interface. Reuse the map instance.
@@ -58,7 +59,7 @@ node scripts/test-content-manager-ui.mjs   # content-manager and owner token UI 
 node scripts/build-docs-demo.mjs
 ```
 
-Then repeat the responsive QA. The manifest identity (`id`, `start_url`, and `scope` all `/`) must stay stable. The self-hosted service worker must never cache `/api`, `/mcp`, `/oauth/*`, `/.well-known/oauth-*`, `/photos/*`, protected trip pages, or trip payloads. Self-hosted private photos belong in `SHARED_TRIP_DATA_DIR/photos`, never in source or public directories. Never add private filename mappings to the public, generic `photos/manifest.js`.
+Then repeat the responsive QA. The manifest identity (`id`, `start_url`, and `scope` all `/`) must stay stable. The self-hosted service worker must never cache `/api` (including the place and photo search endpoints), `/mcp`, `/oauth/*`, `/.well-known/oauth-*`, `/photos/*`, protected trip pages, or trip payloads. Self-hosted private photos belong in `SHARED_TRIP_DATA_DIR/photos`, never in source or public directories. Never add private filename mappings to the public, generic `photos/manifest.js`.
 
 ## Legacy static generator (opt-in)
 
@@ -94,4 +95,4 @@ Report:
 - which MCP client was used, if any (for example the official SDK smoke test, not a third-party AI app unless that was actually exercised);
 - assumptions or traveler facts still awaiting confirmation.
 
-Do not claim synchronization, offline behavior, installation, MCP client compatibility, viewer or content-manager access control, token issuance or expiry, OAuth discovery, consent or grant expiry, backups, crash recovery, map-tile availability, or deployment were verified unless they were actually exercised.
+Do not claim synchronization, offline behavior, installation, MCP client compatibility, viewer or content-manager access control, token issuance or expiry, OAuth discovery, consent or grant expiry, backups, crash recovery, map-tile availability, place or photo lookups (live Nominatim or Commons responses, the zero-lookup rendering rule, or the editor UI), or deployment were verified unless they were actually exercised.

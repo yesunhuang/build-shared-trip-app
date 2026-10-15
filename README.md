@@ -31,7 +31,8 @@ Open `http://127.0.0.1:4173/` and use **Owner sign-in** with your token. Create 
 | Sync | Open pages poll the server and reconnect after network loss. Writes need a connection. Protected trips are never kept in a persistent offline cache. |
 | AI | Remote MCP over Streamable HTTP (protocol `2025-11-25`) with `list_trips`, `get_trip`, `create_trip`, `apply_trip_changes`, `import_trip`, and `export_trip`. It accepts the owner's admin bearer or an owner-issued content-manager token (fixed 90 days, `/mcp` only, shown once, revocable). For clients that cannot send a custom key, such as ChatGPT, the schema v5 release adds OAuth (scope `trips:manage`, `/mcp` only). OAuth is limited to one content manager that the owner names in `SHARED_TRIP_OAUTH_USERNAME`, and it is denied when that is unset. Browser cookies never authorize MCP. The custom-header path was tested with the official SDK. OAuth passed the local suite and fictional Chrome flow; a real ChatGPT sign-in and consent is pending. No named AI client is claimed. See [mcp.md](references/mcp.md). |
 | Recovery | Online validated SQLite snapshots that include accounts, tokens and OAuth grant records. Data-directory ownership is an OS-held lock, so a crashed or killed service can restart without manual lock deletion. Windows and isolated Linux container checks passed, including automatic container recovery after a hard kill, contention and fictional-data preservation. |
-| Portability | Import legacy trip JSON or exports, with IDs and translations kept. Export any trip as recoverable JSON. |
+| Portability | Import legacy trip JSON or exports, with IDs and translations kept. Export any trip as recoverable JSON. Saved place and photo selections travel with it, and import and export never perform lookups. |
+| Lookups | Off by default. `SHARED_TRIP_LOOKUPS_ENABLED=1` plus an identifying `SHARED_TRIP_LOOKUP_USER_AGENT` enables explicit place search (Nominatim, endpoint switchable with `SHARED_TRIP_NOMINATIM_URL`) and Commons photo search for the owner and content managers. Requests are serial, rate-spaced and cached, with no autocomplete or background jobs. The public endpoints have no service-level agreement, and query text is sent to the provider. See [place-and-photo-lookups.md](references/place-and-photo-lookups.md). |
 
 ## The interface
 
@@ -51,7 +52,8 @@ These are rendered views of an earlier single-trip implementation. The phone ima
 
 ### In every trip
 
-- **One timeline** for flights, stays, transport, restaurants, and sights, with optional exact Maps links and placeholder plans.
+- **One timeline** for flights, stays, transport, restaurants, and sights, with optional exact Google Maps links and placeholder plans.
+- **Optional place and photo search (self-hosted, off by default):** when the operator enables it, owners and content managers press **Search** in the plan editor to find a public OpenStreetMap place and, separately, a credited Wikimedia Commons photo. They choose the exact result, and **Save** stores it as part of the trip. Pages render the saved choice without searching again. No Google API, API key or billing account is involved. The operator must review the provider policies first. See [place-and-photo-lookups.md](references/place-and-photo-lookups.md).
 - **Trip context:** to-dos with flexible due dates, an all-dates forecast strip with hourly details, optional nearby ideas, and a payments & apps page.
 - **Four languages:** English, Simplified Chinese, Traditional Chinese, and Japanese. When you edit source text, its outdated translations are cleared and the source text is shown until you translate it again.
 - **Drafts welcome:** start with only a title, then add dates, plans, and reminders. Photos, translations, and recommendations are optional while you edit.
@@ -63,7 +65,7 @@ Read [`SKILL.md`](SKILL.md) first. It defines the self-hosted workflow, privacy 
 ```text
 Read SKILL.md and follow build-shared-trip-app for the attached itinerary.
 Use the self-hosted service: create or import the trip through the API or MCP.
-Keep uncertain details visibly pending; do not invent bookings or place IDs.
+Keep uncertain details visibly pending; do not invent bookings, place IDs, OSM IDs or coordinates.
 Report which checks actually ran; do not deploy without my approval.
 ```
 
@@ -101,7 +103,7 @@ Rebuild the demo whenever the template or the fictional input changes. Automated
 | Location | Purpose |
 | --- | --- |
 | [`SKILL.md`](SKILL.md) · [`agents/`](agents/) | Agent instructions and discovery metadata |
-| [`references/`](references/) | Self-hosting, MCP, setup, input, UI, performance, privacy, and legacy deployment guides |
+| [`references/`](references/) | Self-hosting, MCP, setup, input, place/photo lookups, UI, performance, privacy, and legacy deployment guides |
 | `server/` | Self-hosted Node service, SQLite storage, accounts, API, and MCP |
 | [`deploy/`](deploy/README.md) | Docker Compose + Caddy HTTPS template and fictional live-trial evidence |
 | `assets/selfhosted/` | Home page, manifest, and service worker for the single installed app |

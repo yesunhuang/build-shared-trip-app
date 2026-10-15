@@ -8,7 +8,12 @@ Never reuse data from a prior generated trip. Search the working files for old n
 
 ## Resolve locations
 
-For every recommendation and every plan that should appear on the map:
+A self-hosted plan can be located in either of two ways. Recommendations and legacy generator input still use Google Maps URLs only.
+
+- **Selected OpenStreetMap place (self-hosted plans).** When the operator has enabled lookups, the user searches in the plan editor and chooses the exact candidate. An agent may save the same `place` object through `apply_trip_changes`, but only for an OSM object the user chose or you confirmed on its OSM object page. Check that its name and address match the intended facility or branch. Never invent an OSM ID or coordinates. Its navigation link is coordinate-based; do not describe it as a Google venue link. See [place-and-photo-lookups.md](place-and-photo-lookups.md) and [input-schema.md](input-schema.md#selected-openstreetmap-place-self-hosted).
+- **Full Google Maps place URL (all plans and recommendations).** Follow the steps below. The new place search does not use Google, and you must not scrape Google content to fill a `place` object.
+
+For every recommendation, and every plan located by a Google Maps URL:
 
 1. Open the named place's Google Maps review/address/photo page in a desktop browser.
 2. Copy the full address-bar URL.
@@ -18,11 +23,11 @@ For every recommendation and every plan that should appear on the map:
 
 If a venue has several branches, choose the branch on the route. Airports, stations, hotels, rental-car counters, and restaurants are POIs too.
 
-A deliberately locationless placeholder plan may omit `googleMapsUrl`. It remains in the timeline without a map marker or Maps action. Do not invent a generic search link or approximate pin for it.
+A deliberately locationless placeholder plan may omit `googleMapsUrl` (and, on the self-hosted service, `place`). It remains in the timeline without a map marker or Maps action. Do not invent a generic search link or approximate pin for it.
 
 ## Photos and licensing
 
-Add one representative image for every plan and recommendation. Prefer, in order:
+Legacy generator input needs one representative image for every plan and recommendation. Self-hosted drafts may omit photos. When you add one, prefer, in order:
 
 1. user-supplied photos;
 2. official venue or tourism media with reuse permission;
@@ -30,6 +35,8 @@ Add one representative image for every plan and recommendation. Prefer, in order
 4. other clearly licensed sources.
 
 Do not copy photos from Google Maps, Tabelog, social media, or commercial photo libraries without permission. Record `sourceUrl` and a concise creator/license credit. Use the source page, not a raw image URL, for attribution.
+
+For a Commons photo on the self-hosted service, keep the full `wikimedia-commons` photo object: author, license, license URL and source page, using a bounded, unmodified thumbnail URL. Check the file page for additional rights. Skip files with an unknown, non-commercial or no-derivatives licence. A Commons search hit is representative, not proof that it shows the exact place, until the user confirms it is relevant.
 
 ## Recommendations
 

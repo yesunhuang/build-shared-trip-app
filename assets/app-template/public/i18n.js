@@ -83,7 +83,7 @@ export const UI_EN = {
   everyone: "Everyone",
   googleMapsLink: "Full Google Maps link · optional",
   googleMapsLinkPlaceholder: "https://www.google.com/maps/place/…/@latitude,longitude",
-  googleMapsLinkHint: "Leave blank for a timeline-only placeholder. To add a map marker, paste the exact full place URL from a computer browser; short Share links do not work.",
+  googleMapsLinkHint: "A selected place supplies the map marker. You can also paste an exact full Google Maps place URL. Leave the location empty for a timeline-only plan; short Share links do not work.",
   googleMapsLinkInvalid: "Paste a full Google Maps place link containing /maps/place/ and coordinates.",
   placeReady: "Location ready",
   whatToKnow: "What to know",

@@ -17,15 +17,18 @@ Placeholders: `trips.example.org` is fictional. `/PRIVATE/shared-trips/...` stan
 | SHARED_TRIP_ADMIN_TOKEN | app only | Owner-only bearer secret of 32-512 characters. It is the master credential, including MCP. Content-manager MCP tokens are issued from the home page and stored in the database, not in this file. |
 | SHARED_TRIP_ORIGIN | app | `https://<public host>`. The app rejects any other Host or Origin value. It is also the exact OAuth issuer, and `<origin>/mcp` is the OAuth resource. |
 | SHARED_TRIP_OAUTH_USERNAME | app only, optional | `<approved-content-manager-username>` (for example `sample-editor`). It names the one account allowed to approve OAuth grants (schema v5 release). Leave it unset to deny all OAuth. It is not a secret, but it is deployment-specific, so keep it in the private file. |
+| SHARED_TRIP_LOOKUPS_ENABLED | app only, optional | `1` enables explicit place/photo search. Unset by default. See [Place and photo lookups](#place-and-photo-lookups-optional) before setting it. |
+| SHARED_TRIP_LOOKUP_USER_AGENT | app only, required if lookups are enabled | Application name and version plus your contact email or URL. Not a secret, but it identifies you, so keep it in the private file. |
+| SHARED_TRIP_NOMINATIM_URL | app only, optional | HTTPS Nominatim-compatible search endpoint. When lookups are enabled, it defaults to the public OSMF endpoint. |
 | SHARED_TRIP_DOMAIN | Caddy only | Same hostname as the origin |
 | SHARED_TRIP_DATA_PATH | app `/data` | Data directory owned by UID 1000 on a local filesystem |
 | SHARED_TRIP_BACKUP_PATH | app `/backups` | Separate snapshot storage, owned by UID 1000 |
 | CADDY_DATA_PATH / CADDY_CONFIG_PATH | Caddy `/data`, `/config` | Certificates, keys, and ACME account data |
 | SHARED_TRIP_IMAGE_TAG / CADDY_IMAGE | images | App rollback tag; pinned Caddy image |
 
-The app container receives only the variables listed in `deploy/compose.yaml`. Before relying on OAuth, check that your reviewed release passes `SHARED_TRIP_OAUTH_USERNAME` through. If it does not, OAuth stays denied.
+The app container receives only the variables listed in `deploy/compose.yaml`. Before relying on OAuth, check that your reviewed release passes `SHARED_TRIP_OAUTH_USERNAME` through. If it does not, OAuth stays denied. The lookup settings are included in the current template, with lookups disabled by default; older private Compose copies need the same settings before use.
 
-The data directory holds `shared-trip.sqlite` (trips, retry log, accounts and roles, invitations, MCP access-token records, OAuth client and grant records with token digests, audit log), the ownership files described in [section 9](#9-unclean-stops-and-data-directory-ownership), pre-migration snapshots, and the optional private `photos/` store. Compose refuses to start when a variable is missing, and it does not create missing host directories. Neither the app port nor the Caddy admin API is published.
+The data directory holds `shared-trip.sqlite` (trips, retry log, accounts and roles, invitations, MCP access-token records, OAuth client and grant records with token digests, audit log), the ownership files described in [section 9](#9-unclean-stops-and-data-directory-ownership), pre-migration snapshots, the optional private `photos/` store and, only when lookups are enabled, a non-essential private lookup cache. Compose refuses to start when a variable is missing, and it does not create missing host directories. Neither the app port nor the Caddy admin API is published.
 
 ## 1. Inspect the host before installing anything
 
@@ -176,6 +179,8 @@ sudo test ! -e "$photos" && sudo tar -C /PRIVATE/shared-trips/data -cf "$photos"
 
 The CLI uses SQLite's online backup while the service runs and validates the snapshot. The snapshot contains trips, IDs, versions, archive state, the retry log, deletion tombstones (schema v6), accounts (with password hashes and roles), invitation digests, MCP access-token records, OAuth client and grant records with token digests (schema v5), and the audit log. Treat it as a credential-bearing secret. A snapshot taken before a trip was deleted still contains that trip; restoring it brings the trip back.
 
+Selected place and photo snapshots are ordinary trip content inside the database, so the snapshot carries them. Commons photo bytes stay remote and are not archived. The lookup cache is non-essential; you do not need to back it up or restore it.
+
 The backup command needs no input. Redirecting stdin prevents Compose from consuming later commands when this recipe runs inside a script.
 
 The CLI refuses an existing target, so snapshots are never overwritten. If a name collides, rerun the command. Same-server snapshots are **not** off-site protection. Copy them, encrypted, to separate storage you control. Delete old snapshots only one at a time, after the off-site copy has been verified. This template has no automatic cleanup.
@@ -270,6 +275,22 @@ Keep the upgraded directory for analysis. Edits, accounts, role changes and MCP 
 
 Restoring a snapshot also restores its approval and credential-revocation state. Before reconnecting clients, review credentials that were revoked after the snapshot and revoke them again where needed.
 
+## Place and photo lookups (optional)
+
+Lookups are off by default and need nothing for normal operation. Enabling them is an owner decision. Make it only after reading [place-and-photo-lookups.md](../references/place-and-photo-lookups.md), including the OSMF Nominatim and Wikimedia policies. These public endpoints have no SLA, need a valid identifying User-Agent, forbid autocomplete and bulk use, and receive every query text. They need no API key, billing account or provider sign-in. Turning the feature on generates no credentials.
+
+**Network egress.** In this template the `backend` network is `internal: true`, so the app container has no outbound internet access. With the unchanged template, enabling lookups makes searches fail; it does not open a path to the provider. Lookups need outbound HTTPS from the app to the configured Nominatim endpoint and to Wikimedia Commons. Providing that is a deliberate change to the host's network design, for example an additional outbound-only network for the app in a private override. Review it like any firewall change and keep the app's port unpublished. This template does not ship that change, and its acceptance checks predate the feature.
+
+To enable on a reviewed release that passes the variables through:
+
+1. With `sudoedit`, add `SHARED_TRIP_LOOKUPS_ENABLED=1` and `SHARED_TRIP_LOOKUP_USER_AGENT=<app-name>/<version> (+<your-contact-url-or-email>)` to the private env file. Optionally add `SHARED_TRIP_NOMINATIM_URL=https://<provider>/search` for a different provider whose terms allow retaining results.
+2. Run `dc config --quiet`, then `dc up -d app`.
+3. Tell trip editors that search text goes to the provider and must contain no confidential material.
+
+To disable, remove `SHARED_TRIP_LOOKUPS_ENABLED` (or set it to anything other than `1`) and run `dc up -d app`. Saved places and photos stay in the trips and keep rendering. Saved Commons images and OSM map tiles are fetched by visitors' browsers whether or not lookups are on.
+
+The search endpoints are under `/api/*`, so the existing no-store headers and protected-path rules already cover them. No Caddyfile change is needed for them.
+
 ## Existing proxy
 
 If 80/443 are taken, keep the current proxy and add a dedicated virtual host instead of starting Caddy:
@@ -316,4 +337,5 @@ The app sends `Referrer-Policy: strict-origin-when-cross-origin`, so external ma
 - The running app can write to the backup mount, so off-site copies are the real protection.
 - Desktop and phone-width Chrome interactions and direct Cache Storage/local-storage inspection passed in the observed trial profile; see the [cache completion report](../doc/Progress/progress_2026_10_14_cpx005_codex_b.md). Physical-phone installation, full pointer/touch regression and named external AI-client integration remain separate checks. Real-data migration requires its own authorization and preservation plan.
 - The content-manager release passed isolated Linux production-image tests, preservation checks on restored storage and an authorized app upgrade; [checkpoint 007](../doc/Progress/progress_2026_10_15_cpx007_codex_b.md) records the evidence. Anonymous HTTPS access remained protected. Live content-manager credential authentication over the public proxy/CDN and the actual external AI client still require owner-controlled provisioning and verification.
+- Place and photo lookups have no deployment evidence in this template. Outbound egress for the app container, live Nominatim/Commons behaviour, and the editor in a browser are unverified until recorded. Enabling lookups requires no schema migration; saved places and photos are additive trip content.
 - OAuth schema v5 passed the full local suite, official SDK OAuth/refresh flow, fictional Chrome checks, production-image Linux tests, isolated migration/restore and live HTTPS discovery/privacy checks. See [checkpoint 008](../doc/Progress/progress_2026_10_15_cpx008_codex_b.md) and [checkpoint 009](../doc/Progress/progress_2026_10_15_cpx009_codex_b.md). Actual ChatGPT sign-in, consent and an authenticated read-only tool result remain pending.

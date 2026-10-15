@@ -39,6 +39,20 @@ import {
 } from "./weather-forecast.js?v=__CACHE_VERSION__";
 import { getFlightBookings } from "./flight-bookings.js?v=__CACHE_VERSION__";
 import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=__CACHE_VERSION__";
+import {
+  OSM_COPYRIGHT_URL,
+  coordinateGoogleMapsUrl,
+  createLookupController,
+  formatCoordinate,
+  normalizePhotoCandidate,
+  normalizePlaceCandidate,
+  normalizeQuery,
+  photoForSaving,
+  pickerText,
+  placeForSaving,
+  readSavedPhoto,
+  readSavedPlace
+} from "./place-picker.js?v=__CACHE_VERSION__";
 
 const FIREBASE_SDK_VERSION = "12.15.0";
 // Self-hosted mode is decided before any Firebase code path. It never loads the
@@ -180,6 +194,14 @@ let itinerarySheetDrag = null;
 let itinerarySheetFrameTimer = null;
 let itinerarySheetPositionFrame = null;
 let pendingItinerarySheetTop = null;
+// The plan highlighted on both the map and the itinerary (marker click or opened card).
+let selectedMapSlotId = "";
+// One plan-editor session at a time. Place/photo lookups and choices belong to the
+// session that started them; closing or reopening the editor discards them.
+let editorSession = null;
+// Explicit place/photo lookup is a hosted editor feature only. The static
+// generator and approved viewers never render lookup controls.
+const LOOKUP_ENABLED = HOSTED && !HOSTED_READ_ONLY;
 const WEATHER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 const FLIGHT_BOOKING_REFS = Object.freeze({});
@@ -1045,15 +1067,25 @@ function renderItinerary() {
 
   els.days.replaceChildren(day ? renderDay(day, Math.max(0, index)) : renderNoDays());
 
-  if (!preserveDisclosureState) return;
+  if (!preserveDisclosureState) {
+    setMapSelection("");
+    return;
+  }
   els.days.querySelectorAll(".timeline-item").forEach((item) => {
     const card = item.querySelector(".timeline-card");
-    if (card && openSlotIds.has(item.dataset.slotId)) card.open = true;
+    if (card && openSlotIds.has(item.dataset.slotId)) {
+      // Restoring an open card after a re-render must not move the map.
+      card.dataset.restoring = "true";
+      card.open = true;
+    }
   });
   const dining = els.days.querySelector(".dining-disclosure");
   const guide = els.days.querySelector(".day-guide");
   if (dining) dining.open = diningOpen;
   if (guide) guide.open = guideOpen;
+  const stillShown = [...els.days.querySelectorAll(".timeline-item")]
+    .some((item) => item.dataset.slotId === selectedMapSlotId);
+  setMapSelection(stillShown ? selectedMapSlotId : "");
 }
 
 function renderNoDays() {
@@ -1247,6 +1279,10 @@ function renderSlot(day, slot, slotIndex) {
   if (slot.notes) body.append(textElement("p", "note-line", slot.notes));
   const bookingDetails = renderTimelineBookingDetails(flightBooking, hotelBooking);
   if (bookingDetails) body.append(bookingDetails);
+  const placeSource = renderPlaceSource(slot);
+  if (placeSource) body.append(placeSource);
+  const photoCredit = renderPhotoCredit(slot);
+  if (photoCredit) body.append(photoCredit);
   const actions = element("div", "timeline-card__actions");
   const mapsAction = googleMapsAnchor(slot, { allowSearchFallback: false });
   if (mapsAction) actions.append(mapsAction);
@@ -1268,12 +1304,81 @@ function renderSlot(day, slot, slotIndex) {
 
   card.append(summary, body);
   card.addEventListener("toggle", () => {
-    if (card.open && Number.isFinite(slot.lat) && Number.isFinite(slot.lng) && mapInstance) {
-      focusMapPoint(slot.lat, slot.lng, 13);
+    const restoring = card.dataset.restoring === "true";
+    delete card.dataset.restoring;
+    const mapped = !slot.mapLocationOmitted && Number.isFinite(slot.lat) && Number.isFinite(slot.lng);
+    if (card.open) {
+      if (!mapped) return;
+      setMapSelection(slot.id);
+      if (!restoring && mapInstance) focusMapPoint(slot.lat, slot.lng, 13);
+    } else if (selectedMapSlotId === slot.id) {
+      setMapSelection("");
     }
   });
   article.append(marker, card);
   return article;
+}
+
+// Shows where a chosen location came from; provider text is plain text only.
+function renderPlaceSource(slot) {
+  const place = readSavedPlace(slot?.place);
+  if (!place) return null;
+  const line = element("p", "place-source");
+  line.append(
+    textElement("span", "place-source__label", `${pickerText(currentLanguage, "locationSourceLabel")}: `),
+    externalAnchor(pickerText(currentLanguage, "viewOnOpenStreetMap"), place.sourceUrl, "place-source__link"),
+    textElement("span", "place-source__attribution", ` · ${place.attribution} · ${place.license}`)
+  );
+  return line;
+}
+
+// Visible credit, licence and source for an explicitly chosen licensed photo.
+function renderPhotoCredit(slot) {
+  const photo = readSavedPhoto(slot?.photo);
+  if (!photo) return null;
+  return photoCreditLine(photo, "photo-credit photo-credit--licensed");
+}
+
+function photoCreditLine(photo, className) {
+  const line = element("p", className);
+  line.append(textElement("span", "photo-credit__label", `${pickerText(currentLanguage, "representativePhotoLabel")} · `));
+  if (photo.author) {
+    line.append(textElement("span", "photo-credit__author", pickerText(currentLanguage, "photoBy", { author: photo.author })), document.createTextNode(" · "));
+  }
+  const licenseLabel = pickerText(currentLanguage, "photoLicense", { license: photo.license });
+  line.append(photo.licenseUrl
+    ? externalAnchor(licenseLabel, photo.licenseUrl, "photo-credit__license")
+    : textElement("span", "photo-credit__license", licenseLabel));
+  line.append(document.createTextNode(" · "), externalAnchor(pickerText(currentLanguage, "photoSource"), photo.sourceUrl, "photo-credit__source"));
+  return line;
+}
+
+// Highlights one plan on both the itinerary and the map, or clears the highlight.
+function setMapSelection(slotId) {
+  selectedMapSlotId = slotId || "";
+  els.days.querySelectorAll(".timeline-item").forEach((item) => {
+    const selected = Boolean(selectedMapSlotId) && item.dataset.slotId === selectedMapSlotId;
+    item.classList.toggle("is-map-selected", selected);
+    if (selected) item.setAttribute("aria-current", "true");
+    else item.removeAttribute("aria-current");
+  });
+  applyMarkerSelection();
+}
+
+function applyMarkerSelection() {
+  const markers = mapInstance?.tripMarkers;
+  if (!markers) return;
+  Object.keys(markers).forEach((id) => {
+    const marker = markers[id];
+    const selected = id === selectedMapSlotId;
+    const node = typeof marker?.getElement === "function" ? marker.getElement() : null;
+    if (node) {
+      node.classList.toggle("is-selected", selected);
+      if (selected) node.setAttribute("aria-current", "true");
+      else node.removeAttribute("aria-current");
+    }
+    if (typeof marker?.setZIndexOffset === "function") marker.setZIndexOffset(selected ? 1000 : 0);
+  });
 }
 
 function renderTimelineBookingDetails(flightBooking, hotelBooking) {
@@ -1771,8 +1876,12 @@ function renderCredits() {
     if (item?.photo && typeof item.photo === "object") addPhotoCredit(item.photo, item.name);
   });
 
+  const placeCredit = orderedDaySlots(day).some((slot) => readSavedPlace(slot.place))
+    ? [externalAnchor(pickerText(currentLanguage, "placeDataCredit"), OSM_COPYRIGHT_URL, "footer-credit-link")]
+    : [];
   els.credits.replaceChildren(
     externalAnchor(ui(currentLanguage, "weatherDataBy"), "https://open-meteo.com/en/license", "footer-credit-link"),
+    ...placeCredit,
     ...[...credits].map(([url, label]) => externalAnchor(label, url, "footer-credit-link"))
   );
   els.credits.closest("details").hidden = false;
@@ -1832,6 +1941,8 @@ function renderMap(attempt = 0) {
     });
     mapContentKey = nextContentKey;
   }
+  if (selectedMapSlotId && !points.some((point) => point.id === selectedMapSlotId)) setMapSelection("");
+  else applyMarkerSelection();
   if (needsFrame) {
     mapGeometryKey = nextGeometryKey;
     requestAnimationFrame(() => {
@@ -1847,9 +1958,7 @@ function handleMapPointClick(point) {
   const item = [...els.days.querySelectorAll(".timeline-item")]
     .find((candidate) => candidate.dataset.slotId === point.id);
   if (!item) return;
-  els.days.querySelectorAll(".timeline-item.is-map-selected")
-    .forEach((candidate) => candidate.classList.remove("is-map-selected"));
-  item.classList.add("is-map-selected");
+  setMapSelection(point.id);
   const card = item.querySelector(".timeline-card");
   if (card) card.open = true;
   if (document.documentElement.classList.contains("is-itinerary-view")) {
@@ -2043,7 +2152,10 @@ function setupInteractionHandlers() {
   });
   els.addReminder.addEventListener("click", () => openTodoDialog());
   const googleMapsInput = els.form.elements.googleMapsUrl;
-  googleMapsInput.addEventListener("input", () => updateGoogleMapsLinkState());
+  googleMapsInput.addEventListener("input", () => {
+    updateGoogleMapsLinkState();
+    handleGoogleMapsInputForLookup();
+  });
   googleMapsInput.addEventListener("blur", () => updateGoogleMapsLinkState({ showError: true }));
   googleMapsInput.addEventListener("invalid", () => updateGoogleMapsLinkState({ showError: true }));
   els.form.addEventListener("submit", handleItemSubmit);
@@ -2051,6 +2163,9 @@ function setupInteractionHandlers() {
   els.dialog.addEventListener("click", (event) => {
     if (event.target === els.dialog) els.dialog.close();
   });
+  // Cancelling or closing the editor discards unsaved place/photo choices and
+  // makes any late lookup response irrelevant.
+  els.dialog.addEventListener("close", endEditorSession);
   els.todoForm.addEventListener("submit", handleTodoSubmit);
   els.deleteReminder.addEventListener("click", handleTodoDelete);
   els.todoDialog.addEventListener("click", (event) => {
@@ -2248,6 +2363,8 @@ function openItemDialog(dayId, slotId = "") {
   }
 
   updateGoogleMapsLinkState();
+  // Shows any saved place/photo from trip data only; nothing is looked up here.
+  startEditorSession(dayId, slotId, slot);
   els.dialog.showModal();
   focusDialogFieldOnDesktop(els.form.elements.name);
 }
@@ -2319,6 +2436,461 @@ function coordinateLabel(value) {
   return Number(value).toFixed(6).replace(/\.?0+$/, "");
 }
 
+// ---------------------------------------------------------------------------
+// Explicit place and photo matching (self-hosted editors only).
+// No request is made while rendering, opening the editor, typing or saving
+// unrelated fields: only the Search and Refresh results controls call the server.
+
+const GOOGLE_LOCATION_KEYS = Object.freeze([
+  "googleMapsUrl", "mapsUrl", "googleMapsPlaceName", "googleMapsPlaceLabel", "googleMapsFeatureId"
+]);
+const ALL_LOCATION_KEYS = Object.freeze([
+  ...GOOGLE_LOCATION_KEYS, "address", "lat", "lng", "approximateLocation", "place", "mapLocationOmitted"
+]);
+
+function pickerNode(tag, className, key) {
+  const node = textElement(tag, className, pickerText(currentLanguage, key));
+  node.dataset.pickerText = key;
+  return node;
+}
+
+function ensureLookupPanels() {
+  let placePanel = document.getElementById("place-lookup");
+  let photoPanel = document.getElementById("photo-lookup");
+  if (!placePanel) {
+    placePanel = buildLookupPanel("place");
+    els.form.elements.googleMapsUrl.closest("label").before(placePanel);
+  }
+  if (!photoPanel) {
+    photoPanel = buildLookupPanel("photo");
+    els.form.elements.review.closest("label").after(photoPanel);
+  }
+  return { place: placePanel, photo: photoPanel };
+}
+
+function buildLookupPanel(kind) {
+  const prefix = kind === "place" ? "place" : "photo";
+  const panel = element("section", `lookup-panel lookup-panel--${kind}`);
+  panel.id = `${kind}-lookup`;
+  panel.dataset.lookupKind = kind;
+  const title = pickerNode("h3", "lookup-panel__title", `${prefix}SectionTitle`);
+  title.id = `${kind}-lookup-title`;
+  panel.setAttribute("aria-labelledby", title.id);
+  const hint = pickerNode("p", "form-hint lookup-panel__hint", `${prefix}SectionHint`);
+  const current = element("div", "lookup-current");
+  current.dataset.lookupCurrent = kind;
+
+  const search = element("div", "lookup-search");
+  const input = document.createElement("input");
+  input.type = "search";
+  input.id = `${kind}-lookup-query`;
+  input.className = "lookup-search__input";
+  input.maxLength = 200;
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.setAttribute("enterkeyhint", "search");
+  input.dataset.pickerPlaceholder = `${prefix}SearchPlaceholder`;
+  input.placeholder = pickerText(currentLanguage, `${prefix}SearchPlaceholder`);
+  const label = pickerNode("label", "lookup-search__label", `${prefix}SearchLabel`);
+  label.htmlFor = input.id;
+  const privacy = pickerNode("p", "lookup-privacy", `${prefix}PrivacyNote`);
+  privacy.id = `${kind}-lookup-privacy`;
+  input.setAttribute("aria-describedby", privacy.id);
+  const searchButton = pickerNode("button", "button button--small lookup-search__button", "search");
+  searchButton.type = "button";
+  searchButton.dataset.lookupAction = "search";
+  const refreshButton = pickerNode("button", "button button--quiet button--small lookup-search__button", "refreshResults");
+  refreshButton.type = "button";
+  refreshButton.dataset.lookupAction = "refresh";
+  refreshButton.hidden = true;
+  const row = element("div", "lookup-search__row");
+  row.append(input, searchButton, refreshButton);
+  search.append(label, privacy, row);
+
+  const status = element("p", "lookup-status");
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  status.dataset.lookupStatus = kind;
+  const results = element("ul", `lookup-results lookup-results--${kind}`);
+  results.dataset.lookupResults = kind;
+  results.setAttribute("aria-labelledby", title.id);
+  panel.append(title, hint, current, search, status, results);
+  if (kind === "place") panel.append(pickerNode("p", "form-hint lookup-panel__or", "orPasteGoogle"));
+
+  // Enter in the search box is an explicit search; it never submits the plan.
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!event.isComposing) runLookup(kind, "search");
+  });
+  searchButton.addEventListener("click", () => runLookup(kind, "search"));
+  refreshButton.addEventListener("click", () => runLookup(kind, "refresh"));
+  return panel;
+}
+
+function lookupParts(session, kind) {
+  const panel = session.panels[kind];
+  return {
+    panel,
+    input: panel.querySelector(".lookup-search__input"),
+    search: panel.querySelector('[data-lookup-action="search"]'),
+    refresh: panel.querySelector('[data-lookup-action="refresh"]'),
+    status: panel.querySelector(".lookup-status"),
+    results: panel.querySelector(".lookup-results"),
+    current: panel.querySelector(".lookup-current")
+  };
+}
+
+function startEditorSession(dayId, slotId, slot) {
+  endEditorSession();
+  if (!LOOKUP_ENABLED) return;
+  const panels = ensureLookupPanels();
+  // The language can change while the dialog is closed and its panels are retained.
+  refreshLookupLanguage();
+  const originalPhoto = slot
+    ? (slot.photo || getPlacePhoto(slot.photoSourceId || slot.id) || null)
+    : null;
+  const session = {
+    tripId: HOSTED_TRIP_ID,
+    dayId,
+    slotId,
+    revision: 0,
+    language: currentLanguage,
+    panels,
+    renderedResults: { place: null, photo: null },
+    original: {
+      place: readSavedPlace(slot?.place),
+      lat: slot?.lat,
+      lng: slot?.lng,
+      label: String(slot?.address || slot?.googleMapsPlaceLabel || "").trim(),
+      photo: originalPhoto,
+      photoName: String(slot?.name || "")
+    },
+    location: { mode: "unchanged", place: null },
+    photo: { mode: "unchanged", photo: null, preview: null }
+  };
+  session.lookups = {
+    place: createLookupController({
+      request: (query, refresh) => hostedApi.searchPlaces(session.tripId, query, refresh),
+      normalize: normalizePlaceCandidate,
+      onChange: () => { if (editorSession === session) renderLookup(session, "place"); }
+    }),
+    photo: createLookupController({
+      request: (query, refresh) => hostedApi.searchPhotos(session.tripId, query, refresh),
+      normalize: normalizePhotoCandidate,
+      onChange: () => { if (editorSession === session) renderLookup(session, "photo"); }
+    })
+  };
+  editorSession = session;
+  ["place", "photo"].forEach((kind) => {
+    const parts = lookupParts(session, kind);
+    parts.input.value = "";
+    parts.input.disabled = false;
+    parts.results.replaceChildren();
+    parts.status.textContent = "";
+    delete parts.status.dataset.error;
+    renderLookup(session, kind);
+  });
+}
+
+function endEditorSession() {
+  const session = editorSession;
+  if (!session) return;
+  editorSession = null;
+  session.lookups?.place.dispose();
+  session.lookups?.photo.dispose();
+  ["place", "photo"].forEach((kind) => {
+    const parts = lookupParts(session, kind);
+    parts.results.replaceChildren();
+    parts.status.textContent = "";
+    parts.current.replaceChildren();
+    parts.panel.removeAttribute("aria-busy");
+  });
+}
+
+async function runLookup(kind, action) {
+  const session = editorSession;
+  if (!session || !LOOKUP_ENABLED || !els.dialog.open) return;
+  const lookup = session.lookups[kind];
+  const { input } = lookupParts(session, kind);
+  if (action === "refresh") await lookup.refresh();
+  else await lookup.search(input.value);
+  if (editorSession !== session) return;
+  if (lookup.state.error?.status === 401) redirectToLogin();
+}
+
+function renderLookup(session, kind, { forceResults = false } = {}) {
+  const parts = lookupParts(session, kind);
+  const { state } = session.lookups[kind];
+  const loading = state.status === "loading";
+  if (loading) parts.panel.setAttribute("aria-busy", "true");
+  else parts.panel.removeAttribute("aria-busy");
+  parts.input.disabled = state.forbidden;
+  parts.search.disabled = loading || state.forbidden;
+  parts.refresh.hidden = !state.lastQuery;
+  parts.refresh.disabled = loading || state.forbidden;
+
+  let message = "";
+  let isError = false;
+  if (loading) message = pickerText(currentLanguage, "searching");
+  else if (state.status === "error") {
+    isError = true;
+    message = pickerText(currentLanguage, state.errorKey || "lookupFailed");
+    if (state.errorDetail && state.errorDetail !== message) message = `${message} (${state.errorDetail})`;
+  } else if (state.status === "done") {
+    message = state.results.length
+      ? pickerText(currentLanguage, kind === "place" ? "placeResultsCount" : "photoResultsCount", { count: state.results.length })
+      : pickerText(currentLanguage, kind === "place" ? "placeNoResults" : "photoNoResults");
+    if (state.cached && state.results.length) message = `${message} ${pickerText(currentLanguage, "cachedResults")}`;
+  }
+  const chosenNote = kind === "place"
+    ? (session.location.mode === "place" ? pickerText(currentLanguage, "placeSelectedPending") : "")
+    : (session.photo.mode === "photo" ? pickerText(currentLanguage, "photoSelectedPending") : "");
+  if (!loading && !isError && state.status !== "done" && chosenNote) message = chosenNote;
+  parts.status.textContent = message;
+  if (isError) parts.status.dataset.error = "true";
+  else delete parts.status.dataset.error;
+
+  if (forceResults || session.renderedResults[kind] !== state.results) {
+    session.renderedResults[kind] = state.results;
+    parts.results.replaceChildren(...state.results.map((candidate) => (
+      kind === "place" ? renderPlaceResult(session, candidate) : renderPhotoResult(session, candidate)
+    )));
+  }
+  markChosenResults(session, kind);
+  renderLookupCurrent(session, kind);
+}
+
+function renderPlaceResult(session, candidate) {
+  const item = element("li", "lookup-result lookup-result--place");
+  item.dataset.candidateId = candidate.id;
+  const copy = element("div", "lookup-result__copy");
+  copy.append(textElement("strong", "lookup-result__name", candidate.name));
+  if (candidate.address && candidate.address !== candidate.name) copy.append(textElement("span", "lookup-result__address", candidate.address));
+  copy.append(textElement("span", "lookup-result__coordinates muted", `${pickerText(currentLanguage, "coordinatesLabel")}: ${formatCoordinate(candidate.lat)}, ${formatCoordinate(candidate.lng)}`));
+  const source = element("span", "lookup-result__source");
+  source.append(
+    externalAnchor(pickerText(currentLanguage, "viewOnOpenStreetMap"), candidate.sourceUrl, "lookup-result__link"),
+    textElement("span", "lookup-result__attribution", ` · ${candidate.attribution} · ${candidate.license}`)
+  );
+  copy.append(source);
+  const choose = textElement("button", "button button--quiet button--small lookup-result__choose", pickerText(currentLanguage, "useThisPlace"));
+  choose.type = "button";
+  choose.setAttribute("aria-pressed", "false");
+  choose.setAttribute("aria-label", `${pickerText(currentLanguage, "useThisPlace")}: ${candidate.name}`);
+  choose.addEventListener("click", () => choosePlace(session, candidate));
+  item.append(copy, choose);
+  return item;
+}
+
+function renderPhotoResult(session, candidate) {
+  const item = element("li", "lookup-result lookup-result--photo");
+  item.dataset.candidateUrl = candidate.url;
+  const name = candidate.title || session.original.photoName || pickerText(currentLanguage, "representativePhotoLabel");
+  item.append(lookupThumbnail(candidate.thumbnailUrl || optimizedPhotoUrl(candidate.url), name));
+  const copy = element("div", "lookup-result__copy");
+  if (candidate.title) copy.append(textElement("strong", "lookup-result__name", candidate.title));
+  copy.append(photoCreditLine(candidate, "photo-credit lookup-result__credit"));
+  const choose = textElement("button", "button button--quiet button--small lookup-result__choose", pickerText(currentLanguage, "useThisPhoto"));
+  choose.type = "button";
+  choose.setAttribute("aria-pressed", "false");
+  choose.setAttribute("aria-label", `${pickerText(currentLanguage, "useThisPhoto")}: ${name}`);
+  choose.addEventListener("click", () => choosePhoto(session, candidate));
+  item.append(copy, choose);
+  return item;
+}
+
+// Bounded, lazily loaded preview. A failed image shows a text fallback; it never
+// triggers another search or a retry.
+function lookupThumbnail(url, name) {
+  const frame = element("span", "lookup-thumb");
+  const fallback = textElement("span", "lookup-thumb__fallback", pickerText(currentLanguage, "previewUnavailable"));
+  frame.append(fallback);
+  if (!url) return frame;
+  fallback.hidden = true;
+  const image = document.createElement("img");
+  image.alt = ui(currentLanguage, "representativePhoto", { name });
+  image.setAttribute("loading", "lazy");
+  image.setAttribute("decoding", "async");
+  image.setAttribute("referrerpolicy", "no-referrer");
+  image.width = 160;
+  image.height = 120;
+  image.addEventListener("error", () => {
+    image.remove();
+    fallback.hidden = false;
+  }, { once: true });
+  image.src = url;
+  frame.append(image);
+  return frame;
+}
+
+function markChosenResults(session, kind) {
+  const { results } = lookupParts(session, kind);
+  results.querySelectorAll(".lookup-result").forEach((item) => {
+    const chosen = kind === "place"
+      ? session.location.mode === "place" && session.location.place?.id === item.dataset.candidateId
+      : session.photo.mode === "photo" && session.photo.photo?.url === item.dataset.candidateUrl;
+    item.classList.toggle("is-chosen", chosen);
+    const button = item.querySelector(".lookup-result__choose");
+    if (!button) return;
+    button.setAttribute("aria-pressed", String(chosen));
+    button.textContent = pickerText(currentLanguage, chosen ? "chosen" : (kind === "place" ? "useThisPlace" : "useThisPhoto"));
+  });
+}
+
+function choosePlace(session, candidate) {
+  if (editorSession !== session || !els.dialog.open) return;
+  const place = placeForSaving(candidate);
+  if (!place) return;
+  session.revision += 1;
+  session.location = { mode: "place", place, revision: session.revision };
+  // A chosen place replaces any Google Maps link for this plan.
+  els.form.elements.googleMapsUrl.value = "";
+  updateGoogleMapsLinkState();
+  renderLookup(session, "place");
+  lookupParts(session, "place").status.textContent = pickerText(currentLanguage, "placeSelectedPending");
+}
+
+function choosePhoto(session, candidate) {
+  if (editorSession !== session || !els.dialog.open) return;
+  const photo = photoForSaving(candidate);
+  if (!photo) return;
+  session.revision += 1;
+  session.photo = { mode: "photo", photo, preview: candidate, revision: session.revision };
+  renderLookup(session, "photo");
+  lookupParts(session, "photo").status.textContent = pickerText(currentLanguage, "photoSelectedPending");
+}
+
+function clearChosenLocation(session) {
+  if (editorSession !== session) return;
+  session.revision += 1;
+  session.location = { mode: "cleared", place: null, revision: session.revision };
+  els.form.elements.googleMapsUrl.value = "";
+  updateGoogleMapsLinkState();
+  renderLookup(session, "place");
+  lookupParts(session, "place").status.textContent = pickerText(currentLanguage, "locationCleared");
+}
+
+function clearChosenPhoto(session) {
+  if (editorSession !== session) return;
+  session.revision += 1;
+  session.photo = { mode: "cleared", photo: null, preview: null, revision: session.revision };
+  renderLookup(session, "photo");
+  lookupParts(session, "photo").status.textContent = pickerText(currentLanguage, "photoRemoved");
+}
+
+function renderLookupCurrent(session, kind) {
+  const { current } = lookupParts(session, kind);
+  const box = element("div", "lookup-current__box");
+  const actions = element("div", "lookup-current__actions");
+  if (kind === "place") {
+    const googleValue = els.form.elements.googleMapsUrl.value.trim();
+    const { mode, place } = session.location;
+    const original = session.original;
+    const hasOriginalLocation = Number.isFinite(original.lat) && Number.isFinite(original.lng);
+    if (googleValue) {
+      box.append(textElement("p", "lookup-current__note", pickerText(currentLanguage, "usingGoogleLink")));
+    } else if (mode === "place" && place) {
+      box.append(placeSummary(place, pickerText(currentLanguage, "selectedPlace")));
+    } else if (mode === "cleared") {
+      box.append(textElement("p", "lookup-current__note", pickerText(currentLanguage, "locationCleared")));
+    } else if (original.place) {
+      box.append(placeSummary(original.place, pickerText(currentLanguage, "savedPlace")));
+    } else if (hasOriginalLocation) {
+      const summary = element("div", "lookup-summary");
+      summary.append(textElement("span", "eyebrow", pickerText(currentLanguage, "currentLocation")));
+      if (original.label) summary.append(textElement("strong", "lookup-summary__name", original.label));
+      summary.append(textElement("span", "muted", `${pickerText(currentLanguage, "coordinatesLabel")}: ${formatCoordinate(original.lat)}, ${formatCoordinate(original.lng)}`));
+      box.append(summary);
+    } else {
+      box.append(textElement("p", "lookup-current__note muted", pickerText(currentLanguage, "noLocation")));
+    }
+    const canClear = Boolean(googleValue) || mode === "place" || (mode === "unchanged" && (original.place || hasOriginalLocation));
+    if (canClear) {
+      const clear = textElement("button", "button button--quiet button--small lookup-current__clear", pickerText(currentLanguage, "clearLocation"));
+      clear.type = "button";
+      clear.addEventListener("click", () => clearChosenLocation(session));
+      actions.append(clear);
+    }
+  } else {
+    const { mode, photo, preview } = session.photo;
+    const original = session.original;
+    let shown = null;
+    let heading = "";
+    if (mode === "photo" && photo) {
+      shown = preview || photo;
+      heading = pickerText(currentLanguage, "selectedPhoto");
+    } else if (mode === "unchanged" && original.photo) {
+      shown = typeof original.photo === "string" ? { url: original.photo } : original.photo;
+      heading = pickerText(currentLanguage, "currentPhoto");
+    }
+    if (shown?.url) {
+      const summary = element("div", "lookup-summary lookup-summary--photo");
+      summary.append(lookupThumbnail(shown.thumbnailUrl || optimizedPhotoUrl(shown.url), original.photoName || heading));
+      const copy = element("div", "lookup-summary__copy");
+      copy.append(textElement("span", "eyebrow", heading));
+      const licensed = readSavedPhoto(shown) || normalizePhotoCandidate(shown);
+      if (licensed) copy.append(photoCreditLine(licensed, "photo-credit"));
+      else if (shown.credit) copy.append(textElement("span", "photo-credit", String(shown.credit)));
+      summary.append(copy);
+      box.append(summary);
+      const remove = textElement("button", "button button--quiet button--small lookup-current__clear", pickerText(currentLanguage, "removePhoto"));
+      remove.type = "button";
+      remove.addEventListener("click", () => clearChosenPhoto(session));
+      actions.append(remove);
+    } else {
+      box.append(textElement("p", "lookup-current__note muted", pickerText(currentLanguage, mode === "cleared" ? "photoRemoved" : "noPhoto")));
+    }
+  }
+  if (actions.childNodes.length) box.append(actions);
+  current.replaceChildren(box);
+}
+
+function placeSummary(place, heading) {
+  const summary = element("div", "lookup-summary");
+  summary.append(
+    textElement("span", "eyebrow", heading),
+    textElement("strong", "lookup-summary__name", place.name)
+  );
+  if (place.address && place.address !== place.name) summary.append(textElement("span", "lookup-summary__address", place.address));
+  summary.append(textElement("span", "muted", `${pickerText(currentLanguage, "coordinatesLabel")}: ${formatCoordinate(place.lat)}, ${formatCoordinate(place.lng)}`));
+  const source = element("span", "lookup-summary__source");
+  source.append(
+    externalAnchor(pickerText(currentLanguage, "viewOnOpenStreetMap"), place.sourceUrl, "lookup-result__link"),
+    textElement("span", "", ` · ${place.attribution} · ${place.license}`)
+  );
+  summary.append(source);
+  return summary;
+}
+
+function refreshLookupLanguage() {
+  document.querySelectorAll(".lookup-panel [data-picker-text]").forEach((node) => {
+    node.textContent = pickerText(currentLanguage, node.dataset.pickerText);
+  });
+  document.querySelectorAll(".lookup-panel [data-picker-placeholder]").forEach((node) => {
+    node.setAttribute("placeholder", pickerText(currentLanguage, node.dataset.pickerPlaceholder));
+  });
+  // A background trip refresh re-runs static translations; only an actual
+  // language change rebuilds the result list.
+  if (editorSession && editorSession.language !== currentLanguage) {
+    editorSession.language = currentLanguage;
+    ["place", "photo"].forEach((kind) => renderLookup(editorSession, kind, { forceResults: true }));
+  }
+}
+
+function handleGoogleMapsInputForLookup() {
+  const session = editorSession;
+  if (!session) return;
+  // Pasting a Google Maps link replaces a place chosen in this editor.
+  if (els.form.elements.googleMapsUrl.value.trim() && session.location.mode !== "unchanged") {
+    session.revision += 1;
+    session.location = { mode: "unchanged", place: null, revision: session.revision };
+    markChosenResults(session, "place");
+    lookupParts(session, "place").status.textContent = "";
+  }
+  renderLookupCurrent(session, "place");
+}
+
 function focusDialogFieldOnDesktop(field) {
   if (!field || window.matchMedia("(pointer: coarse)").matches || isIosDevice()) return;
   requestAnimationFrame(() => field.focus({ preventScroll: true }));
@@ -2344,6 +2916,29 @@ async function handleItemSubmit(event) {
   if (submittedMapsUrl && !parsedMapsPlace.ok) return;
   const existingMapsPlace = parseFullGoogleMapsPlaceUrl(existingSlot?.googleMapsUrl || existingSlot?.mapsUrl || "");
   const clearingMappedLocation = Boolean(existingSlot && !submittedMapsUrl && existingMapsPlace.ok);
+  // Choices made in this editor apply only to the plan the editor was opened for.
+  const session = editorSession && editorSession.dayId === dayId && editorSession.slotId === slotId
+    ? editorSession
+    : null;
+  const chosenPlace = session?.location.mode === "place" && !submittedMapsUrl ? session.location.place : null;
+  const clearingLocation = session?.location.mode === "cleared" && !submittedMapsUrl;
+  const chosenPhoto = session?.photo.mode === "photo" ? session.photo.photo : null;
+  const clearingPhoto = session?.photo.mode === "cleared";
+  const googleUrlChanged = parsedMapsPlace.ok && (!existingMapsPlace.ok || existingMapsPlace.url !== parsedMapsPlace.url);
+  const removedKeys = new Set();
+  if (chosenPlace) {
+    GOOGLE_LOCATION_KEYS.forEach((key) => removedKeys.add(key));
+    removedKeys.add("mapLocationOmitted");
+    if (!chosenPlace.address) removedKeys.add("address");
+  } else if (parsedMapsPlace.ok) {
+    // A newly pasted Google Maps link replaces a previously chosen place.
+    if (googleUrlChanged) removedKeys.add("place");
+  } else if (clearingLocation || (clearingMappedLocation && !preservingLegacyLocation)) {
+    ALL_LOCATION_KEYS.forEach((key) => removedKeys.add(key));
+  }
+  if (chosenPhoto) removedKeys.add("photoSourceId");
+  else if (clearingPhoto) ["photo", "photoSourceId"].forEach((key) => removedKeys.add(key));
+  const locationChanged = Boolean(chosenPlace) || googleUrlChanged || removedKeys.has("lat");
 
   const submittedName = String(data.get("name") || "").trim();
   const submittedReview = String(data.get("review") || "").trim();
@@ -2363,9 +2958,18 @@ async function handleItemSubmit(event) {
     || String(existingSlot.period || "") !== slotPatch.period;
   const staleTranslationFields = [
     ...(nameChanged ? ["name"] : []),
-    ...(reviewChanged ? ["review"] : [])
+    ...(reviewChanged ? ["review"] : []),
+    ...(locationChanged ? ["address"] : [])
   ];
-  if (parsedMapsPlace.ok) {
+  if (chosenPlace) {
+    Object.assign(slotPatch, {
+      place: clone(chosenPlace),
+      lat: chosenPlace.lat,
+      lng: chosenPlace.lng,
+      approximateLocation: false
+    });
+    if (chosenPlace.address) slotPatch.address = chosenPlace.address;
+  } else if (parsedMapsPlace.ok) {
     Object.assign(slotPatch, {
       googleMapsUrl: parsedMapsPlace.url,
       googleMapsPlaceName: parsedMapsPlace.placeName,
@@ -2377,6 +2981,7 @@ async function handleItemSubmit(event) {
       approximateLocation: false
     });
   }
+  if (chosenPhoto) slotPatch.photo = clone(chosenPhoto);
 
   const saved = await mutateTrip((trip) => {
     const day = trip.days.find((candidate) => candidate.id === dayId);
@@ -2386,12 +2991,7 @@ async function handleItemSubmit(event) {
     let next;
     if (existingIndex >= 0) {
       next = { ...day.slots[existingIndex], ...slotPatch };
-      if (clearingMappedLocation && !preservingLegacyLocation) {
-        [
-          "googleMapsUrl", "mapsUrl", "googleMapsPlaceName", "googleMapsPlaceLabel",
-          "googleMapsFeatureId", "address", "lat", "lng", "approximateLocation"
-        ].forEach((key) => delete next[key]);
-      }
+      removedKeys.forEach((key) => delete next[key]);
       if (next.i18n) next.i18n = clone(next.i18n);
       invalidateTranslations(next, staleTranslationFields);
       day.slots[existingIndex] = next;
@@ -2841,6 +3441,7 @@ function applyStaticTranslations() {
   if (els.dialog.open) {
     els.dialogTitle.textContent = ui(currentLanguage, els.form.elements.slotId.value ? "editPlan" : "addPlan");
     updateGoogleMapsLinkState({ showError: els.form.elements.googleMapsUrl.getAttribute("aria-invalid") === "true" });
+    refreshLookupLanguage();
   }
   if (els.todoDialog.open) {
     els.todoDialogTitle.textContent = ui(currentLanguage, els.todoForm.elements.reminderId.value ? "editTodo" : "addTodo");
@@ -2999,6 +3600,12 @@ function googleMapsDestinations(location = {}, { allowSearchFallback = true } = 
     .map((entry) => ({ ...entry, url: normalizeGoogleMapsUrl(entry.url) }))
     .filter((entry) => entry.url);
   if (verified.length) return verified;
+  // A chosen OpenStreetMap place opens its saved coordinates in Google Maps; no
+  // Google place identifier is implied.
+  if (location.place && Number.isFinite(location.lat) && Number.isFinite(location.lng) && readSavedPlace(location.place)) {
+    const coordinateUrl = coordinateGoogleMapsUrl(location.lat, location.lng);
+    if (coordinateUrl) return [{ url: coordinateUrl }];
+  }
   if (!allowSearchFallback) return [];
   if (!String(location.address || "").trim() && !(Number.isFinite(location.lat) && Number.isFinite(location.lng))) return [];
   const fallbackUrl = buildGoogleMapsUrl(location);

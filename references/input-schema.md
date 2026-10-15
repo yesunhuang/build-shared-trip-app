@@ -17,6 +17,8 @@ The two forms share field shapes for days, plans, reminders, localization, maps,
 - [Reminders](#reminders)
 - [Days and plans](#days-and-plans)
 - [Maps and photos](#maps-and-photos)
+  - [Selected OpenStreetMap place (self-hosted)](#selected-openstreetmap-place-self-hosted)
+  - [Selected Commons photo (self-hosted)](#selected-commons-photo-self-hosted)
 - [Recommendations](#recommendations)
 - [Weather](#weather)
 - [Resources](#resources)
@@ -48,7 +50,7 @@ The server owns `id`, `version`, and `updatedAt`. Clients never choose a new tri
 }
 ```
 
-- `days[].slots` holds plans, using the [plan shape](#days-and-plans) below. Reminders, participant groups, and `i18n` patches use the same shapes as the legacy input.
+- `days[].slots` holds plans, using the [plan shape](#days-and-plans) below. A self-hosted plan may also carry a [selected OpenStreetMap `place`](#selected-openstreetmap-place-self-hosted) and a [selected Commons `photo`](#selected-commons-photo-self-hosted). Reminders, participant groups, and `i18n` patches use the same shapes as the legacy input.
 - Optional compatibility content, such as `resources`, `weather`, recommendations, and day-level `i18n`, is kept when present. It never needs to be invented.
 - Responses also include the read-only aliases `slug` (= `id`), `startDate`, `endDate`, and `routeDecoration` (= `route`) for the shared template. Treat them as read-only; edit `dateRange` and `route` through canonical fields; the ID cannot change.
 - Other optional top-level fields: `shortName`, `metaDescription`, `theme` (`ink`/`accent`/`background` hex colors), `disclaimer`, and `content`. Plans, days, reminders, and groups may carry a `compat` object. Import preserves unmapped nested fields in `compat.unmapped` and unmapped root fields in `content.importExtras`, with warnings.
@@ -60,7 +62,7 @@ To change a trip, send operations (`update_trip`, `upsert_day`, `upsert_plan`, `
 Saving a trip on the service checks the **structure** only. A new trip can start as `{ "title": "…" }`, and the following are all optional while you edit:
 
 - dates and days, which may be added later, up to 31 days per trip (`dateRange` start/end may be empty strings until dates are known);
-- plan times, Maps URLs, photos, and booking details;
+- plan times, Maps URLs, selected places, photos, and booking details;
 - `zh-Hans`, `zh-Hant`, and `ja` translations, which fall back to the source text;
 - recommendations (no minimum count), weather locations, and resources.
 
@@ -231,7 +233,7 @@ Days must be chronological, unique, inside the trip range, and no more than 31:
 }
 ```
 
-Every plan is an itinerary item. `googleMapsUrl` is optional so a locationless placeholder can remain timeline-only:
+Every plan is an itinerary item. `googleMapsUrl` is optional so a locationless placeholder can remain timeline-only. On the self-hosted service, a plan can be located by a selected OpenStreetMap [`place`](#selected-openstreetmap-place-self-hosted) instead:
 
 ```json
 {
@@ -263,7 +265,7 @@ Allowed `period`: `morning`, `noon`, `evening`.
 
 Allowed `planType`: `flight`, `stay`, `restaurant`, `transport`, `car`, `sight`, `activity`, `event`, `shopping`, `other`.
 
-Use `sortTime` for chronological placement when `time` is descriptive. If using `sortOrder`, put it on every plan in the day. The generator converts `plans` to runtime `slots` and derives map metadata when a place URL is present. A plan without `googleMapsUrl` gets no marker or Maps action.
+Use `sortTime` for chronological placement when `time` is descriptive. If using `sortOrder`, put it on every plan in the day. The generator converts `plans` to runtime `slots` and derives map metadata when a place URL is present. A plan without `googleMapsUrl` gets no marker or Maps action. On the self-hosted service, a plan with neither `googleMapsUrl` nor a selected `place` likewise stays timeline-only. Legacy coordinates already stored on an older item are preserved as before.
 
 Flights may add:
 
@@ -286,7 +288,12 @@ Never add a booking code or confirmation reference.
 
 ## Maps and photos
 
-For a plan that should appear on the map, use the full browser address-bar URL for the exact Google Maps place. It must:
+A plan that should appear on the map needs a verified location source:
+
+- **Legacy generator input:** a full Google Maps place URL, as below. This requirement is unchanged.
+- **Self-hosted service:** either a full Google Maps place URL, as below, or a [selected OpenStreetMap place](#selected-openstreetmap-place-self-hosted). Send one location source per plan. Do not construct either one from a guess.
+
+A full Google Maps place URL is the browser address-bar URL for the exact place. It must:
 
 - use HTTPS on a Google Maps host;
 - contain `/maps/place/`;
@@ -300,6 +307,66 @@ Legacy generator input requires `photo.url`, `photo.sourceUrl`, and `photo.credi
 On the self-hosted service, a private photo can be referenced by a root-relative URL such as `"url": "/photos/harbor-walk.webp"`. The file lives in `SHARED_TRIP_DATA_DIR/photos` (flat names using `A-Z a-z 0-9 _ -`, with a `.webp`, `.png`, `.jpg`, or `.jpeg` extension). It is served only to signed-in owners and approved viewers. It still needs `sourceUrl` and `credit`. There is no upload API: the owner places the file on the server. Do not add private filenames to the public, generic `photos/manifest.js`.
 
 Keep the original photo/source/credit fields in the authoring JSON. The runtime selects bounded remote thumbnails; `scripts/optimize-photos.mjs` can additionally build local WebP previews and a URL-to-asset manifest after generation. See [responsive-performance.md](responsive-performance.md) for budgets, cache invalidation, and testing.
+
+### Selected OpenStreetMap place (self-hosted)
+
+A self-hosted plan can store the exact public place that a user chose from an explicit place search in the editor ([place-and-photo-lookups.md](place-and-photo-lookups.md)). The shape is strict:
+
+```json
+{
+  "place": {
+    "provider": "openstreetmap",
+    "id": "node/123",
+    "name": "Example Harbour Pier",
+    "address": "1 Example Quay, Example Town",
+    "lat": 38.7001,
+    "lng": -9.1402,
+    "sourceUrl": "https://www.openstreetmap.org/node/123",
+    "attribution": "© OpenStreetMap contributors",
+    "license": "ODbL-1.0",
+    "selectedAt": "2030-05-01T12:00:00.000Z"
+  }
+}
+```
+
+The values above are fictional. The rules are:
+
+- `provider` is exactly `openstreetmap` and `license` exactly `ODbL-1.0`. Other keys are rejected.
+- `id` is the OSM object type and number: `node/<n>`, `way/<n>`, or `relation/<n>`.
+- `lat`/`lng` are the selected coordinates. `selectedAt` is an ISO 8601 timestamp of the user's choice.
+- The plan's own `lat`, `lng` and `address` mirror the place and must be consistent with it. The marker and the navigation action come from these coordinates.
+- `sourceUrl` points to the OSM object page, and `attribution` is kept and displayed.
+- Saving needs no lookup. The editor, `POST /api/trips/<id>/changes` (`upsert_plan`) and MCP `apply_trip_changes` accept the same object under the usual `expectedVersion` and `requestId` rules. `null` removes it, as for other optional fields.
+- Never invent an OSM ID or coordinates. Save a place only after it has been chosen from a real search result or confirmed on its OSM object page.
+
+A navigation link built from these coordinates is a coordinate link, not a verified Google Maps venue, and must never be labelled as one. The existing full Google Maps URL support, with its parsed fields (`googleMapsPlaceName`, `googleMapsFeatureId`, `address`, `lat`, `lng`), is unchanged.
+
+### Selected Commons photo (self-hosted)
+
+A photo chosen from the editor's Commons search is stored with its full attribution:
+
+```json
+{
+  "photo": {
+    "provider": "wikimedia-commons",
+    "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ab/Example.jpg/640px-Example.jpg",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Example.jpg",
+    "credit": "Example Author, CC BY-SA 4.0",
+    "author": "Example Author",
+    "license": "CC BY-SA 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "selectedAt": "2030-05-01T12:00:00.000Z"
+  }
+}
+```
+
+- `url` is the provider's thumbnail, requested at 640 px wide; Commons may round up to a supported size. The image itself is not copied to the server. The example above is fictional.
+- `sourceUrl`, `credit`, `author`, `license` and `licenseUrl` stay saved and are displayed. Files with an unknown, unsupported, non-commercial or no-derivatives licence are not offered.
+- The photo is representative. A Commons search result does not prove that it shows the exact place until the user confirms that it is relevant.
+- If the image fails to load, the plan falls back to its no-photo state. No new lookup is made.
+- New managed Commons snapshots include `selectedAt` and use strict validation. Existing photo objects without that selection marker, including provider labels and private `/photos/<name>` files, retain their previous validation and metadata.
+
+Both objects are additive trip content. They are stored in SQLite, included in backups and exports, and kept by import, which never performs a lookup.
 
 ## Recommendations
 
@@ -405,4 +472,4 @@ These complete-content checks apply only to the legacy generator. They are separ
 node scripts/validate-trip.mjs trip.json
 ```
 
-Validation rejects incomplete translations, invalid non-empty Maps links, missing photos, duplicate ideas, unsafe secrets, invalid participant references, incomplete resources, oversized synchronized data, and stale structural mistakes before they become UI or Firebase failures. A missing plan `googleMapsUrl` is valid; recommendation map links are still mandatory.
+Validation rejects incomplete translations, invalid non-empty Maps links, missing photos, duplicate ideas, unsafe secrets, invalid participant references, incomplete resources, oversized synchronized data, and stale structural mistakes before they become UI or Firebase failures. A missing plan `googleMapsUrl` is valid; recommendation map links are still mandatory. The self-hosted place and photo lookups do not change these checks. A selected OpenStreetMap `place` is self-hosted content and is not a location source for generator input.

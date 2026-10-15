@@ -60,7 +60,7 @@ export const UI_ZH_HANT = Object.freeze({
   everyone: "全員",
   googleMapsLink: "Google 地圖完整連結 · 選填",
   googleMapsLinkPlaceholder: "https://www.google.com/maps/place/…/@latitude,longitude",
-  googleMapsLinkHint: "如只需在時間表顯示佔位項目，可留空。若要加入地圖標記，請在電腦瀏覽器中貼上確切地點的完整網址；「分享」短連結無法使用。",
+  googleMapsLinkHint: "所選地點會顯示在地圖上，也可貼上確切地點的 Google Maps 完整網址。地點留空時僅顯示於時間表；不支援「分享」短連結。",
   googleMapsLinkInvalid: "請貼上包含 /maps/place/ 和座標的完整 Google 地圖地點連結。",
   placeReady: "地點已識別",
   whatToKnow: "行程說明",

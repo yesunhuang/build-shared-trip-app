@@ -29,15 +29,15 @@ try{
   await until(()=>window.document.querySelectorAll(".trip-card").length===2,"list two trips");
   window.document.getElementById("create").click();
   const create=window.document.querySelector("dialog form");create.elements.title.value="Fictional UI-created trip";submit(create);
-  await until(()=>runtime.service.listTrips().trips.length===3&&!window.document.querySelector("dialog"),"create draft");
   const card=()=>[...window.document.querySelectorAll(".trip-card")].find((c)=>c.querySelector("h2").textContent==="Fictional UI-created trip");
+  await until(()=>runtime.service.listTrips().trips.length===3&&!window.document.querySelector("dialog")&&card(),"create and render draft");
   const created=runtime.service.listTrips().trips.find((t)=>t.title==="Fictional UI-created trip");
   assert.equal(card().querySelector("a").getAttribute("href"),"/trips/"+created.id);
   card().querySelector("button").click();
   await until(()=>window.document.querySelector("dialog form"),"open metadata editor");
   const metadata=window.document.querySelector("dialog form");metadata.elements.title.value="Fictional renamed trip";submit(metadata);
-  await until(()=>runtime.service.getTrip(created.id).trip.title==="Fictional renamed trip"&&!window.document.querySelector("dialog"),"metadata edit");
   const renamed=()=>[...window.document.querySelectorAll(".trip-card")].find((c)=>c.querySelector("h2").textContent==="Fictional renamed trip");
+  await until(()=>runtime.service.getTrip(created.id).trip.title==="Fictional renamed trip"&&!window.document.querySelector("dialog")&&renamed(),"metadata edit rendered");
   renamed().querySelectorAll("button")[1].click();
   await until(()=>runtime.service.getTrip(created.id).trip.archived&&!renamed(),"archive trip");
   const archived=window.document.getElementById("archived");archived.checked=true;archived.dispatchEvent(new window.Event("change"));

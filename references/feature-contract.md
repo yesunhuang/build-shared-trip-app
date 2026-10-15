@@ -47,7 +47,8 @@ Preserve these behaviors unless the user explicitly requests a design change. Th
 - Keep plan details collapsed until selected.
 - Keep the map synchronized to the active day and reframe all current markers.
 - Opening a timeline item focuses its marker without hiding it behind the mobile sheet.
-- A map-marker selection opens and scrolls to the corresponding plan.
+- A map-marker selection opens and scrolls to the corresponding plan. This two-way selection applies equally to plans located by a Google Maps URL and to plans with a selected OpenStreetMap place.
+- For a plan with a selected OpenStreetMap place, the navigation action is built from the saved coordinates, and the source link opens the OSM object page. Never present a generated or coordinate-based link as a verified Google Maps venue.
 - On desktop, give the map a substantial sticky column (roughly 44–48% of the workspace) and a viewport-aware height. Keep the timeline readable; do not shrink the map into a thumbnail. Below the desktop breakpoint, preserve the dedicated mobile planner.
 - Show checklist items due on the selected itinerary date near the top of that day's content, before the timeline. Checklist dates may be before, during, or after the trip.
 
@@ -85,9 +86,19 @@ Show only:
 - plan type;
 - Booked / not booked;
 - optional full Google Maps browser place URL;
+- self-hosted, when lookups are enabled: an explicit public-place search and a separate photo search;
 - What to know.
 
-When a full place URL is supplied, parse and save place name, address, final POI coordinates, feature ID, and original URL, then update the timeline and map. When it is blank, save a timeline-only plan with no marker or Maps action. Preserve legacy coordinates only when editing an older item that already has coordinates but no URL.
+When a full place URL is supplied, parse and save place name, address, final POI coordinates, feature ID, and original URL, then update the timeline and map. When it is blank and no place has been selected, save a timeline-only plan with no marker or Maps action. Preserve legacy coordinates only when editing an older item that already has coordinates but no URL.
+
+Self-hosted place and photo search applies only when the operator has enabled it, and only for owners and content managers ([place-and-photo-lookups.md](place-and-photo-lookups.md)):
+
+- A place lookup runs only on an explicit **Search** or **Refresh**. There is no autocomplete or search-as-you-type. Candidates show name and address, and the user picks the exact place. Nothing is chosen automatically.
+- Photo search is independent of place search. Each candidate shows its credit and license. The chosen photo is labelled as representative until the user confirms it is relevant.
+- **Save** stores the selected `place` (with mirrored `lat`/`lng`/`address`) and `photo` snapshots through the normal versioned change. **Cancel** or closing the dialog leaves the trip unchanged.
+- Opening the editor, the trip page, reloads, polls and unrelated edits render the saved snapshots and make zero place or photo search calls. There is no background refresh. Remote images and map tiles are still fetched normally. A missing or broken image shows the no-photo state without retrying a lookup.
+- Saved OSM attribution and photo credit, source and license are displayed.
+- With lookups disabled, or for viewers, no search control is usable. Saved places and photos still render.
 
 ## Recommendations
 
@@ -134,7 +145,8 @@ When a full place URL is supplied, parse and save place name, address, final POI
 
 - Four languages render without shifting boxes, clipping dates, or translating the brand.
 - Every supplied plan link and every recommendation link opens an exact place page.
-- Every mapped plan marker matches its exact link; a plan without a link has neither a marker nor a generated Maps action.
+- Every mapped plan marker matches its exact link or its selected OpenStreetMap place coordinates. A plan with neither a link nor a selected place has neither a marker nor a generated Maps action. An OSM place's navigation action is coordinate-based and is not labelled as a Google venue.
+- Self-hosted lookups: off by default; with them disabled, both search endpoints refuse requests and contact no provider. When enabled, only the owner and content managers can search, with same-origin checks; viewers, MCP tokens and OAuth tokens are refused. A search changes no trip or version. Save persists exactly the chosen `place`/`photo` with `expectedVersion`/`requestId`; Cancel persists nothing. Opening, reloading, polling and unrelated edits make zero search calls. Repeats are served from the cache and Refresh bypasses it. Upstream requests are serial, at least 1,100 ms apart, time-limited and size-bounded, never use a client-supplied URL, and follow no redirects. Import and export carry snapshots without lookups. MCP keeps exactly six tools, and `apply_trip_changes` accepts the same objects.
 - All plan photos and credits render; missing photos fail gracefully.
 - Tap-only handle interaction does not move the sheet.
 - Add/edit close controls remain reachable on iPhone.
@@ -174,3 +186,6 @@ Record each check as one of: **specified** (a test or procedure exists), **run**
 | Third-party AI clients and hosted connectors | Real account connection | **Not verified** |
 | Docker build, Compose + Caddy template, external HTTPS and MCP | Authorized host, [deploy/README.md](../deploy/README.md) | Build, isolated Linux role/MCP tests, migration, app upgrade and anonymous HTTPS checks passed; see [checkpoint 007](../doc/Progress/progress_2026_10_15_cpx007_codex_b.md). Live content-manager authentication remains pending. |
 | External map tiles and other providers in a browser | Live browser session | **Not verified** until recorded |
+| Place/photo lookups: opt-in gate, roles, same-origin, cache/Refresh, spacing/timeouts, zero lookups on display, Save/Cancel, `place`/`photo` validation, import/export | Server and DOM suites with stubbed providers, as defined by the implementation | Specified; results belong in the coordinator's run evidence |
+| Place/photo editor layout and remote image fallback in a browser | Desktop and phone-width browser on fictional data | **Not verified** until recorded |
+| Live Nominatim and Commons requests | Operator-enabled instance, after policy review | **Not verified**; not required by automated tests |

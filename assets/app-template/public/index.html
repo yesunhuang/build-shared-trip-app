@@ -455,6 +455,8 @@ __TRIP_DATA_JSON__
         map.tripLayers = L.layerGroup().addTo(map);
       }
       map.tripLayers.clearLayers();
+      // Markers by plan id, so the itinerary can highlight the matching marker.
+      map.tripMarkers = Object.create(null);
       var zoomButtons = map.tripZoomControl.getContainer().querySelectorAll('a');
       [opts.zoomInTitle || 'Zoom in', opts.zoomOutTitle || 'Zoom out'].forEach(function (title, index) {
         zoomButtons[index].title = title;
@@ -481,9 +483,10 @@ __TRIP_DATA_JSON__
           + (p.time ? escapeHTML(p.time) + '<br>' : '')
           + '<a target="_blank" rel="noopener noreferrer" href="' + escapeHTML(p.googleMapsUrl || buildGoogleMapsLink(p.lat, p.lng, p.name)) + '">'
           + escapeHTML(opts.googleMapsLabel || 'Open in Google Maps') + '</a>';
-        var marker = L.marker([p.lat, p.lng], { icon: icon })
+        var marker = L.marker([p.lat, p.lng], { icon: icon, title: pointNumber + '. ' + String(p.name || ''), alt: pointNumber + '. ' + String(p.name || ''), riseOnHover: true })
           .addTo(map.tripLayers)
           .bindPopup(popupContent, popupOptions);
+        if (p.id) map.tripMarkers[p.id] = marker;
         if (typeof opts.onPointClick === 'function') {
           marker.on('click', function () { opts.onPointClick(p); });
         }

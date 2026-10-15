@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { normalizeContent, applyParsedPlaces, assertSafePayload, isValidId } from "./validate.mjs";
+import { normalizeContent, applyParsedPlaces, applySelectedPlaces, assertSafePayload, isValidId } from "./validate.mjs";
 import { applyContentRules } from "./content-rules.mjs";
 import { applyOperations, newId, deriveStart, deriveEnd } from "./operations.mjs";
 import { importContent } from "./legacy.mjs";
@@ -21,8 +21,11 @@ function validate(raw, previous) {
   assertSafePayload(raw);
   const { content, issues, parsedPlaces } = normalizeContent(raw);
   issues.throwIfAny();
-  const urls = new Map((previous?.days || []).flatMap((day) => day.slots || []).map((slot) => [slot.id, slot.googleMapsUrl]));
+  // A plan whose selected place is removed re-derives its location from its legacy Google URL (the
+  // URL is treated as changed); while a place is selected, the place owns lat/lng/address.
+  const urls = new Map((previous?.days || []).flatMap((day) => day.slots || []).map((slot) => [slot.id, slot.place ? null : slot.googleMapsUrl]));
   applyParsedPlaces(content, parsedPlaces, urls);
+  applySelectedPlaces(content, previous);
   applyContentRules(previous, content);
   return content;
 }

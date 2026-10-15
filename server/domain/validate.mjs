@@ -49,8 +49,39 @@ export const PLAN_KEYS = new Set([
   "id", "name", "period", "time", "sortTime", "sortOrder", "planType", "booked",
   "participantGroupIds", "review", "notes", "description", "googleMapsUrl", "mapsUrl",
   "googleMapsPlaceName", "googleMapsPlaceLabel", "googleMapsFeatureId", "address", "lat", "lng",
-  "approximateLocation", "photo", "photoSourceId", "booking", "routeGroup", "i18n", "compat"
+  "approximateLocation", "place", "photo", "photoSourceId", "booking", "routeGroup", "i18n", "compat"
 ]);
+
+// Selected public place (optional plan.place). Chosen explicitly by an editor from an
+// OpenStreetMap/Nominatim-compatible lookup result; when present it is the canonical source of the
+// plan's lat/lng/address (see applySelectedPlaces). Strict, bounded, allowlisted shape.
+export const OSM_PROVIDER = "openstreetmap";
+export const OSM_ATTRIBUTION = "© OpenStreetMap contributors";
+export const OSM_LICENSE = "ODbL-1.0";
+export const PLACE_KEYS = new Set(["provider", "id", "name", "address", "lat", "lng", "sourceUrl", "attribution", "license", "selectedAt"]);
+const OSM_ID = /^(node|way|relation)\/[1-9]\d{0,15}$/;
+
+// Selected Wikimedia Commons photo: the managed snapshot written by the photo picker. A plan.photo
+// object is treated as one only when it has provider "wikimedia-commons" AND an own selectedAt field
+// (see isManagedCommonsPhoto); it is then validated strictly by normalizeCommonsPhoto. Every other
+// photo object, including older records that merely carry a provider label (for example
+// { provider: "manual", ... } or a pre-picker { provider: "wikimedia-commons", url, credit } without
+// selectedAt), keeps the earlier bounded free-object validation and is stored unchanged. Only these
+// licenses, unported, at these canonical URLs, are accepted in managed snapshots.
+export const COMMONS_PROVIDER = "wikimedia-commons";
+export const COMMONS_PHOTO_KEYS = new Set(["provider", "url", "sourceUrl", "credit", "author", "license", "licenseUrl", "selectedAt"]);
+export const COMMONS_LICENSES = Object.freeze(Object.fromEntries([
+  ["CC0", "https://creativecommons.org/publicdomain/zero/1.0/"],
+  ...["1.0", "2.0", "2.5", "3.0", "4.0"].flatMap((version) => [
+    [`CC BY ${version}`, `https://creativecommons.org/licenses/by/${version}/`],
+    [`CC BY-SA ${version}`, `https://creativecommons.org/licenses/by-sa/${version}/`]
+  ])
+]));
+const COMMONS_UPLOAD_PATH = /^\/wikipedia\/commons\/(?:thumb\/[0-9a-f]\/[0-9a-f]{2}\/[^/]+\/[^/]+|[0-9a-f]\/[0-9a-f]{2}\/[^/]+)$/;
+const RASTER_EXTENSION = /\.(?:jpe?g|png|webp)$/i;
+const COMMONS_FILE_PATH = /^\/wiki\/File:[^/]+$/;
+const ISO_TIMESTAMP = /^(\d{4})-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+const MARKUP = /[<>]/;
 export const REMINDER_KEYS = new Set(["id", "item", "dueDate", "done", "leadDays", "notes", "i18n", "compat"]);
 export const GROUP_KEYS = new Set(["id", "label", "members", "alwaysTogether", "i18n", "compat"]);
 export const WEATHER_KEYS = new Set(["locations"]);
@@ -422,6 +453,140 @@ function normalizeWeather(raw, path, issues) {
   return out;
 }
 
+/** ISO-8601 UTC timestamp such as 2032-03-04T05:06:07.000Z. */
+export function isIsoTimestamp(value) {
+  if (typeof value !== "string" || value.length > 30) return false;
+  const match = ISO_TIMESTAMP.exec(value);
+  if (!match || Number(match[1]) < 2000 || Number(match[1]) > 2200) return false;
+  return Number.isFinite(Date.parse(value));
+}
+
+// Canonical absolute HTTPS URL on exactly one host: no credentials, port, query or fragment, and
+// already in WHATWG-serialized form (so the stored string is exactly what a browser would request).
+function canonicalHttpsUrl(value, host) {
+  if (typeof value !== "string" || !value || value.length > 1000 || /[\s\\]/.test(value) || CONTROL_CHARS.test(value)) return null;
+  let parsed;
+  try { parsed = new URL(value); } catch { return null; }
+  const allowedHost = Array.isArray(host) ? host.includes(parsed.hostname) : parsed.hostname === host;
+  if (parsed.protocol !== "https:" || !allowedHost || parsed.port || parsed.username || parsed.password) return null;
+  if (parsed.search || parsed.hash || value.includes("?") || value.includes("#") || parsed.href !== value) return null;
+  return parsed;
+}
+
+/** Provider-derived display text: bounded, no control characters and never markup. */
+function plainText(value, path, issues, max) {
+  if (typeof value !== "string" || !value.trim()) {
+    issues.add(path, "is required");
+    return undefined;
+  }
+  if (value.length > max) issues.add(path, `must be at most ${max} characters`);
+  else if (CONTROL_CHARS.test(value)) issues.add(path, "contains control characters");
+  else if (MARKUP.test(value)) issues.add(path, "must be plain text without markup");
+  else return value;
+  return undefined;
+}
+
+function requireNumber(value, path, issues, min, max) {
+  if (value === undefined || value === null) {
+    issues.add(path, "is required");
+    return undefined;
+  }
+  return number(value, path, issues, { min, max });
+}
+
+function exactValue(value, expected, path, issues) {
+  if (value !== expected) {
+    issues.add(path, `must be ${JSON.stringify(expected)}`);
+    return undefined;
+  }
+  return value;
+}
+
+function selectedAtValue(value, path, issues) {
+  if (!isIsoTimestamp(value)) {
+    issues.add(path, "must be an ISO-8601 UTC timestamp such as 2032-03-04T05:06:07.000Z");
+    return undefined;
+  }
+  return value;
+}
+
+/**
+ * plan.place: an explicitly selected OpenStreetMap object. Every field is required; sourceUrl,
+ * attribution and license are fixed by the ID, so a client cannot attach arbitrary links or text.
+ */
+export function normalizeSelectedPlace(raw, path, issues) {
+  if (!isPlainObject(raw)) {
+    issues.add(path, "must be an object");
+    return undefined;
+  }
+  const before = issues.list.length;
+  checkKeys(raw, PLACE_KEYS, path, issues);
+  const out = {};
+  out.provider = exactValue(raw.provider, OSM_PROVIDER, `${path}.provider`, issues);
+  if (typeof raw.id !== "string" || !OSM_ID.test(raw.id)) issues.add(`${path}.id`, "must be an OpenStreetMap object such as node/123, way/123 or relation/123");
+  else out.id = raw.id;
+  out.name = plainText(raw.name, `${path}.name`, issues, 200);
+  out.address = plainText(raw.address, `${path}.address`, issues, 500);
+  out.lat = requireNumber(raw.lat, `${path}.lat`, issues, -90, 90);
+  out.lng = requireNumber(raw.lng, `${path}.lng`, issues, -180, 180);
+  if (out.id) exactValue(raw.sourceUrl, `https://www.openstreetmap.org/${out.id}`, `${path}.sourceUrl`, issues);
+  out.sourceUrl = out.id ? `https://www.openstreetmap.org/${out.id}` : undefined;
+  out.attribution = exactValue(raw.attribution, OSM_ATTRIBUTION, `${path}.attribution`, issues);
+  out.license = exactValue(raw.license, OSM_LICENSE, `${path}.license`, issues);
+  out.selectedAt = selectedAtValue(raw.selectedAt, `${path}.selectedAt`, issues);
+  return issues.list.length === before ? out : undefined;
+}
+
+/** Canonical Commons license name from a provider short name, or "" when it is not allowlisted. */
+export function canonicalCommonsLicense(value) {
+  const name = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (/^CC0(?: 1\.0)?$/i.test(name)) return "CC0";
+  const match = /^CC[ -]BY(-SA)?[ -](1\.0|2\.0|2\.5|3\.0|4\.0)$/i.exec(name);
+  return match ? `CC BY${match[1] ? "-SA" : ""} ${match[2]}` : "";
+}
+
+/**
+ * True for the managed Commons snapshot shape: provider "wikimedia-commons" plus an own selectedAt
+ * field (whatever its value; a bad value is then rejected by normalizeCommonsPhoto). Search results
+ * and every snapshot the picker saves carry selectedAt. A provider label alone is legacy metadata,
+ * not proof that the object came from this picker, so it does not make an object managed: such
+ * records keep free-object validation and are never rewritten (no invented timestamp, no changed
+ * credit or source).
+ */
+export function isManagedCommonsPhoto(value) {
+  return isPlainObject(value) && value.provider === COMMONS_PROVIDER && Object.hasOwn(value, "selectedAt");
+}
+
+/**
+ * Managed plan.photo snapshot: only a selected Wikimedia Commons image with a complete author and an
+ * allowlisted CC0 / CC BY / CC BY-SA license at its canonical URL. Every field is required. Provider
+ * parsing and cache revalidation call this directly (strict regardless of the managed marker).
+ */
+export function normalizeCommonsPhoto(raw, path, issues) {
+  const before = issues.list.length;
+  checkKeys(raw, COMMONS_PHOTO_KEYS, path, issues);
+  const out = {};
+  out.provider = exactValue(raw.provider, COMMONS_PROVIDER, `${path}.provider`, issues);
+  const image = canonicalHttpsUrl(raw.url, ["upload.wikimedia.org", "thumb.wikimedia.org"]);
+  if (!image || !COMMONS_UPLOAD_PATH.test(image.pathname) || !RASTER_EXTENSION.test(image.pathname)
+    || (image.hostname === "thumb.wikimedia.org" && !image.pathname.startsWith("/wikipedia/commons/thumb/"))) {
+    issues.add(`${path}.url`, "must be a Commons JPEG, PNG or WebP URL on upload.wikimedia.org, or a Commons thumbnail on thumb.wikimedia.org");
+  } else out.url = raw.url;
+  const source = canonicalHttpsUrl(raw.sourceUrl, "commons.wikimedia.org");
+  if (!source || !COMMONS_FILE_PATH.test(source.pathname)) issues.add(`${path}.sourceUrl`, "must be a https://commons.wikimedia.org/wiki/File: page");
+  else out.sourceUrl = raw.sourceUrl;
+  out.credit = plainText(raw.credit, `${path}.credit`, issues, 500);
+  out.author = plainText(raw.author, `${path}.author`, issues, 300);
+  if (typeof raw.license !== "string" || !Object.hasOwn(COMMONS_LICENSES, raw.license)) {
+    issues.add(`${path}.license`, `must be one of ${Object.keys(COMMONS_LICENSES).join(", ")}`);
+  } else {
+    out.license = raw.license;
+    out.licenseUrl = exactValue(raw.licenseUrl, COMMONS_LICENSES[raw.license], `${path}.licenseUrl`, issues);
+  }
+  out.selectedAt = selectedAtValue(raw.selectedAt, `${path}.selectedAt`, issues);
+  return issues.list.length === before ? out : undefined;
+}
+
 function normalizePlan(raw, path, issues, ctx) {
   if (!isPlainObject(raw)) {
     issues.add(path, "must be an object");
@@ -471,8 +636,13 @@ function normalizePlan(raw, path, issues, ctx) {
   assignDefined(out, "lat", number(raw.lat, `${path}.lat`, issues, { min: -90, max: 90 }));
   assignDefined(out, "lng", number(raw.lng, `${path}.lng`, issues, { min: -180, max: 180 }));
   assignDefined(out, "approximateLocation", bool(raw.approximateLocation, `${path}.approximateLocation`, issues));
+  if (raw.place !== undefined && raw.place !== null) assignDefined(out, "place", normalizeSelectedPlace(raw.place, `${path}.place`, issues));
   if (raw.photo !== undefined && raw.photo !== null) {
     if (typeof raw.photo === "string") assignDefined(out, "photo", urlValue(raw.photo, `${path}.photo`, issues));
+    // Managed Commons snapshot (Commons provider + selectedAt): strict schema. Anything else,
+    // including legacy objects with only a provider label, keeps the earlier free-object checks
+    // (sensitive keys, safe URLs, depth/size bounds) and is stored as given.
+    else if (isManagedCommonsPhoto(raw.photo)) assignDefined(out, "photo", normalizeCommonsPhoto(raw.photo, `${path}.photo`, issues));
     else assignDefined(out, "photo", freeObject(raw.photo, `${path}.photo`, issues));
   }
   assignDefined(out, "photoSourceId", text(raw.photoSourceId, `${path}.photoSourceId`, issues, { max: 200 }));
@@ -649,12 +819,14 @@ export function normalizeContent(raw, { prefix = "trip" } = {}) {
 /**
  * Fill derived map fields for plans whose googleMapsUrl was parsed. Only applied
  * when the URL is new or changed, so a caller's own derived fields stay intact.
+ * A plan with a selected place (plan.place) is skipped: the place, not the legacy
+ * Google URL, owns its coordinates and address.
  */
 export function applyParsedPlaces(content, parsedPlaces, previousUrls) {
   for (const day of content.days) {
     for (const slot of day.slots) {
       const parsed = parsedPlaces.get(slot);
-      if (!parsed) continue;
+      if (!parsed || slot.place) continue;
       const before = previousUrls.get(slot.id);
       if (before === slot.googleMapsUrl && Number.isFinite(slot.lat) && Number.isFinite(slot.lng)) continue;
       slot.googleMapsPlaceName = parsed.placeName;
@@ -668,4 +840,46 @@ export function applyParsedPlaces(content, parsedPlaces, previousUrls) {
       if (!slot.photoSourceId && slot.id) slot.photoSourceId = slot.id;
     }
   }
+}
+
+const MIRRORED_PLACE_FIELDS = Object.freeze(["lat", "lng", "address"]);
+
+/**
+ * Mirror plan.lat/lng/address from a selected plan.place (the canonical source). previous is the
+ * stored content before this write (null for a new trip or import). A duplicate field equal to the
+ * place value, or carried over unchanged from the stored plan (for example the earlier Google-derived
+ * coordinates when a place is first selected), is replaced by the place value. A duplicate that the
+ * caller changed to anything else is a conflict and the whole write is refused, never silently
+ * overwritten.
+ *
+ * Removing a selection: when the stored plan had a place, the new plan has none and no googleMapsUrl
+ * (which would re-derive its own location in applyParsedPlaces), each of lat/lng/address that still
+ * equals both the stored plan value and the stored place value is a carried-over mirror and is
+ * removed, so no stale marker remains. A value the caller changed is kept. Plans that had no place
+ * before (legacy plans) are untouched.
+ */
+export function applySelectedPlaces(content, previous) {
+  const stored = new Map();
+  for (const day of previous?.days || []) for (const slot of day?.slots || []) if (slot?.id) stored.set(slot.id, slot);
+  const issues = new Issues();
+  content.days.forEach((day, dayIndex) => {
+    day.slots.forEach((slot, slotIndex) => {
+      const prior = stored.get(slot.id);
+      if (!slot.place) {
+        if (!isPlainObject(prior?.place) || slot.googleMapsUrl) return;
+        for (const key of MIRRORED_PLACE_FIELDS) {
+          if (slot[key] !== undefined && slot[key] === prior[key] && prior[key] === prior.place[key]) delete slot[key];
+        }
+        return;
+      }
+      for (const key of MIRRORED_PLACE_FIELDS) {
+        const value = slot.place[key];
+        if (slot[key] === undefined || slot[key] === value) continue;
+        if (prior && prior[key] === slot[key]) continue;
+        issues.add(`trip.days[${dayIndex}].slots[${slotIndex}].${key}`, `conflicts with place.${key}; omit it or send the selected place's value`);
+      }
+      for (const key of MIRRORED_PLACE_FIELDS) slot[key] = slot.place[key];
+    });
+  });
+  issues.throwIfAny("A plan's coordinates or address conflict with its selected place.");
 }

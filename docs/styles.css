@@ -4622,3 +4622,146 @@ details[open] > summary .summary-chevron,
 .hosted-boot__card { max-width:420px; text-align:center; }
 .hosted-boot__title { font-size:24px; font-weight:700; }
 .hosted-boot__actions { display:flex; flex-wrap:wrap; justify-content:center; gap:12px; }
+
+/* Map/itinerary selection: the marker and the card share one highlight. */
+.route-pin .route-pin__num { transition: transform 140ms ease, background-color 140ms ease, box-shadow 140ms ease; }
+.route-pin.is-selected .route-pin__num {
+  background: var(--ink);
+  border-color: #fffdf8;
+  box-shadow: 0 0 0 4px rgba(219, 117, 73, 0.45), 0 6px 14px rgba(23, 54, 47, 0.35);
+  transform: scale(1.18);
+}
+.route-pin:focus-visible .route-pin__num { outline: 3px solid var(--accent); outline-offset: 2px; }
+.timeline-item.is-map-selected .timeline-marker {
+  color: #fffdf8;
+  background: var(--ink);
+  box-shadow: 0 0 0 3px rgba(219, 117, 73, 0.32);
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-pin .route-pin__num { transition: none; }
+  .route-pin.is-selected .route-pin__num { transform: none; }
+}
+
+/* Saved place source and licensed photo credit on timeline cards. */
+.place-source,
+.photo-credit--licensed {
+  margin: 0.55rem 0 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.place-source a,
+.photo-credit a { color: var(--accent); font-weight: 700; }
+.photo-credit--licensed { display: block; }
+
+/* Explicit place and photo lookup in the plan editor (self-hosted editors only). */
+.lookup-panel {
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.85rem;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.lookup-panel[aria-busy="true"] .lookup-results { opacity: 0.6; }
+.lookup-panel__title { margin: 0; color: var(--ink); font-size: 0.92rem; }
+.lookup-panel__hint,
+.lookup-panel__or { margin: 0; }
+.lookup-privacy {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  color: var(--ink-2);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+.lookup-search { display: grid; gap: 0.4rem; min-width: 0; }
+.lookup-search__label { font-size: 0.78rem; font-weight: 720; }
+.lookup-search__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.4rem;
+  align-items: center;
+  min-width: 0;
+}
+.lookup-search__input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.55rem 0.65rem;
+  color: var(--text);
+  background: #fffcf5;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 1rem;
+}
+.lookup-search__button[hidden] { display: none; }
+.lookup-status { min-height: 1rem; margin: 0; color: var(--muted); font-size: 0.74rem; }
+.lookup-status:empty { display: none; }
+.lookup-status[data-error="true"] { color: var(--danger); font-weight: 680; }
+.lookup-current__box {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.65rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.lookup-current__note { margin: 0; font-size: 0.78rem; }
+.lookup-current__actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.lookup-summary { display: grid; gap: 0.15rem; min-width: 0; overflow-wrap: anywhere; font-size: 0.78rem; line-height: 1.35; }
+.lookup-summary--photo { grid-template-columns: auto minmax(0, 1fr); gap: 0.6rem; align-items: start; }
+.lookup-summary__copy { display: grid; gap: 0.2rem; min-width: 0; }
+.lookup-summary__source,
+.lookup-result__source { font-size: 0.7rem; color: var(--muted); }
+.lookup-results {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 22rem;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+.lookup-results:empty { display: none; }
+.lookup-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.6rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.lookup-result--photo { grid-template-columns: auto minmax(0, 1fr) auto; }
+.lookup-result.is-chosen { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(219, 117, 73, 0.16); }
+.lookup-result__copy { display: grid; gap: 0.15rem; min-width: 0; overflow-wrap: anywhere; font-size: 0.78rem; line-height: 1.35; }
+.lookup-result__name { color: var(--ink); font-size: 0.84rem; }
+.lookup-result__choose[aria-pressed="true"] { color: #fffdf8; background: var(--ink); border-color: var(--ink); }
+.lookup-thumb {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  width: 5.5rem;
+  height: 4.1rem;
+  place-items: center;
+  background: linear-gradient(145deg, var(--moss-soft), var(--accent-soft));
+  border-radius: 8px;
+}
+.lookup-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.lookup-thumb__fallback { padding: 0.25rem; color: var(--ink-2); font-size: 0.62rem; font-weight: 700; text-align: center; }
+.lookup-thumb__fallback[hidden] { display: none; }
+@media (max-width: 479px) {
+  .lookup-search__row { grid-template-columns: minmax(0, 1fr) auto; }
+  .lookup-search__row .lookup-search__input { grid-column: 1 / -1; }
+  .lookup-result,
+  .lookup-result--photo { grid-template-columns: minmax(0, 1fr); }
+  .lookup-result__choose { width: 100%; }
+  .lookup-results { max-height: 18rem; }
+}

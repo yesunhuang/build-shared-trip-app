@@ -10,7 +10,7 @@
 // Permanent trip deletion (deleteTrip, audit action trip.delete) is owner-only: an owner cookie or
 // owner bearer over HTTP, or the offline host-operator CLI (channel "operator"). It is never
 // reachable through MCP and is not a change operation, so content managers cannot delete trips.
-import { DomainError, validationError } from "./domain/errors.mjs";
+import { DomainError, conflict, validationError } from "./domain/errors.mjs";
 import { OPERATOR, OWNER, canDeleteTrips, canEditContent } from "./auth/policy.mjs";
 
 const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -46,6 +46,18 @@ export class ContentGateway {
   /** input: { tripId, requestId, expectedVersion, changes } */
   applyTripChanges(context, input) {
     return this.write(context, changeAction(input?.changes), input, (record) => this.service.applyTripChanges(input, record));
+  }
+  /**
+   * Target check for the HTTP-only public place/photo lookups: an editor (owner or content manager)
+   * and an existing, unarchived trip. It only reads the trip; lookups never write trip content (a
+   * chosen result is saved separately through applyTripChanges).
+   */
+  lookupTarget({ principal }, tripId) {
+    if (!principal) throw unauthorized();
+    if (!canEditContent(principal)) throw forbidden();
+    const { trip } = this.service.getTrip(tripId);
+    if (trip.archived) throw conflict("trip_archived", "The trip is archived. Unarchive it before searching for places or photos.");
+    return trip.id;
   }
   /** input: { tripId, requestId, expectedVersion }. Owner-only permanent deletion. */
   deleteTrip(context, input) {
