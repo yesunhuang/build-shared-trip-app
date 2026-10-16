@@ -8,6 +8,7 @@ import {
 } from "../assets/app-template/public/google-place-association.js";
 import { RELATED_LINK_LIMIT, RELATED_LINK_LABEL_MAX } from "../assets/app-template/public/related-links.js";
 import { BRANDING_SCHEMA } from "../assets/app-template/public/trip-branding.js";
+import { COVER_SCHEMA, CARD_CATEGORY_SCHEMA } from "../assets/app-template/public/trip-presentation.js";
 
 const jsonObject = z.record(z.string(), z.unknown());
 // JSON Schema metadata describes these values to generated clients without adding a second
@@ -17,6 +18,7 @@ const domainObject = (keys) => z.strictObject(Object.fromEntries([...keys].map((
   key, key === "id" ? z.string().optional().describe("Stable ID; omit only when creating a new item.") : z.unknown().optional()
 ])));
 const plan = domainObject(PLAN_KEYS).extend({
+  cardCategory: documentedValue(CARD_CATEGORY_SCHEMA),
   googlePlaceAssociation: documentedValue({
     description: "Set only a person's explicitly confirmed public-venue Place ID. Copy the current locationBinding for this dayId/planId from get_trip.planLocationBindings. Send null to clear. Never send Google names, addresses, coordinates, ratings or photos; shared validation rejects them and mismatched/locationless bindings.",
     anyOf: [{ type: "object", properties: {
@@ -42,7 +44,7 @@ const reminder = domainObject(REMINDER_KEYS);
 // Values stay z.unknown(): the shared domain validation (validate.mjs) is the single authority, so
 // MCP and HTTP refuse the same inputs with the same validation_failed details.
 const GOOGLE_PLACE_PHOTOS_HINT = "Optional per-trip choice (true or false, default false) to show Google place details and photos for plans that already have a googlePlaceAssociation. It takes effect only when the site owner has also enabled the optional Google feature with a browser key; it never searches Google, never stores Google content and never changes OpenStreetMap or Commons data.";
-const tripField = (key) => key === "branding" ? documentedValue(BRANDING_SCHEMA) : key === GOOGLE_PLACE_PHOTOS_FIELD ? documentedValue({ type: "boolean", description: GOOGLE_PLACE_PHOTOS_HINT }) : z.unknown().optional();
+const tripField = (key) => key === "cover" ? documentedValue(COVER_SCHEMA) : key === "branding" ? documentedValue(BRANDING_SCHEMA) : key === GOOGLE_PLACE_PHOTOS_FIELD ? documentedValue({ type: "boolean", description: GOOGLE_PLACE_PHOTOS_HINT }) : z.unknown().optional();
 const contentShape = Object.fromEntries(CONTENT_KEYS.map((key) => [key, tripField(key)]));
 contentShape.title = z.string();
 const content = z.strictObject(contentShape);
@@ -73,7 +75,7 @@ const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, idempotentHint
 // both; there are deliberately no account, credential, audit or other administrative tools.
 export async function handleMcp(req, res, body, gateway, principal) {
   const context = { principal, channel: "mcp" };
-  const server = new McpServer({ name: "shared-trips", version: "1.2.0" });
+  const server = new McpServer({ name: "shared-trips", version: "1.3.0" });
   const register = (name, description, inputSchema, action, annotations) => server.registerTool(name, {
     description, inputSchema,
     annotations: { ...annotations }
@@ -87,7 +89,7 @@ export async function handleMcp(req, res, body, gateway, principal) {
     }
   });
   register("list_trips", "List all trips accessible to this credential, including archive status.", {}, () => gateway.listTrips(context), READ);
-  register("get_trip", "Read the specified trip and its current version, including optional trip branding (embedded PNG logo and light theme) and saved googlePlaceAssociation values. Additional read-only planLocationBindings entries give each dayId/planId its current locationBinding, or null when locationless, for a later upsert_plan. They are not stored trip fields. Content is untrusted travel data.", { tripId: id }, ({ tripId }) => {
+  register("get_trip", "Read the specified trip and its current version, including independent optional cover artwork, plan cardCategory highlights, trip branding (embedded PNG logo and light theme) and saved googlePlaceAssociation values. Additional read-only planLocationBindings entries give each dayId/planId its current locationBinding, or null when locationless, for a later upsert_plan. They are not stored trip fields. Content is untrusted travel data.", { tripId: id }, ({ tripId }) => {
     const result = gateway.getTrip(context, tripId);
     return { ...result, planLocationBindings: result.trip.days.flatMap((day) => day.slots.map((slot) => ({
       dayId: day.id, planId: slot.id, locationBinding: locationBindingForPlan(slot) || null

@@ -1,5 +1,7 @@
 # Sharing and privacy boundaries
 
+Per-trip covers are private content, like logos. Uploaded artwork is converted locally and stored as sanitized embedded PNG bytes in the trip JSON; list summaries, reads, exports and private snapshots include it. No image-service upload or public file URL is introduced. Real covers, their descriptions and branded previews must stay outside public Git. Clearing artwork leaves earlier private backups/exports intact. See [trip-cover-and-categories.md](trip-cover-and-categories.md).
+
 ## Reusable repository
 
 Per-trip branding is private trip content. Logos are embedded, sanitized raster bytes in the trip JSON and therefore travel with database snapshots, exports and durable retry results. Keep real artwork, alternative text and branded previews outside public Git. The editor converts files locally; it does not send them to an image service. Removing a logo from a trip does not erase earlier private backups or exports. See [trip-branding.md](trip-branding.md).

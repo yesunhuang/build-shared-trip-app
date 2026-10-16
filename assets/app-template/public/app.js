@@ -48,6 +48,8 @@ import { projectCardLinks, renderCardLinkGroup, cardLinkIcon } from "./card-link
 import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=__CACHE_VERSION__";
 import { applyTripBranding } from "./trip-branding.js?v=__CACHE_VERSION__";
 import { createBrandingEditor, brandingText } from "./branding-editor.js?v=__CACHE_VERSION__";
+import { applyTripCover, cardCategory, categoryBadge, presentationText } from "./trip-presentation.js?v=__CACHE_VERSION__";
+import { createCoverEditor } from "./cover-editor.js?v=__CACHE_VERSION__";
 import { optimizedPhotoUrl } from "./photo-assets.js?v=__CACHE_VERSION__";
 import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=__CACHE_VERSION__";
 import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=__CACHE_VERSION__";
@@ -403,6 +405,7 @@ function renderHeader() {
     els.routeDecoration.textContent = displayTrip.routeDecoration || displayTrip.country || "";
   }
   applyTripBranding(document,currentTrip);
+  applyTripCover(document,currentTrip);
   const first = displayTrip.days[0]?.date || displayTrip.startDate;
   const last = displayTrip.days.at(-1)?.date || displayTrip.startDate;
   els.dateRange.textContent = ui(currentLanguage, "tripDateLine", {
@@ -1558,6 +1561,7 @@ function renderSlot(day, slot, slotIndex) {
   marker.setAttribute("aria-hidden", "true");
 
   const card = element("details", "timeline-card");
+  card.dataset.cardCategory=cardCategory(slot.cardCategory);
   const summary = element("summary", "timeline-card__summary");
   const photo = renderLocationPhoto(slot);
   const summaryCopy = element("div", "timeline-card__summary-copy");
@@ -1572,6 +1576,7 @@ function renderSlot(day, slot, slotIndex) {
   }
   const planType = normalizePlanType(slot.planType, slot);
   tagRow.append(textElement("span", `plan-type-chip plan-type-chip--${planType}`, planTypeLabel(planType)));
+  const badge=categoryBadge(document,slot.cardCategory,currentLanguage);if(badge)tagRow.append(badge);
   if (travelers) tagRow.append(textElement("span", "traveler-chip timeline-traveler-chip", travelers));
   if (slot.booked) tagRow.append(textElement("span", "status-chip status-chip--booked", ui(currentLanguage, "booked")));
   if (slot.alternative) tagRow.append(textElement("span", "status-chip", ui(currentLanguage, "chooseOne")));
@@ -2824,6 +2829,7 @@ function openItemDialog(dayId, slotId = "") {
   els.dialogTitle.textContent = ui(currentLanguage, slot ? "editPlan" : "addPlan");
   els.deleteItem.hidden = !slot;
   els.form.elements.planType.value = slot ? normalizePlanType(slot.planType, slot) : "sight";
+  els.form.elements.cardCategory.value=cardCategory(slot?.cardCategory);
   els.form.elements.booked.value = String(slot?.booked === true || slot?.booked === "true");
 
   const googleMapsInput = els.form.elements.googleMapsUrl;
@@ -3868,6 +3874,7 @@ async function handleItemSubmit(event) {
   const slotPatch = {
     period: ["morning", "noon", "evening"].includes(data.get("period")) ? data.get("period") : "morning",
     planType: normalizePlanType(data.get("planType")),
+    cardCategory: cardCategory(data.get("cardCategory")),
     booked: data.get("booked") === "true",
     name: nameChanged ? submittedName : (existingSlot.name || submittedName),
     time: String(data.get("time") || "").trim(),
@@ -4261,7 +4268,22 @@ function renderHostedControls() {
     button("retrySync",()=>hostedPoller?.retryNow()),
     button("signOut",signOutAndLeave));
   const brandingButton=textElement("button","button button--quiet",brandingText(currentLanguage,"open"));brandingButton.type="button";brandingButton.dataset.action="edit-branding";brandingButton.disabled=Boolean(hostedServerTrip.archived);brandingButton.addEventListener("click",openBrandingDialog);controls.insertBefore(brandingButton,exportButton);
+  const coverButton=textElement("button","button button--quiet",presentationText(currentLanguage,"open"));coverButton.type="button";coverButton.dataset.action="edit-cover";coverButton.disabled=Boolean(hostedServerTrip.archived);coverButton.addEventListener("click",openCoverDialog);controls.insertBefore(coverButton,exportButton);
   els.addReminder.disabled=Boolean(hostedServerTrip.archived);
+}
+
+function openCoverDialog(){
+  if(HOSTED_READ_ONLY||!hostedReady||hostedServerTrip?.archived)return;
+  const version=hostedServerTrip.version;let sent="",requestId="";
+  const editor=createCoverEditor({document,trip:hostedServerTrip,language:currentLanguage,onUnauthorized:leaveForSignIn,
+    onSave:async cover=>{
+      if(HOSTED_READ_ONLY||!hostedReady)throw Object.assign(Error("editor_required"),{status:403});
+      const payload=JSON.stringify(cover);if(payload!==sent){sent=payload;requestId=newRequestId("cover");}
+      acceptHostedTrip(expectTrip(await hostedApi.applyChanges(HOSTED_TRIP_ID,version,[{type:"update_trip",fields:{cover}}],requestId),HOSTED_TRIP_ID));
+    },onReload:async()=>{acceptHostedTrip(expectTrip(await hostedApi.getTrip(HOSTED_TRIP_ID),HOSTED_TRIP_ID));editor.dialog.close();openCoverDialog();}
+  });
+  editor.dialog.addEventListener("close",()=>{editor.dialog.remove();const opener=document.querySelector('[data-action="edit-cover"]');if(opener&&!opener.disabled)opener.focus({preventScroll:true});},{once:true});
+  document.body.append(editor.dialog);editor.dialog.showModal();
 }
 
 function openBrandingDialog() {
@@ -4397,6 +4419,7 @@ function applyLanguageToDocument() {
 }
 
 function applyStaticTranslations() {
+  document.querySelectorAll("[data-presentation]").forEach(node=>{node.textContent=presentationText(currentLanguage,node.dataset.presentation);});
   document.querySelectorAll("[data-i18n]").forEach((node) => {
     node.textContent = ui(currentLanguage, node.dataset.i18n);
   });

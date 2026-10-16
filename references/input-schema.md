@@ -1,5 +1,7 @@
 # Input schema
 
+Optional trip `cover` and plan `cardCategory` are documented in the [cover and category contract](trip-cover-and-categories.md). Cover is an independent bounded PNG object or null; category is an explicit enum with neutral default. They share canonical HTTP/MCP and authoring-envelope validation, backup/export support and version-aware edits.
+
 Plans also support the optional ordered [related-links collection](plan-related-links.md): at most six stable `{id,label,url}` entries, shared HTTP/MCP validation, native card anchors and authorized-editor controls. Missing means unchanged on a plan patch; `[]` clears it.
 
 This file describes trip content in two forms:

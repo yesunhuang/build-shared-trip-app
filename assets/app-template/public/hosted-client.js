@@ -606,3 +606,4 @@ export function exportFilename(trip = {}, tripId = "") {
     .slice(0, 60);
   return `${base || "trip"}-${tripId || trip.id || "export"}.json`;
 }
+export {coverImage} from "./trip-presentation.js?v=__CACHE_VERSION__";

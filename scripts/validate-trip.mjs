@@ -5,6 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFullGoogleMapsPlaceUrl } from "../assets/app-template/public/google-maps-place-url.js";
 import { relatedLinksProblems } from "../assets/app-template/public/related-links.js";
+import { coverProblems, CARD_CATEGORIES } from "../assets/app-template/public/trip-presentation.js";
+import { sanitizeRasterData } from "../server/domain/branding.mjs";
+import { COVER_BYTES_MAX, COVER_EDGE_MAX } from "../assets/app-template/public/trip-presentation.js";
 
 export const REQUIRED_LOCALES = Object.freeze(["en", "zh-Hans", "zh-Hant", "ja"]);
 export const TRANSLATED_LOCALES = Object.freeze(REQUIRED_LOCALES.filter((locale) => locale !== "en"));
@@ -17,7 +20,7 @@ const PLAN_TYPE_SET = new Set(PLAN_TYPES);
 const FORBIDDEN_KEY = /(?:confirmation(?:number|code)?|booking(?:reference|code)|passport|ticketnumber|cardnumber|securitycode|cvv|privatekey|serviceaccount|clientemail|clientsecret|refreshtoken|accesstoken|idtoken|authtoken|bearertoken|sessiontoken|secretaccesskey|password|credential)/i;
 const FIREBASE_WEB_CONFIG_KEYS = new Set(["apiKey", "authDomain", "projectId", "storageBucket", "messagingSenderId", "appId", "measurementId"]);
 const STRUCTURAL_TRANSLATION_KEYS = new Set([
-  "id", "slug", "title", "date", "startDate", "endDate", "timezone", "period", "planType",
+  "id", "slug", "title", "date", "startDate", "endDate", "timezone", "period", "planType", "cardCategory", "cover",
   "booked", "lat", "lng", "googleMapsUrl", "mapsUrl", "url", "sourceUrl", "participantGroupIds",
   "weatherLocationIds", "sortOrder", "sortTime"
 ]);
@@ -84,6 +87,8 @@ export function validateTrip(input, options = {}) {
   }
 
   const trip = objectAt(input, "trip", error);
+  const coverIssues=coverProblems(trip.cover);for(const issue of coverIssues)error(`trip.${issue.path}`,issue.message);
+  if(trip.cover&&!coverIssues.length)try{sanitizeRasterData(trip.cover.data,COVER_BYTES_MAX,COVER_EDGE_MAX);}catch{error("trip.cover.data","must be a valid bounded RGB/RGBA PNG");}
   if (Buffer.byteLength(JSON.stringify(trip), "utf8") > 750_000) {
     error("trip", "serialized trip data must stay below 750 KB so synchronized writes remain safely under Firestore's 1 MiB document limit");
   }
@@ -189,6 +194,7 @@ export function validateTrip(input, options = {}) {
 function validatePlan(plan, location, context) {
   const { error, warn, groupIds, groupCount, planIds, allowExample } = context;
   if (!isPlainObject(plan)) return error(location, "must be an object");
+  if(plan.cardCategory!==undefined&&!CARD_CATEGORIES.includes(plan.cardCategory))error(`${location}.cardCategory`,"must be an explicit supported card category");
   if (plan.relatedLinks !== undefined) for (const problem of relatedLinksProblems(plan.relatedLinks)) error(`${location}.relatedLinks${problem.key}`, problem.message);
   requireString(plan, "id", location, error, { max: 80 });
   if (plan.id && !ID.test(plan.id)) error(`${location}.id`, "must use letters, numbers, underscores, or hyphens");

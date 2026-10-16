@@ -71,7 +71,7 @@ try {
   ok(await api(`/api/users/${account.id}/role`, { role: "content-manager" }));
   const secret = ok(await api(`/api/users/${account.id}/mcp-tokens`, { label: "Fictional discovery regression" }), 201).secret;
   await connect(secret);
-  assert.equal(sdk.getServerVersion().version, "1.2.0");
+  assert.equal(sdk.getServerVersion().version, "1.3.0");
   const inventory = (await sdk.listTools()).tools;
   assert.deepEqual(inventory.map(t => t.name).sort(), ["apply_trip_changes", "create_trip", "export_trip", "get_trip", "import_trip", "list_trips"]);
   const schema = inventory.find(t => t.name === "apply_trip_changes").inputSchema;

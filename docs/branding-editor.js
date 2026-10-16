@@ -1,4 +1,4 @@
-import {BRANDING_PRESETS,LOGO_BYTES_MAX,LOGO_EDGE_MAX,brandingProblems,themeColors,themeTokens,logoSource} from "./trip-branding.js?v=v-2100193edc44";
+import {BRANDING_PRESETS,LOGO_BYTES_MAX,LOGO_EDGE_MAX,brandingProblems,themeColors,themeTokens,logoSource} from "./trip-branding.js?v=v-a658691789ff";
 const keys=["open","title","logo","upload","hint","alt","remove","theme","default","sage","ocean","plum","custom","legacy","ink","accent","background","preview","reset","save","cancel","reload","busy","fileError","colorError","conflict","denied","failed","defaultLogo"];
 const copy={
  en:["Branding","Trip branding","Trip logo","Choose image","PNG, JPEG or WebP up to 8 MB. A small PNG is saved with this trip, its backups and exports.","Logo description","Remove logo","Color theme","Default","Sage","Ocean","Plum","Custom colors","Existing theme","Text / header","Accent","Light page background","Preview","Reset to defaults","Save branding","Cancel","Reload saved branding","Preparing image…","Choose a supported image within the size limits.","Use a light page background and dark text with at least 4.5:1 contrast. Accent shades are adjusted for readability.","This trip changed. Your draft is kept. Reload saved branding before editing again.","An authorized editor connection is required.","Could not save. Your draft is kept; retry the same edit after reconnecting.","Default logo"],
@@ -7,7 +7,7 @@ const copy={
  ja:["デザイン","旅行のデザイン","旅行のロゴ","画像を選択","PNG・JPEG・WebP、最大8 MB。縮小したPNGは旅行データ、バックアップ、書き出しに含まれます。","ロゴの説明","ロゴを削除","配色","標準","セージ","オーシャン","プラム","色を指定","現在の配色","文字・ヘッダー","アクセント","明るいページ背景","プレビュー","標準に戻す","デザインを保存","キャンセル","保存済みのデザインを再読込","画像を処理中…","対応形式とサイズの画像を選択してください。","背景は明るく、文字は暗くし、コントラストを4.5:1以上にしてください。アクセントの濃さは読みやすく調整されます。","旅行が変更されました。下書きは保持しています。再読込してから編集してください。","編集権限のある接続が必要です。","保存できませんでした。下書きは保持しています。再接続後に同じ編集を再試行できます。","標準のロゴ"]
 };
 export function brandingText(language,key){const index=keys.indexOf(key);return (copy[language]||copy.en)[index]||copy.en[index]||key;}
-export async function prepareLogoFile(file,{document:doc,URL:urls=doc.defaultView.URL,Image:ImageType=doc.defaultView.Image}={}) {
+export async function prepareLogoFile(file,{document:doc,URL:urls=doc.defaultView.URL,Image:ImageType=doc.defaultView.Image,edges=[LOGO_EDGE_MAX,192,128,96,64],bytesMax=LOGO_BYTES_MAX}={}) {
   if(!file||file.size>8*1024*1024||file.size<12||!["image/png","image/jpeg","image/webp"].includes(file.type))throw Error("file");
   const bytes=new Uint8Array(await file.slice(0,32).arrayBuffer());
   const png=[137,80,78,71,13,10,26,10].every((v,i)=>bytes[i]===v),jpeg=bytes[0]===255&&bytes[1]===216&&bytes[2]===255,webp=String.fromCharCode(...bytes.slice(0,4))==="RIFF"&&String.fromCharCode(...bytes.slice(8,12))==="WEBP";
@@ -17,11 +17,11 @@ export async function prepareLogoFile(file,{document:doc,URL:urls=doc.defaultVie
   try{
     const image=await new Promise((resolve,reject)=>{const value=new ImageType();const timer=setTimeout(()=>{value.src="";reject(Error("file"));},15000);value.onload=()=>{clearTimeout(timer);resolve(value);};value.onerror=()=>{clearTimeout(timer);reject(Error("file"));};value.src=url;});
     const width=image.naturalWidth,height=image.naturalHeight;if(!width||!height||width>4096||height>4096||width*height>16000000)throw Error("file");
-    for(const edge of [LOGO_EDGE_MAX,192,128,96,64]){
+    for(const edge of edges){
       const scale=Math.min(1,edge/width,edge/height),canvas=doc.createElement("canvas");canvas.width=Math.max(1,Math.round(width*scale));canvas.height=Math.max(1,Math.round(height*scale));
       const ctx=canvas.getContext("2d");if(!ctx)throw Error("canvas");ctx.drawImage(image,0,0,canvas.width,canvas.height);
       const source=canvas.toDataURL("image/png");canvas.width=0;canvas.height=0;
-      const data=source.split(",")[1];if(source.startsWith("data:image/png;base64,")&&data&&Math.floor(data.length*3/4)<=LOGO_BYTES_MAX)return {mimeType:"image/png",data,alt:"Trip logo"};
+      const data=source.split(",")[1];if(source.startsWith("data:image/png;base64,")&&data&&Math.floor(data.length*3/4)<=bytesMax)return {mimeType:"image/png",data,alt:"Trip logo"};
     }
     throw Error("file");
   }finally{urls.revokeObjectURL(url);}

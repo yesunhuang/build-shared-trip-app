@@ -10,7 +10,8 @@ import {
 } from "../../assets/app-template/public/google-place-association.js";
 import { validationError } from "./errors.mjs";
 import { relatedLinksProblems } from "../../assets/app-template/public/related-links.js";
-import { normalizeBranding } from "./branding.mjs";
+import { normalizeBranding, normalizeCover } from "./branding.mjs";
+import { CARD_CATEGORIES } from "../../assets/app-template/public/trip-presentation.js";
 
 export const LOCALES = Object.freeze(["en", "zh-Hans", "zh-Hant", "ja"]);
 export const PERIODS = Object.freeze(["morning", "noon", "evening"]);
@@ -46,7 +47,7 @@ export const GOOGLE_PLACE_PHOTOS_FIELD = "googlePlacePhotosEnabled";
 export const CONTENT_KEYS = Object.freeze([
   "title", "shortName", "metaDescription", "timezone", "country", "dateRange", "route",
   "days", "reminders", "participantGroups", "tips", "disclaimer", "theme", "i18n",
-  "weather", "resources", "content", "branding", GOOGLE_PLACE_PHOTOS_FIELD
+  "weather", "resources", "content", "branding", "cover", GOOGLE_PLACE_PHOTOS_FIELD
 ]);
 // Read-only aliases emitted for the existing runtime template.
 export const ALIAS_KEYS = Object.freeze(["slug", "startDate", "endDate", "routeDecoration"]);
@@ -59,7 +60,7 @@ export const DAY_KEYS = new Set([
   "recommendations", "i18n", "compat"
 ]);
 export const PLAN_KEYS = new Set([
-  "id", "name", "period", "time", "sortTime", "sortOrder", "planType", "booked",
+  "id", "name", "period", "time", "sortTime", "sortOrder", "planType", "cardCategory", "booked",
   "participantGroupIds", "review", "notes", "description", "relatedLinks", "googleMapsUrl", "mapsUrl",
   "googleMapsPlaceName", "googleMapsPlaceLabel", "googleMapsFeatureId", "address", "lat", "lng",
   "approximateLocation", "place", "photo", "photoSourceId", "booking", "routeGroup", "i18n", "compat",
@@ -395,6 +396,7 @@ function i18nValue(value, path, issues) {
       continue;
     }
     if (Object.hasOwn(patch, "relatedLinks")) issues.add(`${path}.${locale}.relatedLinks`, "links are structural plan content, not a translation override");
+    for(const key of ["cover","cardCategory"])if(Object.hasOwn(patch,key))issues.add(`${path}.${locale}.${key}`,"presentation data is structural content, not a translation override");
     const copy = freeJson(patch, `${path}.${locale}`, issues, 1);
     if (copy && Object.keys(copy).length) out[locale] = copy;
   }
@@ -648,6 +650,10 @@ function normalizePlan(raw, path, issues, ctx) {
     else out.planType = raw.planType;
   }
   assignDefined(out, "booked", bool(raw.booked, `${path}.booked`, issues));
+  if(raw.cardCategory!==undefined){
+    if(!CARD_CATEGORIES.includes(raw.cardCategory))issues.add(`${path}.cardCategory`, `must be one of ${CARD_CATEGORIES.join(", ")}`);
+    else out.cardCategory=raw.cardCategory;
+  }
   assignDefined(out, "participantGroupIds", idList(raw.participantGroupIds, `${path}.participantGroupIds`, issues, ctx.groupIds, "participant group"));
   assignDefined(out, "review", text(raw.review, `${path}.review`, issues, { max: 4000 }));
   assignDefined(out, "notes", text(raw.notes, `${path}.notes`, issues, { max: 4000 }));
@@ -867,6 +873,7 @@ export function normalizeContent(raw, { prefix = "trip" } = {}) {
   assignDefined(out, "resources", freeObject(raw.resources, `${prefix}.resources`, issues));
   assignDefined(out, "content", freeObject(raw.content, `${prefix}.content`, issues));
   assignDefined(out, "branding", normalizeBranding(raw.branding, `${prefix}.branding`, issues));
+  assignDefined(out, "cover", normalizeCover(raw.cover, `${prefix}.cover`, issues));
   out[GOOGLE_PLACE_PHOTOS_FIELD] = googlePlacePhotosValue(raw[GOOGLE_PLACE_PHOTOS_FIELD], `${prefix}.${GOOGLE_PLACE_PHOTOS_FIELD}`, issues);
 
   // Missing required IDs on nested objects are reported above (idValue).

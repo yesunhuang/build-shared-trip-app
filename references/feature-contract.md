@@ -1,5 +1,7 @@
 # Feature contract
 
+[Cover artwork and semantic card highlights](trip-cover-and-categories.md) are independent trip/plan presentation. Owners and content managers may upload/replace/clear a cover and choose explicit categories; viewers can only read. Covers appear on home cards and trip headers separately from logos. Missing covers/categories preserve legacy defaults; walking/car travel is never automatically promoted to ticketed transport. Existing booking semantics, maps/provider attribution and allowance controls remain intact. Target-client schema visibility is a separate rollout acceptance gate.
+
 Self-hosted trips support independent [branding](trip-branding.md): an embedded bounded raster logo, accessible light presets/custom colors and explicit reset. The native mobile-friendly editor and typed MCP fields share owner/content-manager authorization and version-aware atomic writes. Logo/theme data survive export/import, snapshots and restart; existing trips and the global installed identity remain unchanged. Provider components, checklist semantics, weather, maps and the Google allowance are preserved.
 
 Card address text uses saved Maps/selected-place destinations, with ordinary encoded name/address search fallback; multiple destinations stay individually labelled and only links have an arrow. Plans support up to six ordered editable [related links](plan-related-links.md), preserved through shared version-aware HTTP/MCP/import/export paths. Viewers may open links but cannot edit them.

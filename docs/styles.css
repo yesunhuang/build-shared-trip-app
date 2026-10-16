@@ -5178,3 +5178,18 @@ details[open] > summary .summary-chevron,
 }
 .has-text-links { overflow-wrap: anywhere; }
 .meta-list li { min-width: 0; }
+
+/* Explicit semantic highlights never infer booking or transport semantics. */
+.timeline-card[data-card-category=restaurant] { --category-bg:#fff2df; --category-ink:#663b13; --category-line:#916029; }
+.timeline-card[data-card-category=hotel] { --category-bg:#eaf0ff; --category-ink:#253e73; --category-line:#536c9c; }
+.timeline-card[data-card-category=ticketed-transport] { --category-bg:#e4f5ed; --category-ink:#154737; --category-line:#36715b; }
+.timeline-card[data-card-category]:not([data-card-category=neutral]) > .timeline-card__summary { background:var(--category-bg); border-inline-start:5px solid var(--category-line); }
+.timeline-card[data-card-category]:not([data-card-category=neutral]) .timeline-card__title { color:var(--category-ink); }
+.card-category-badge { display:inline-flex; align-items:center; gap:.35rem; padding:.3rem .55rem; border:1px solid var(--category-line); border-radius:8px; color:var(--category-ink); background:var(--category-bg); font-size:.8rem; font-weight:750; line-height:1.35; overflow-wrap:anywhere; }
+.card-category-badge svg { width:20px; height:20px; flex:none; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.hero > .trip-cover { display:block; width:100%; height:clamp(160px,28vw,320px); object-fit:cover; border-radius:16px; margin-bottom:1rem; background:#ffffff; }
+.cover-preview .trip-cover { display:block; width:100%; aspect-ratio: 16/7; object-fit:cover; border:1px solid #66736e; border-radius:10px; }
+.cover-editor .field { min-width:0; }
+.cover-editor input[type=range] { accent-color:#17362f; }
+[data-action=edit-cover] { min-height:44px; }
+@media(max-width:400px) { .hero > .trip-cover { height:170px; border-radius:12px; } }

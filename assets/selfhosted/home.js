@@ -1,4 +1,4 @@
-import { hostedApi, requestJSON, WRITE_TIMEOUT_MS, newRequestId, downloadJSON, exportFilename, safeNextPath, LANGUAGE_STORAGE_KEY, logoutAndLeave, finishPendingLogout, signoutPending, sessionCanEdit, sessionCanImport, sessionCanManageAccounts, ACCOUNT_ROLES, GOOGLE_PLACE_PHOTOS_FIELD, buildGooglePlacePhotosField, tripHasGooglePlacePhotos, createLinkActivationGuard } from "/hosted-client.js?v=__CACHE_VERSION__";
+import { hostedApi, requestJSON, WRITE_TIMEOUT_MS, newRequestId, downloadJSON, exportFilename, safeNextPath, LANGUAGE_STORAGE_KEY, logoutAndLeave, finishPendingLogout, signoutPending, sessionCanEdit, sessionCanImport, sessionCanManageAccounts, ACCOUNT_ROLES, GOOGLE_PLACE_PHOTOS_FIELD, buildGooglePlacePhotosField, tripHasGooglePlacePhotos, createLinkActivationGuard, coverImage } from "/hosted-client.js?v=__CACHE_VERSION__";
 // The trip list is rebuilt on every poll, on window focus and after actions. A rebuild while a
 // press on a trip link is in progress would detach the link before the browser opens it (window
 // focus fires on the very press that focuses an unfocused window), so it waits for that press.
@@ -437,6 +437,7 @@ function renderNow() {
       button(text(trip.archived?"restore":"archive"),async()=>{await hostedApi.applyChanges(trip.id,trip.version,[{type:"archive_trip",archived:!trip.archived}]);await load();}));
     actions.append(button(text("export"),async()=>downloadJSON(await hostedApi.exportTrip(trip.id),exportFilename(trip))));
     if (canDelete && deletableVersion(trip.version)) actions.append(deleteButton(trip));
+    const cover=coverImage(document,trip.cover,"trip-card-cover");if(cover)card.append(cover);
     card.append(heading,dates,actions);byId("list").append(card);
   }
 }

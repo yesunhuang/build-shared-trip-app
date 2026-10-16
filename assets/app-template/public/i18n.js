@@ -378,7 +378,7 @@ export function localizeTrip(trip, language) {
       const patch = value.i18n?.[language];
       if (patch && typeof patch === "object") {
         Object.entries(patch).forEach(([childKey, childValue]) => {
-          if (childKey === "relatedLinks") return;
+          if (["relatedLinks","cover","cardCategory"].includes(childKey)) return;
           if (isRoot && childKey === "title") return;
           localized[childKey] = walk(childValue, childKey);
         });

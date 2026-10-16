@@ -49,7 +49,7 @@ export class TripService {
   listTrips() {
     return { trips: this.db.prepare("SELECT data FROM trips ORDER BY archived,id").all().map(({ data }) => {
       const t = JSON.parse(data);
-      return { id: t.id, title: t.title, version: t.version, archived: t.archived, dateRange: {start:deriveStart(t),end:deriveEnd(t)}, updatedAt: t.updatedAt };
+      return { id: t.id, title: t.title, version: t.version, archived: t.archived, dateRange: {start:deriveStart(t),end:deriveEnd(t)}, updatedAt: t.updatedAt, ...(t.cover?{cover:t.cover}:{}) };
     }) };
   }
   getTrip(id) {

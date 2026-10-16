@@ -261,6 +261,16 @@
               <option value="other" data-i18n="planTypeOther">Other</option>
             </select>
           </label>
+          <label class="form-field">
+            <span data-presentation="category">Card highlight</span>
+            <select name="cardCategory" aria-describedby="card-category-hint">
+              <option value="neutral" data-presentation="neutral">Neutral</option>
+              <option value="restaurant" data-presentation="restaurant">Restaurant</option>
+              <option value="hotel" data-presentation="hotel">Hotel</option>
+              <option value="ticketed-transport" data-presentation="ticketed-transport">Ticketed transport</option>
+            </select>
+            <small id="card-category-hint" data-presentation="categoryHint">Highlights do not change the plan type, reservations or booking status.</small>
+          </label>
           <fieldset class="form-field form-fieldset">
             <legend data-i18n="reservation">Reservation</legend>
             <div class="segmented-control">
