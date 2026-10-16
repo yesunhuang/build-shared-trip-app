@@ -17,6 +17,7 @@ import {
   resourcesPath,
   sessionCanEdit,
   sessionHasGooglePlaces,
+  signoutPending,
   toRenderTrip,
   tripHasGooglePlacePhotos,
   tripIdFromPath
@@ -42,6 +43,7 @@ import {
 } from "./google-places-ui-kit.js?v=__CACHE_VERSION__";
 import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=__CACHE_VERSION__";
 import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=__CACHE_VERSION__";
+import { linkedTextElement, locationTextNode } from "./text-links.js?v=__CACHE_VERSION__";
 import { optimizedPhotoUrl } from "./photo-assets.js?v=__CACHE_VERSION__";
 import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=__CACHE_VERSION__";
 import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=__CACHE_VERSION__";
@@ -54,13 +56,19 @@ import {
   ui
 } from "./i18n.js?v=__CACHE_VERSION__";
 import {
-  DAY_FORECAST_LOCATIONS,
-  fetchTripForecast,
-  loadCachedTripForecast,
+  createWeatherForecastController,
   localizeForecastLocation,
   weatherCodeIcon,
   weatherCodeKey
 } from "./weather-forecast.js?v=__CACHE_VERSION__";
+import {
+  applyDayWeatherChangesLocally,
+  buildDayWeatherChanges,
+  isValidCoordinate as isValidWeatherCoordinate,
+  pointKey as weatherPointKey,
+  resolveDayWeather
+} from "./weather-association.js?v=__CACHE_VERSION__";
+import { createDayWeatherEditor, weatherEditorText } from "./weather-editor.js?v=__CACHE_VERSION__";
 import { getFlightBookings } from "./flight-bookings.js?v=__CACHE_VERSION__";
 import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=__CACHE_VERSION__";
 import {
@@ -197,13 +205,36 @@ let currentStatusKey = "connecting";
 let currentStatusVariables = {};
 let lastUpdatedDate = null;
 let activeDayId = initialDayId(currentTrip.days);
-const cachedWeatherForecast = loadCachedTripForecast();
-let weatherForecastState = {
-  status: "loading",
-  data: cachedWeatherForecast,
-  error: null
-};
-let weatherRefreshPromise = null;
+// Trip-scoped, in-memory forecast state; recomputed from the current trip on every render (see
+// weather-forecast.js). Never persisted in any mode.
+// Weather work stops for good once the hosted session is being left: sign-out initiation (before
+// the logout response arrives, while bootTrip still exists), a pending sign-out from another tab,
+// or a redirect to sign-in. Late forecast replies, new batches and editor saves are then ignored.
+let weatherSessionEnded = false;
+function weatherSessionActive() {
+  if (!HOSTED) return true;
+  return !weatherSessionEnded && !signoutPending() && Boolean(getBootTrip());
+}
+const weatherForecast = createWeatherForecastController({
+  isActive: weatherSessionActive,
+  onChange: () => renderWeatherAfterForecast()
+});
+function endWeatherSession() {
+  weatherSessionEnded = true;
+  const session = weatherEditorSession;
+  weatherEditorSession = null;
+  session?.editor.dispose();
+  weatherForecast.dispose();
+}
+// Sign-out button: stop weather first, then the existing hosted sign-out helper (unchanged).
+function signOutAndLeave() {
+  endWeatherSession();
+  return logoutAndLeave();
+}
+// One per-day weather editor at a time (owner/content managers only), kept across dialog re-renders.
+const WEATHER_EDITOR_ENABLED = !HOSTED_READ_ONLY;
+let weatherEditorSession = null;
+let weatherEditorNotice = "";
 let weatherDialogDayId = "";
 let weatherDialogLocationId = "";
 let weatherDialogReturnDayId = "";
@@ -249,7 +280,7 @@ const linkGuard = createLinkActivationGuard({ root: document });
 // A 401 is never deferred: redirectToLogin() clears the visible page at once, and any refresh
 // deferred during a held link press is dropped so it can never render or reload afterwards. No
 // Google reservation or permit can start anything after this.
-function leaveForSignIn() { googleAllowanceGate?.dispose(); googlePlaceDetails?.dispose(); linkGuard.dispose(); redirectToLogin(); }
+function leaveForSignIn() { endWeatherSession(); googleAllowanceGate?.dispose(); googlePlaceDetails?.dispose(); linkGuard.dispose(); redirectToLogin(); }
 const WEATHER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 const FLIGHT_BOOKING_REFS = Object.freeze({});
@@ -465,6 +496,8 @@ function bindReminderItems(container, computed, { editable = false } = {}) {
 }
 
 function renderEssentials() {
+  syncWeatherForecast();
+  const weatherForecastState = weatherForecast.snapshot();
   const previousScrollLeft = els.activeWeather.querySelector(".weather-date-strip")?.scrollLeft || 0;
   els.activeWeather.replaceChildren();
   if (!displayTrip.days.length) return;
@@ -475,9 +508,9 @@ function renderEssentials() {
   headingLabel.id = "weather-compact-title";
   headingCopy.append(headingLabel);
   const weatherStatus = element("div", "weather-compact__status");
-  const statusChip = weatherStatusChip();
+  const statusChip = weatherStatusChip(weatherForecastState);
   if (statusChip) weatherStatus.append(statusChip);
-  const fetchedAt = weatherForecastState.data?.fetchedAt;
+  const fetchedAt = weatherForecastState.fetchedAt;
   const fetchedDate = fetchedAt ? new Date(fetchedAt) : null;
   if (fetchedDate && !Number.isNaN(fetchedDate.getTime())) {
     const freshness = textElement(
@@ -492,10 +525,13 @@ function renderEssentials() {
   if (weatherStatus.childNodes.length) heading.append(weatherStatus);
   els.activeWeather.append(heading);
 
-  if (!weatherForecastState.data) {
+  // The date strip is shown whenever data exists, nothing needs fetching (every day is off, outside
+  // the forecast window or has no saved coordinates), or the editor needs the per-day controls.
+  const showStrip = weatherForecastState.hasData || !weatherForecastState.neededPoints || !HOSTED_READ_ONLY;
+  if (!showStrip) {
     els.activeWeather.append(textElement("p", "weather-compact__empty", ui(
       currentLanguage,
-      weatherForecastState.status === "loading" ? "loadingForecast" : "forecastUnavailable"
+      ["loading", "refreshing"].includes(weatherForecastState.status) ? "loadingForecast" : "forecastUnavailable"
     )));
   } else {
     const strip = element("div", "weather-date-strip");
@@ -520,9 +556,11 @@ function renderEssentials() {
       card.append(cardHeading);
 
       const peeks = element("div", "weather-peeks");
-      const locations = DAY_FORECAST_LOCATIONS[day.id] || [];
+      const association = weatherForecast.day(day.id);
+      const locations = association.entries.map((entry) => entry.id);
       if (locations.length) peeks.append(renderWeatherPeek(day, locations));
-      if (!locations.length) peeks.append(textElement("p", "weather-compact__empty", ui(currentLanguage, "forecastNotAvailable")));
+      else if (association.mode === "off") peeks.append(textElement("p", "weather-compact__empty", weatherEditorText(currentLanguage, "offShort")));
+      else peeks.append(textElement("p", "weather-compact__empty", ui(currentLanguage, "forecastNotAvailable")));
       card.append(peeks);
       strip.append(card);
     });
@@ -538,44 +576,33 @@ function renderEssentials() {
   if (els.weatherDialog.open) renderWeatherDialog({ preserveScroll: true });
 }
 
-async function refreshWeatherForecast({ force = true } = {}) {
-  if (weatherRefreshPromise) return weatherRefreshPromise;
-  const fetchedAt = Date.parse(weatherForecastState.data?.fetchedAt || "");
-  if (!force && Number.isFinite(fetchedAt) && Date.now() - fetchedAt < WEATHER_REFRESH_INTERVAL_MS) return null;
-
-  weatherRefreshPromise = (async () => {
-    weatherForecastState = { ...weatherForecastState, status: "loading", error: null };
-    renderEssentials();
-    try {
-      const data = await fetchTripForecast();
-      weatherForecastState = { status: "live", data, error: null };
-    } catch (error) {
-      console.warn("Live weather forecast unavailable", error);
-      weatherForecastState = {
-        status: weatherForecastState.data ? "saved" : "error",
-        data: weatherForecastState.data,
-        error
-      };
-    }
-    renderEssentials();
-  })();
-
-  try {
-    return await weatherRefreshPromise;
-  } finally {
-    weatherRefreshPromise = null;
-  }
+// Recompute the day associations from the current trip. Only a changed set of needed points or a
+// changed time zone starts a request; renders, polls, language changes and unrelated edits do not.
+function syncWeatherForecast() {
+  if (weatherForecast.update(currentTrip)) queueMicrotask(() => refreshWeatherForecast({ force: false }));
 }
 
-function weatherStatusChip() {
-  if (weatherForecastState.status === "live") return null;
+// The controller reports the start and end of a real request through onChange, which re-renders
+// the weather strip; a refresh with nothing due does nothing at all.
+function refreshWeatherForecast({ force = true } = {}) {
+  return weatherForecast.refresh({ force });
+}
+
+// Forecast arrivals re-render only the weather strip and an open weather dialog, never the cards.
+function renderWeatherAfterForecast() {
+  if (!weatherSessionActive()) return;
+  renderEssentials();
+}
+
+function weatherStatusChip(weatherForecastState) {
+  if (weatherForecastState.status === "live" || weatherForecastState.status === "idle") return null;
   const key = weatherForecastState.status === "live"
     ? "liveForecast"
     : weatherForecastState.status === "saved"
       ? "savedForecast"
       : weatherForecastState.status === "error"
         ? "forecastUnavailableShort"
-        : weatherForecastState.data
+        : weatherForecastState.hasData
           ? "refreshingForecast"
           : "loadingForecastShort";
   const className = weatherForecastState.status === "live"
@@ -586,9 +613,10 @@ function weatherStatusChip() {
   return textElement("span", className, ui(currentLanguage, key));
 }
 
+// locationIds are the day's association entry IDs (explicit locations or automatic areas).
 function renderWeatherPeek(day, locationIds) {
   const available = locationIds
-    .map((locationId) => ({ locationId, daily: dailyForecast(locationId, day.date) }))
+    .map((locationId) => ({ locationId, daily: dailyForecast(day.id, locationId, day.date) }))
     .filter((entry) => entry.daily);
   const representative = available.reduce((wettest, entry) => (
     !wettest || Number(entry.daily.precipitationProbability) > Number(wettest.daily.precipitationProbability)
@@ -605,11 +633,11 @@ function renderWeatherPeek(day, locationIds) {
     : null;
   const primaryLocationId = available[0]?.locationId || locationIds[0];
   const extraLocationCount = Math.max(0, locationIds.length - 1);
-  const primaryLocationLabel = localizeForecastLocation(primaryLocationId, currentLanguage);
+  const primaryLocationLabel = weatherEntryLabel(day.id, primaryLocationId);
   const peek = element("div", "weather-peek");
   const summary = element("div", "weather-peek__summary");
   const identity = element("span", "weather-peek__identity");
-  identity.title = locationIds.map((locationId) => localizeForecastLocation(locationId, currentLanguage)).join(" · ");
+  identity.title = locationIds.map((locationId) => weatherEntryLabel(day.id, locationId)).join(" · ");
   identity.append(
     textElement("span", "weather-peek__icon", daily ? weatherCodeIcon(daily.weatherCode) : "☁"),
     textElement("span", "weather-peek__place", extraLocationCount
@@ -661,7 +689,8 @@ function weatherDetailsButton(day) {
 function openWeatherDialog(dayId) {
   weatherDialogDayId = dayId;
   weatherDialogReturnDayId = dayId;
-  weatherDialogLocationId = (DAY_FORECAST_LOCATIONS[dayId] || [])[0] || "";
+  weatherDialogLocationId = weatherForecast.day(dayId).entries[0]?.id || "";
+  weatherEditorNotice = "";
   renderWeatherDialog();
   els.weatherDialogContent.scrollTop = 0;
   if (!els.weatherDialog.open) els.weatherDialog.showModal();
@@ -684,10 +713,19 @@ function renderWeatherDialog({ preserveScroll = false } = {}) {
     day: "numeric"
   });
   els.weatherDialogArea.textContent = getDayArea(day.id, currentLanguage);
+  // An open editor element is detached and re-attached as-is, so typed input survives refreshes.
+  const editorElement = weatherEditorSession?.dayId === day.id ? weatherEditorSession.editor.element : null;
+  const editorFocusKey = editorElement ? weatherEditorSession.editor.focusedKey() : "";
   els.weatherDialogContent.replaceChildren();
-  const locations = DAY_FORECAST_LOCATIONS[day.id] || [];
+  const association = weatherForecast.day(day.id);
+  const locations = association.entries.map((entry) => entry.id);
+  renderWeatherEditorControls(day, editorElement);
+  if (editorFocusKey) weatherEditorSession.editor.restoreFocus(editorFocusKey);
   if (!locations.length) {
-    els.weatherDialogContent.append(textElement("p", "weather-dialog__empty", ui(currentLanguage, "forecastNotAvailable")));
+    els.weatherDialogContent.append(textElement("p", "weather-dialog__empty", association.mode === "off"
+      ? weatherEditorText(currentLanguage, "offShort")
+      : ui(currentLanguage, "forecastNotAvailable")));
+    if (preserveScroll) els.weatherDialogContent.scrollTop = previousScrollTop;
     return;
   }
   if (!locations.includes(weatherDialogLocationId)) weatherDialogLocationId = locations[0];
@@ -696,7 +734,7 @@ function renderWeatherDialog({ preserveScroll = false } = {}) {
     locationTabs.setAttribute("role", "tablist");
     locationTabs.setAttribute("aria-label", ui(currentLanguage, "weatherLocations"));
     locations.forEach((locationId) => {
-      const tab = textElement("button", "weather-location-tab", localizeForecastLocation(locationId, currentLanguage));
+      const tab = textElement("button", "weather-location-tab", weatherEntryLabel(day.id, locationId));
       tab.type = "button";
       tab.setAttribute("role", "tab");
       tab.setAttribute("aria-selected", String(locationId === weatherDialogLocationId));
@@ -720,11 +758,11 @@ function renderWeatherDialog({ preserveScroll = false } = {}) {
 
 function renderWeatherLocationDetails(day, locationId) {
   const section = element("section", "weather-detail-location");
-  const daily = dailyForecast(locationId, day.date);
+  const daily = dailyForecast(day.id, locationId, day.date);
   const locationHeading = element("div", "weather-detail-location__heading");
   locationHeading.append(
     textElement("span", "weather-detail-location__icon", daily ? weatherCodeIcon(daily.weatherCode) : "☁"),
-    textElement("h3", "", localizeForecastLocation(locationId, currentLanguage))
+    textElement("h3", "", weatherEntryLabel(day.id, locationId))
   );
   section.append(locationHeading);
 
@@ -742,11 +780,11 @@ function renderWeatherLocationDetails(day, locationId) {
   );
   section.append(overview);
 
-  const samples = hourlyForecast(locationId, day.date).filter((point) => [6, 9, 12, 15, 18, 21].includes(Number(point.time.slice(0, 2))));
+  const samples = hourlyForecast(day.id, locationId, day.date).filter((point) => [6, 9, 12, 15, 18, 21].includes(Number(point.time.slice(0, 2))));
   if (samples.length) {
     const table = element("table", "weather-hours");
     const caption = textElement("caption", "sr-only", ui(currentLanguage, "hourlyWeatherFor", {
-      location: localizeForecastLocation(locationId, currentLanguage),
+      location: weatherEntryLabel(day.id, locationId),
       date: formatDate(day.date, { weekday: "long", month: "long", day: "numeric" })
     }));
     const head = element("thead");
@@ -775,13 +813,207 @@ function renderWeatherLocationDetails(day, locationId) {
   return section;
 }
 
-function dailyForecast(locationId, date) {
-  const location = weatherForecastState.data?.locations?.[locationId];
-  return location?.daily?.[date] || location?.[date] || null;
+function weatherEntry(dayId, entryId) {
+  return weatherForecast.day(dayId).entries.find((entry) => entry.id === entryId) || null;
 }
 
-function hourlyForecast(locationId, date) {
-  return weatherForecastState.data?.locations?.[locationId]?.hourly?.[date] || [];
+function dailyForecast(dayId, entryId, date) {
+  const entry = weatherEntry(dayId, entryId);
+  return entry ? weatherForecast.daily(entry.key, date) : null;
+}
+
+function hourlyForecast(dayId, entryId, date) {
+  const entry = weatherEntry(dayId, entryId);
+  return entry ? weatherForecast.hourly(entry.key, date) : [];
+}
+
+// Explicit locations keep their stored (localized) names. Automatic areas are named after the
+// day's own representative plan, as an area, never as a verified city.
+function weatherEntryLabel(dayId, entryId) {
+  const entry = weatherEntry(dayId, entryId);
+  if (!entry) return "";
+  if (entry.kind === "location") return localizeForecastLocation(entry.locationId, currentLanguage, weatherForecast.resolved.locations);
+  return weatherAreaLabel(dayId, entry);
+}
+
+function weatherAreaLabel(dayId, entry) {
+  const slot = displayTrip.days.find((day) => day.id === dayId)?.slots?.find((candidate) => candidate.id === entry.representativeSlotId);
+  const place = typeof slot?.name === "string" ? slot.name.trim() : "";
+  return place
+    ? weatherEditorText(currentLanguage, "areaNear", { place })
+    : weatherEditorText(currentLanguage, "area", { number: entry.index || 1 });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Per-day forecast place editor (owner and content managers; never rendered for viewers).
+
+function renderWeatherEditorControls(day, editorElement) {
+  if (!WEATHER_EDITOR_ENABLED) return;
+  const wrapper = element("div", "weather-editor-panel");
+  if (weatherEditorNotice) {
+    const notice = textElement("p", "weather-editor__status weather-editor__status--ok", weatherEditorText(currentLanguage, weatherEditorNotice));
+    notice.setAttribute("role", "status");
+    wrapper.append(notice);
+  }
+  if (editorElement) {
+    weatherEditorSession.editor.setLanguage(currentLanguage);
+    if (HOSTED && hostedServerTrip && weatherEditorSession.openedVersion !== hostedServerTrip.version) weatherEditorSession.editor.markStale(true);
+    wrapper.append(editorElement);
+  } else {
+    const toggle = textElement("button", "button button--quiet weather-editor-toggle", weatherEditorText(currentLanguage, "change"));
+    toggle.type = "button";
+    toggle.dataset.weatherEditorToggle = day.id;
+    toggle.disabled = Boolean(HOSTED && hostedServerTrip?.archived);
+    toggle.addEventListener("click", () => openWeatherEditor(day.id));
+    wrapper.append(toggle);
+  }
+  els.weatherDialogContent.append(wrapper);
+}
+
+// Choosable points: coordinates already saved on this trip's plans (this day first) or stored as
+// weather locations. Nothing is looked up.
+function weatherEditorData(dayId) {
+  const association = weatherForecast.day(dayId);
+  const sourceTrip = HOSTED ? hostedServerTrip : currentTrip;
+  const localized = displayTrip;
+  const points = new Map();
+  for (const location of weatherForecast.resolved.locations.values()) {
+    const key = weatherPointKey(location.lat, location.lng);
+    if (!points.has(key)) points.set(key, { key, lat: location.lat, lng: location.lng, locationId: location.id,
+      label: localizeForecastLocation(location.id, currentLanguage, weatherForecast.resolved.locations) });
+  }
+  const sourceDays = Array.isArray(sourceTrip?.days) ? sourceTrip.days : [];
+  const ordered = [...sourceDays.filter((day) => day?.id === dayId), ...sourceDays.filter((day) => day?.id !== dayId)];
+  for (const day of ordered) {
+    for (const slot of Array.isArray(day?.slots) ? day.slots : []) {
+      if (!isValidWeatherCoordinate(slot?.lat, slot?.lng)) continue;
+      const key = weatherPointKey(slot.lat, slot.lng);
+      if (points.has(key)) continue;
+      const shown = localized.days.find((candidate) => candidate.id === day.id)?.slots?.find((candidate) => candidate.id === slot.id);
+      const label = String(shown?.name || slot.name || "").trim() || `${slot.lat.toFixed(4)}, ${slot.lng.toFixed(4)}`;
+      const i18n = {};
+      for (const [locale, patch] of Object.entries(slot.i18n || {})) if (typeof patch?.name === "string" && patch.name.trim()) i18n[locale] = { name: patch.name };
+      points.set(key, { key, lat: slot.lat, lng: slot.lng, label, name: String(slot.name || label).trim(), ...(Object.keys(i18n).length ? { i18n } : {}) });
+    }
+  }
+  // Preview automatic mode independently of the stored choice. This pure resolution never
+  // changes an off/manual mapping or starts a request while the editor is open.
+  const sourceDay = sourceDays.find((day) => day.id === dayId);
+  const automatic = resolveDayWeather({}, { ...sourceDay, weatherLocationIds: undefined });
+  const autoAreas = automatic.entries.map((entry) => ({
+    key: entry.key, label: weatherAreaLabel(dayId, entry), memberCount: entry.memberCount
+  }));
+  const chosen = association.mode === "manual"
+    ? association.entries.map((entry) => ({ key: entry.key, label: weatherEntryLabel(dayId, entry.id), locationId: entry.locationId }))
+    : [];
+  return { current: { mode: association.mode, entries: association.entries }, autoAreas, savedPoints: [...points.values()], chosen };
+}
+
+function openWeatherEditor(dayId) {
+  if (!WEATHER_EDITOR_ENABLED || !weatherSessionActive()) return;
+  closeWeatherEditor({ restoreFocus: false });
+  weatherEditorNotice = "";
+  const session = { dayId, openedVersion: HOSTED ? hostedServerTrip.version : 0, attempt: null, editor: null };
+  session.editor = createDayWeatherEditor(document, {
+    language: currentLanguage,
+    ...weatherEditorData(dayId),
+    newLocationId: () => uid("weather"),
+    onCancel: () => closeWeatherEditor({ restoreFocus: true }),
+    onSave: (choice) => saveDayWeatherChoice(session, choice)
+  });
+  weatherEditorSession = session;
+  renderWeatherDialog({ preserveScroll: true });
+  session.editor.focus();
+}
+
+function closeWeatherEditor({ restoreFocus = false } = {}) {
+  const session = weatherEditorSession;
+  if (!session) return;
+  weatherEditorSession = null;
+  session.editor.dispose();
+  if (els.weatherDialog.open) {
+    renderWeatherDialog({ preserveScroll: true });
+    if (restoreFocus) els.weatherDialogContent.querySelector(".weather-editor-toggle")?.focus();
+  }
+}
+
+// One validated, version-checked write per save: [update_trip weather (only when a new location is
+// added), upsert_day weatherLocationIds]. An identical retry after an uncertain failure reuses the
+// same requestId; a stale form is refused (and the latest version shown) instead of overwriting.
+async function saveDayWeatherChoice(session, choice) {
+  if (weatherEditorSession !== session || !weatherSessionActive()) return "error";
+  if (!HOSTED) {
+    const built = buildDayWeatherChanges(currentTrip, session.dayId, choice);
+    if (!built.ok) return built.reason === "limit" ? "limit" : "invalid";
+    const saved = await mutateTrip((trip) => applyDayWeatherChangesLocally(trip, session.dayId, built.changes),
+      isFirebaseConfigured() ? "synced" : "savedOnDevice");
+    if (!saved) return "error";
+    finishWeatherEditorSave(session);
+    return "saved";
+  }
+  if (HOSTED_READ_ONLY) return "forbidden";
+  if (!hostedServerTrip.days.some((day) => day.id === session.dayId)) return "conflict";
+  if (session.openedVersion !== hostedServerTrip.version) {
+    resetWeatherEditorToLatest(session);
+    return "conflict";
+  }
+  if (hostedWriteInFlight || !hostedReady || !navigator.onLine) return "offline";
+  const built = buildDayWeatherChanges(hostedServerTrip, session.dayId, choice);
+  if (!built.ok) return built.reason === "limit" ? "limit" : "invalid";
+  const fingerprint = JSON.stringify([session.openedVersion, built.changes]);
+  if (session.attempt?.fingerprint !== fingerprint) session.attempt = { fingerprint, requestId: newRequestId("weather") };
+  hostedWriteInFlight = true;
+  setSyncStatus("saving", "working");
+  try {
+    const result = await hostedApi.applyChanges(HOSTED_TRIP_ID, session.openedVersion, built.changes, session.attempt.requestId);
+    hostedWriteInFlight = false;
+    // A reply arriving after sign-out started (or a redirect to sign-in) is never rendered.
+    if (!weatherSessionActive()) return "forbidden";
+    acceptHostedTrip(expectTrip(result, HOSTED_TRIP_ID));
+    setSyncStatus("synced", "synced");
+    finishWeatherEditorSave(session);
+    return "saved";
+  } catch (error) {
+    hostedWriteInFlight = false;
+    if (!weatherSessionActive()) return "forbidden";
+    setSyncStatus("saveFailed", "error");
+    if (error.status === 401) { leaveForSignIn(); return "forbidden"; }
+    if (error.status === 403) return "forbidden";
+    if (error.status === 409) {
+      try {
+        const latest = await hostedApi.getTrip(HOSTED_TRIP_ID);
+        if (weatherSessionActive()) acceptHostedTrip(expectTrip(latest, HOSTED_TRIP_ID));
+      } catch { /* the poll catches up */ }
+      if (!weatherSessionActive()) return "forbidden";
+      if (weatherEditorSession === session) resetWeatherEditorToLatest(session);
+      return "conflict";
+    }
+    if (error.status === 404) return "conflict";
+    if (error.status === 422 || error.status === 400) return "invalid";
+    // Uncertain outcome: keep the attempt so pressing Save again replays the same requestId.
+    return "offline";
+  } finally {
+    hostedWriteInFlight = false;
+  }
+}
+
+function resetWeatherEditorToLatest(session) {
+  session.openedVersion = hostedServerTrip.version;
+  session.attempt = null;
+  syncWeatherForecast();
+  session.editor.reset(weatherEditorData(session.dayId));
+}
+
+function finishWeatherEditorSave(session) {
+  if (weatherEditorSession !== session) return;
+  weatherEditorSession = null;
+  session.editor.dispose();
+  weatherEditorNotice = "saved";
+  syncWeatherForecast();
+  if (els.weatherDialog.open) {
+    renderWeatherDialog({ preserveScroll: true });
+    els.weatherDialogContent.querySelector(".weather-editor-toggle")?.focus();
+  }
 }
 
 function renderTravelLogistics() {
@@ -824,7 +1056,7 @@ function renderTravelLogistics() {
         route,
         textElement("p", "flight-segment__service", segment.service),
         textElement("p", "flight-segment__schedule", segment.schedule),
-        textElement("p", "muted", segment.detail)
+        linkedTextElement(document, "p", "muted", segment.detail)
       );
       if (segment.baggage) {
         const baggage = element("p", "flight-segment__baggage");
@@ -868,7 +1100,7 @@ function renderTravelLogistics() {
         textElement("span", "status-chip", translateTier(hotel.tier)),
         textElement("h3", "compact-card__title", hotel.name),
         textElement("p", "compact-card__meta", hotel.priceRange || ""),
-        textElement("p", "muted", hotel.note || "")
+        linkedTextElement(document, "p", "muted", hotel.note || "")
       );
       const hotelMapLink = googleMapsAnchor({
         googleMapsKey: `hotel:${canonicalHotel.name}`,
@@ -1316,10 +1548,14 @@ function renderSlot(day, slot, slotIndex) {
   summary.append(photo, summaryCopy, textElement("span", "timeline-card__chevron", "⌄"));
 
   const body = element("div", "timeline-card__body");
-  if (slot.review) body.append(textElement("p", "timeline-card__review", slot.review));
+  if (slot.review) body.append(linkedTextElement(document, "p", "timeline-card__review", slot.review));
+  // The plan's (localized) description, with safe links like the review. Skipped when it repeats
+  // the review so the same paragraph is never shown twice.
+  if (typeof slot.description === "string" && slot.description.trim() && !sameCardText(slot.description, slot.review)) {
+    body.append(linkedTextElement(document, "p", "timeline-card__description", slot.description));
+  }
 
   const meta = [
-    slot.address,
     slot.openingHours && !slot.hideOpeningHours
       ? ui(currentLanguage, "hoursLabel", { value: slot.openingHours })
       : "",
@@ -1327,12 +1563,13 @@ function renderSlot(day, slot, slotIndex) {
     slot.ticketPrice ? ui(currentLanguage, "referenceLabel", { value: slot.ticketPrice }) : "",
     slot.transport?.mode ? ui(currentLanguage, "nextLabel", { value: `${slot.transport.mode}${slot.transport.duration ? ` · ${slot.transport.duration}` : ""}` }) : ""
   ].filter(Boolean);
-  if (meta.length) {
+  if (slot.address || meta.length) {
     const list = element("ul", "meta-list");
+    if (slot.address) list.append(planLocationItem(slot));
     meta.forEach((item) => list.append(textElement("li", "", item)));
     body.append(list);
   }
-  if (slot.notes) body.append(textElement("p", "note-line", slot.notes));
+  if (slot.notes) body.append(linkedTextElement(document, "p", "note-line", slot.notes));
   const bookingDetails = renderTimelineBookingDetails(flightBooking, hotelBooking);
   if (bookingDetails) body.append(bookingDetails);
   const placeSource = renderPlaceSource(slot);
@@ -1391,6 +1628,25 @@ function renderSlot(day, slot, slotIndex) {
   });
   article.append(marker, card);
   return article;
+}
+
+// Two card texts that differ only in surrounding or repeated whitespace count as the same text.
+function sameCardText(first, second) {
+  const normalize = (value) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "");
+  return normalize(first) === normalize(second);
+}
+
+// The plan's location line. It links to the SAME validated destination as the card's own map action
+// (googleMapsAnchor with allowSearchFallback: false), and only when that action has exactly one
+// destination; otherwise, or without a valid target, it stays plain text. No URL is built here.
+function planLocationItem(slot) {
+  const item = element("li", "");
+  const destinations = googleMapsDestinations(slot, { allowSearchFallback: false });
+  const url = destinations.length === 1 ? destinations[0].url : "";
+  item.append(locationTextNode(document, slot.address, url, {
+    ariaLabel: url ? `${ui(currentLanguage, "openGoogleMaps")}: ${slot.address}` : ""
+  }));
+  return item;
 }
 
 // ---------------------------------------------------------------------------
@@ -1958,7 +2214,7 @@ function renderRecommendationCard(item, isRestaurant) {
   card.append(
     textElement("p", "recommendation-card__category", categoryLabel),
     textElement("h4", "recommendation-card__title", item.name),
-    textElement("p", "recommendation-card__description", item.description || "")
+    linkedTextElement(document, "p", "recommendation-card__description", item.description || "")
   );
 
   const ratings = element("div", "recommendation-ratings");
@@ -2340,6 +2596,9 @@ function setupInteractionHandlers() {
   });
   els.weatherDialog.addEventListener("close", () => {
     const returnDayId = weatherDialogReturnDayId;
+    // Closing the dialog (or the day disappearing) discards an unsaved forecast-place edit.
+    closeWeatherEditor();
+    weatherEditorNotice = "";
     weatherDialogDayId = "";
     weatherDialogLocationId = "";
     weatherDialogReturnDayId = "";
@@ -3856,7 +4115,8 @@ function connectHostedSync() {
 function acceptHostedTrip(trip) {
   // Delayed polls must not revive an older trip or reverse a newer Google opt-out.
   if (hostedServerTrip && trip.version <= hostedServerTrip.version) return;
-  const metadataChanged = ["title","timezone","weather","resources"].some((key) =>
+  // Weather choices are recomputed in place (weather-forecast.js), so they no longer need a reload.
+  const metadataChanged = ["title","timezone","resources"].some((key) =>
     JSON.stringify(trip[key]) !== JSON.stringify(hostedServerTrip?.[key]));
   const googleWasEnabled = tripGooglePlacesEnabled();
   hostedServerTrip = trip;
@@ -3914,7 +4174,7 @@ function renderHostedControls() {
   });
   if (HOSTED_READ_ONLY) {
     const badge=textElement("span","hosted-read-only-badge",READ_ONLY_LABELS[currentLanguage]||READ_ONLY_LABELS.en);
-    controls.replaceChildren(home,badge,exportButton,button("retrySync",()=>hostedPoller?.retryNow()),button("signOut",logoutAndLeave));
+    controls.replaceChildren(home,badge,exportButton,button("retrySync",()=>hostedPoller?.retryNow()),button("signOut",signOutAndLeave));
     els.addReminder.hidden=true;els.addReminder.disabled=true;
     return;
   }
@@ -3922,7 +4182,7 @@ function renderHostedControls() {
     button("editTrip",()=>openMetadataDialog()),
     exportButton,
     button("retrySync",()=>hostedPoller?.retryNow()),
-    button("signOut",logoutAndLeave));
+    button("signOut",signOutAndLeave));
   els.addReminder.disabled=Boolean(hostedServerTrip.archived);
 }
 
@@ -4108,9 +4368,17 @@ function selectActiveDay(dayId) {
   if (document.documentElement.classList.contains("is-itinerary-view")) els.itineraryPanel.scrollTop = 0;
 }
 
+// "Today" follows the CURRENT trip's validated time zone (the same zone the weather controller
+// uses), so a remote time-zone edit received while a dialog is open updates the weather/date labels
+// in place. The embedded seed zone is only a fallback; page reloads behave as before.
+function currentTripTimeZone() {
+  const zone = currentTrip?.timezone;
+  return typeof zone === "string" && isValidTimeZone(zone) ? zone : TRIP_TIMEZONE;
+}
+
 function todayInTripISO() {
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TRIP_TIMEZONE,
+    timeZone: currentTripTimeZone(),
     year: "numeric",
     month: "2-digit",
     day: "2-digit"

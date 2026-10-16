@@ -462,6 +462,16 @@ Define each forecast point once:
 
 Reference IDs from each day. The UI shows all itinerary dates together in a horizontal forecast slider and keeps hourly/UV/wind/sunrise/sunset details expandable for each date/stop. Open-Meteo supplies up to 16 forecast days, so distant dates remain visible with unavailable states until they enter the forecast window.
 
+Each day's `weatherLocationIds` distinguishes absence from an empty list ([weather-association.md](weather-association.md)):
+
+| Stored value | Meaning |
+| --- | --- |
+| property absent (or `null` in an `upsert_day` patch, which removes it) | Automatic: areas are inferred in the browser, in memory only, from valid numeric `lat`/`lng` already saved on that day's plans. Nothing is stored. |
+| `[]` | Explicit "no forecast" for that day. |
+| `["id", ...]` | Manual choice of `weather.locations` entries. |
+
+A manually chosen place in the web editor is an ordinary `weather.locations` entry with a stable ID, a name and complete coordinates, copied from a saved plan point or typed by an editor. The shared optional-coordinate schema remains compatible with older partial explicit entries; these remain stored and mapped but unavailable for fetching, without automatic replacement. `(0, 0)` is valid. The server never geocodes. Legacy generator input may keep `weather.dayLocations`; on import, an entry it has for a day (including `[]`) becomes that day's `weatherLocationIds`, matching the earlier runtime precedence. Absent/null mappings select automatic mode and `[]` selects off, also in generator validation.
+
 ## Resources
 
 `resources` contains complete `en`, `zh-Hans`, `zh-Hant`, and `ja` objects. Each has:

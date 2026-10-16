@@ -1541,6 +1541,11 @@ html.is-itinerary-view .page-shell::before {
   color: var(--muted);
 }
 
+.timeline-card__description {
+  margin: 0.42rem 0 0;
+  color: var(--ink-2);
+}
+
 .meta-list {
   display: grid;
   gap: 0.25rem;
@@ -2920,6 +2925,206 @@ details[open] > summary .summary-chevron,
 
 .weather-detail__meta {
   min-height: 1.4em;
+}
+
+/* Per-day forecast place editor (owner/content managers). Wraps at phone width; no fixed widths. */
+.weather-editor-panel {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0 0 0.8rem;
+  min-width: 0;
+}
+
+.weather-editor-toggle {
+  justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+
+.weather-editor {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.8rem;
+  background: var(--card, #fff);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+}
+
+.weather-editor h3,
+.weather-editor h4,
+.weather-editor p {
+  margin: 0;
+}
+
+.weather-editor__title {
+  font-size: 0.95rem;
+}
+
+.weather-editor h4 {
+  font-size: 0.78rem;
+}
+
+.weather-editor__current,
+.weather-editor__notice,
+.weather-editor__empty,
+.weather-editor__meta {
+  color: var(--muted);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.weather-editor__notice {
+  color: var(--accent-text);
+}
+
+.weather-editor fieldset {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+}
+
+.weather-editor legend {
+  padding: 0 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.weather-editor__mode {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.weather-editor__mode input {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0.05rem 0 0;
+}
+
+.weather-editor__auto,
+.weather-editor__manual {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.weather-editor__list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.weather-editor__item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 0.8rem;
+}
+
+.weather-editor__label {
+  flex: 1 1 10rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.weather-editor__badge {
+  padding: 0.1rem 0.45rem;
+  color: var(--ink);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.weather-editor__add,
+.weather-editor__coordinate-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: end;
+  min-width: 0;
+}
+
+.weather-editor__field {
+  display: grid;
+  flex: 1 1 9rem;
+  gap: 0.25rem;
+  min-width: 0;
+  font-size: 0.75rem;
+}
+
+.weather-editor__field select,
+.weather-editor__field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.5rem;
+  box-sizing: border-box;
+}
+
+.weather-editor__error,
+.weather-editor__status--error {
+  color: var(--danger, #9b2c2c);
+  font-size: 0.75rem;
+}
+
+.weather-editor__error[hidden] {
+  display: none;
+}
+
+.weather-editor__status {
+  font-size: 0.75rem;
+}
+
+.weather-editor__status:empty {
+  display: none;
+}
+
+.weather-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.weather-editor button {
+  min-height: 2.5rem;
+}
+
+.weather-editor :focus-visible,
+.weather-editor-toggle:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
+@media (max-width: 679px) {
+  .weather-editor {
+    padding: 0.65rem;
+  }
+
+  .weather-editor__actions {
+    justify-content: stretch;
+  }
+
+  .weather-editor__actions .button {
+    flex: 1 1 8rem;
+  }
 }
 
 .itinerary {
@@ -4823,3 +5028,15 @@ details[open] > summary .summary-chevron,
 .google-match__preview .google-place__details { max-width: 300px; }
 .google-match__use,
 .google-match__cancel { justify-self: start; }
+
+/* Card text links (text-links.js): long URLs wrap instead of widening cards on phones. */
+.text-link,
+.location-link {
+  color: var(--accent-text);
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+  overflow-wrap: anywhere;
+}
+.has-text-links { overflow-wrap: anywhere; }
+.meta-list li { min-width: 0; }

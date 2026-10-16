@@ -13,6 +13,18 @@ const example = JSON.parse(fs.readFileSync(path.join(scriptDirectory, "..", "ass
 const baseline = validateTrip(example, { allowExample: true });
 assert.deepEqual(baseline.errors, [], baseline.errors.join("\n"));
 
+for (const mode of ["auto", "off", "null-auto"]) {
+  const input = structuredClone(example);
+  if (mode === "auto") delete input.trip.days[0].weatherLocationIds;
+  else input.trip.days[0].weatherLocationIds = mode === "off" ? [] : null;
+  assert.deepEqual(validateTrip(input, { allowExample: true }).errors, [], `${mode} is valid alongside other explicit weather locations`);
+}
+for (const invalid of ["off", 3, {}, ["unknown-fictional-location"]]) {
+  const input = structuredClone(example);
+  input.trip.days[0].weatherLocationIds = invalid;
+  assert.ok(validateTrip(input, { allowExample: true }).errors.some((error) => error.includes("weatherLocationIds")), "malformed/manual unknown mapping still refused");
+}
+
 const unrestrictedReminder = structuredClone(example);
 unrestrictedReminder.trip.reminders[0].dueDate = "2031-01-15";
 const reminderResult = validateTrip(unrestrictedReminder, { allowExample: true });

@@ -935,6 +935,12 @@ export function applySelectedPlaces(content, previous) {
   issues.throwIfAny("A plan's coordinates or address conflict with its selected place.");
 }
 
+// Daily weather associations (see references/weather-association.md) use only the shared schema in
+// normalizeContent: optional lat/lng (finite numbers in range when present, including 0), valid
+// unique IDs and known references. There is no extra completeness or (0, 0) rule, so every location
+// accepted by earlier versions stays importable and editable; a location without a complete pair is
+// kept as saved and the browser simply never fetches it.
+
 const sameAssociation = (a, b) => isPlainObject(a) && isPlainObject(b)
   && a.placeId === b.placeId && a.locationBinding === b.locationBinding && a.publicVenueConfirmed === b.publicVenueConfirmed;
 

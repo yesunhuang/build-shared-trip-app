@@ -59,7 +59,14 @@ export function importContent(data) {
     preserveExtra(location,LOCATION_KEYS,"weather location");
   }
   if (raw.weather?.dayLocations) {
-    for (const day of raw.days) day.weatherLocationIds ||= raw.weather.dayLocations[day.id];
+    // Same precedence as the generated runtime: an own, non-null dayLocations entry (including an
+    // explicit [] "off") is that day's explicit choice; a day without one keeps its own field, and
+    // a day with neither stays automatic (property absent).
+    const dayLocations = isPlainObject(raw.weather.dayLocations) ? raw.weather.dayLocations : {};
+    for (const day of raw.days) {
+      const mapped = Object.hasOwn(dayLocations, day.id) ? dayLocations[day.id] : undefined;
+      if (mapped !== undefined && mapped !== null) day.weatherLocationIds = [].concat(mapped);
+    }
     raw.content = { ...(raw.content || {}), legacyWeatherDayLocations: raw.weather.dayLocations };
     delete raw.weather.dayLocations;
     warnings.push("Mapped weather.dayLocations to per-day weatherLocationIds; original retained in content.");

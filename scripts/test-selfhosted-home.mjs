@@ -22,6 +22,8 @@ globalThis.setTimeout=(fn,delay,...args)=>{const timer=nativeTimeout(()=>{timers
 globalThis.fetch=(input,options={})=>nativeFetch(new URL(input,runtime.url),{...options,headers:{...options.headers,Authorization:"Bearer "+token,Origin:runtime.url}});
 const until=async(predicate,label)=>{const end=Date.now()+4000;while(!predicate()){if(Date.now()>end)throw new Error("Timed out: "+label+" "+window.document.getElementById("status").textContent);await new Promise((r)=>nativeTimeout(r,10));}};
 const submit=(form)=>form.dispatchEvent(new window.Event("submit",{cancelable:true,bubbles:true}));
+// run() disables buttons until its final refresh settles; the file input is not a busy indicator.
+const controlsReady=()=>!window.document.getElementById("create").disabled;
 try{
   const client=new URL("../assets/app-template/public/hosted-client.js?v=__CACHE_VERSION__",import.meta.url).href;
   const source=fs.readFileSync(new URL("../assets/selfhosted/home.js",import.meta.url),"utf8").replace('"/hosted-client.js?v=__CACHE_VERSION__"',JSON.stringify(client));
@@ -30,19 +32,19 @@ try{
   window.document.getElementById("create").click();
   const create=window.document.querySelector("dialog form");create.elements.title.value="Fictional UI-created trip";submit(create);
   const card=()=>[...window.document.querySelectorAll(".trip-card")].find((c)=>c.querySelector("h2").textContent==="Fictional UI-created trip");
-  await until(()=>runtime.service.listTrips().trips.length===3&&!window.document.querySelector("dialog")&&card(),"create and render draft");
+  await until(()=>runtime.service.listTrips().trips.length===3&&!window.document.querySelector("dialog")&&card()&&controlsReady(),"create and render draft");
   const created=runtime.service.listTrips().trips.find((t)=>t.title==="Fictional UI-created trip");
   assert.equal(card().querySelector("a").getAttribute("href"),"/trips/"+created.id);
   card().querySelector("button").click();
   await until(()=>window.document.querySelector("dialog form"),"open metadata editor");
   const metadata=window.document.querySelector("dialog form");metadata.elements.title.value="Fictional renamed trip";submit(metadata);
   const renamed=()=>[...window.document.querySelectorAll(".trip-card")].find((c)=>c.querySelector("h2").textContent==="Fictional renamed trip");
-  await until(()=>runtime.service.getTrip(created.id).trip.title==="Fictional renamed trip"&&!window.document.querySelector("dialog")&&renamed(),"metadata edit rendered");
+  await until(()=>runtime.service.getTrip(created.id).trip.title==="Fictional renamed trip"&&!window.document.querySelector("dialog")&&renamed()&&controlsReady(),"metadata edit rendered");
   renamed().querySelectorAll("button")[1].click();
-  await until(()=>runtime.service.getTrip(created.id).trip.archived&&!renamed(),"archive trip");
+  await until(()=>runtime.service.getTrip(created.id).trip.archived&&!renamed()&&controlsReady(),"archive trip");
   const archived=window.document.getElementById("archived");archived.checked=true;archived.dispatchEvent(new window.Event("change"));
   assert.ok(renamed());renamed().querySelectorAll("button")[1].click();
-  await until(()=>!runtime.service.getTrip(created.id).trip.archived,"restore trip");
+  await until(()=>!runtime.service.getTrip(created.id).trip.archived&&controlsReady(),"restore trip and controls ready");
   const picker=window.document.getElementById("import");
   const data=JSON.parse(fs.readFileSync(new URL("../assets/trip.example.json",import.meta.url),"utf8"));
   data.trip.fictionalExtension="Preserved by importer";

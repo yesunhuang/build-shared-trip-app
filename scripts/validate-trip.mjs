@@ -157,7 +157,11 @@ export function validateTrip(input, options = {}) {
     validateTranslations(day, ["area", "theme", "summary"], location, error);
 
     const dayWeatherIds = Array.isArray(day.weatherLocationIds) ? day.weatherLocationIds : [];
-    if (weatherLocations.size && !dayWeatherIds.length) error(`${location}.weatherLocationIds`, "must include at least one weather location ID");
+    // Absence/null means automatic; [] explicitly switches this day off. A supplied manual list
+    // still uses the same known-location reference checks below.
+    if (day.weatherLocationIds !== undefined && day.weatherLocationIds !== null && !Array.isArray(day.weatherLocationIds)) {
+      error(`${location}.weatherLocationIds`, "must be an array of location IDs, or absent for automatic weather");
+    }
     dayWeatherIds.forEach((id, idIndex) => {
       if (!weatherLocations.has(id)) error(`${location}.weatherLocationIds[${idIndex}]`, `unknown location ID ${JSON.stringify(id)}`);
     });
