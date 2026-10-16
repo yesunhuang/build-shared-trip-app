@@ -1,4 +1,8 @@
-import { hostedApi, requestJSON, WRITE_TIMEOUT_MS, newRequestId, downloadJSON, exportFilename, safeNextPath, LANGUAGE_STORAGE_KEY, logoutAndLeave, finishPendingLogout, signoutPending, sessionCanEdit, sessionCanImport, sessionCanManageAccounts, ACCOUNT_ROLES } from "/hosted-client.js?v=__CACHE_VERSION__";
+import { hostedApi, requestJSON, WRITE_TIMEOUT_MS, newRequestId, downloadJSON, exportFilename, safeNextPath, LANGUAGE_STORAGE_KEY, logoutAndLeave, finishPendingLogout, signoutPending, sessionCanEdit, sessionCanImport, sessionCanManageAccounts, ACCOUNT_ROLES, GOOGLE_PLACE_PHOTOS_FIELD, buildGooglePlacePhotosField, tripHasGooglePlacePhotos, createLinkActivationGuard } from "/hosted-client.js?v=__CACHE_VERSION__";
+// The trip list is rebuilt on every poll, on window focus and after actions. A rebuild while a
+// press on a trip link is in progress would detach the link before the browser opens it (window
+// focus fires on the very press that focuses an unfocused window), so it waits for that press.
+const linkGuard = createLinkActivationGuard({ root: document });
 // Sign-in values, passwords and invitation codes stay in form fields only: they are cleared after
 // each submission and never written to browser storage. Role-based controls follow /api/session;
 // the server enforces the same permissions independently.
@@ -217,6 +221,9 @@ let language = "en";
 try { language = localStorage.getItem(LANGUAGE_STORAGE_KEY) || "en"; } catch {}
 let summaries = []; let loggedIn = false; let busy = false; let pollTimer; let failures = 0;
 let session = null; let directory = { accounts: [], invitations: [] }; let inviteNotice = null;
+// authEpoch changes on every sign-out, so trip/session/account answers to loads started before it
+// are discarded. leaving is set once an explicit sign-out has started: nothing loads or renders after.
+let authEpoch = 0; let leaving = false;
 // Owner-only, page-memory state. tokenNotice is the only place a token secret ever exists.
 let tokenNotice = null; const roleDrafts = new Map(); const tokenPanels = new Map(); const labelDrafts = new Map(); let accountsKey = "";
 const byId = (id) => document.getElementById(id);
@@ -385,7 +392,26 @@ async function checkDelete() {
   if (current.version !== flow.version) { await applyDeleteOutcome(flow, { kind: "conflict" }); return; }
   flow.phase = "uncertain"; flow.messageKey = "deleteStillThere"; render(); flow.nodes.confirm.focus();
 }
+// Every caller goes through the link guard: immediate unless a press on a link is in progress.
+// Exception: when the authority the page was last rendered with no longer matches the current
+// session (sign-out, 401/session invalidation, owner demoted to content manager or viewer, any
+// other role/capability/account change), protected DOM and owner controls must update at once, so
+// the render bypasses the guard and drops any deferred render instead of waiting for the press to
+// end. Same-authority content refreshes are still deferred. Deferred work always renders from the
+// state current when it runs, never from a snapshot, so it cannot bring cleared content back.
+let renderedAuthority = null;
+// /api/session reports role, capabilities and (for account sessions) username.
+function authorityKey() {
+  return JSON.stringify([loggedIn, loggedIn ? session?.role ?? null : null, loggedIn ? session?.username ?? null : null,
+    loggedIn && sessionCanEdit(session), loggedIn && sessionCanImport(session), loggedIn && sessionCanManageAccounts(session), isOwnerSession()]);
+}
 function render() {
+  if (leaving) { linkGuard.cancel("render"); return; }
+  if (authorityKey() !== renderedAuthority) { linkGuard.cancel("render"); renderNow(); return; }
+  linkGuard.whenIdle("render", renderNow);
+}
+function renderNow() {
+  renderedAuthority = authorityKey();
   document.documentElement.lang = language; byId("language").value = language;
   document.querySelectorAll("[data-text]").forEach((node) => {node.textContent=text(node.dataset.text);});
   const canEdit = loggedIn && sessionCanEdit(session); const canImport = loggedIn && sessionCanImport(session); const canManage = loggedIn && sessionCanManageAccounts(session);
@@ -706,7 +732,8 @@ function button(label,action) {
 // Clears everything protected that is visible or held in page memory (trips, accounts,
 // invitation code, token secret, unsaved owner choices, an open or unresolved trip deletion).
 function clearOwnerState() {tokenNotice=null;inviteNotice=null;roleDrafts.clear();tokenPanels.clear();labelDrafts.clear();accountsKey="";clearDeleteState();}
-function signedOut() {loggedIn=false;session=null;summaries=[];directory={accounts:[],invitations:[]};clearOwnerState();render();}
+// Always immediate, even during a held link press (render() sees the authority change).
+function signedOut() {authEpoch+=1;loggedIn=false;session=null;summaries=[];directory={accounts:[],invitations:[]};clearOwnerState();render();}
 async function run(action) {
   if(busy)return;busy=true;document.querySelectorAll("button").forEach((b)=>b.disabled=true);
   try {const message=await action();status(typeof message==="string"?message:"");} catch(error) {if(error.status===401)signedOut();status(error.isConflict?text("failed"):error.message,true);}
@@ -719,11 +746,18 @@ function edit(trip) {
   for(const [key,value] of Object.entries({title:trip?.title||"",timezone:trip?.timezone||"UTC",country:trip?.country||"",route:trip?.route||""})){
     const label=document.createElement("label");label.textContent=text(key);const input=document.createElement("input");input.name=key;input.value=value;input.required=["title","timezone"].includes(key);input.maxLength=key==="title"?200:300;label.append(input);form.append(label);
   }
+  // Per-trip Google place details choice: off for new trips; saved even while the site-wide feature
+  // is off, and only effective when both are on. Viewers never see this dialog.
+  const googleBefore=tripHasGooglePlacePhotos(trip);
+  form.append(buildGooglePlacePhotosField(document,{language,checked:googleBefore,idPrefix:trip?"home-edit":"home-create"}));
   const actions=document.createElement("div");actions.className="actions";const save=document.createElement("button");save.textContent=text("save");
   actions.append(button(text("cancel"),()=>dialog.close()),save);form.append(actions);dialog.append(form);document.body.append(dialog);
   const requestId=newRequestId(trip?"metadata":"create");
   form.addEventListener("submit",(event)=>{event.preventDefault();run(async()=>{
     const fields=Object.fromEntries(new FormData(form));
+    const googleAfter=fields[GOOGLE_PLACE_PHOTOS_FIELD]==="true";
+    delete fields[GOOGLE_PLACE_PHOTOS_FIELD];
+    if(!trip||googleAfter!==googleBefore)fields[GOOGLE_PLACE_PHOTOS_FIELD]=googleAfter;
     if(trip)await hostedApi.applyChanges(trip.id,trip.version,[{type:"update_trip",fields}],requestId);
     else await hostedApi.createTrip(fields,requestId);
     dialog.close();await load();
@@ -732,20 +766,33 @@ function edit(trip) {
 }
 async function load() {
   clearTimeout(pollTimer);
+  if (leaving) return;
+  const epoch = authEpoch; const stale = () => leaving || epoch !== authEpoch;
   try {
     await finishPendingLogout();
+    if (stale()) return;
     // Re-checked on every refresh: a revoked account's next poll returns 401 and clears the page.
-    session=await hostedApi.session();loggedIn=true;
-    summaries=(await hostedApi.listTrips()).trips;
-    if(sessionCanManageAccounts(session)){directory=await hostedApi.listAccounts();reconcileAccountState();}
-    else{directory={accounts:[],invitations:[]};clearOwnerState();}
+    const current=await hostedApi.session();
+    if (stale()) return;
+    const wasSignedIn=loggedIn;
+    session=current;loggedIn=true;
+    if(!sessionCanManageAccounts(session)){directory={accounts:[],invitations:[]};clearOwnerState();}
+    // A role/capability change on an already signed-in page (for example the owner demoted to
+    // content manager or viewer) takes effect now, before the trip list request, held link or not.
+    if(wasSignedIn&&authorityKey()!==renderedAuthority)render();
+    const trips=(await hostedApi.listTrips()).trips;
+    if (stale()) return;
+    summaries=trips;
+    if(sessionCanManageAccounts(session)){const accounts=await hostedApi.listAccounts();if(stale())return;directory=accounts;reconcileAccountState();}
     failures=0;status("");render();
     for(const id of [...tokenPanels.keys()])await loadTokens(id);
-    if(!loggedIn)return;
+    if(!loggedIn||stale())return;
     // Only already-loaded connection lists refresh in the background; a failed list waits for Try again.
     for(const [id,panel] of [...tokenPanels])if(Array.isArray(panel.grants))loadGrants(id);
     pollTimer=setTimeout(load,20000);
   } catch(error) {
+    // A failure answering a load that was already superseded by a sign-out changes nothing.
+    if(stale())return;
     if(error.status===401||signoutPending())signedOut();
     status(error.status===401?"":error.message,error.status!==401);
     if(error.status!==401&&++failures<5)pollTimer=setTimeout(load,Math.min(30000,2000*2**failures));
@@ -762,7 +809,9 @@ byId("archived").addEventListener("change",render);
 byId("create").addEventListener("click",()=>edit());
 // An explicit Refresh also discards a displayed token secret.
 byId("retry").addEventListener("click",()=>{tokenNotice=null;render();load();});
-byId("logout").addEventListener("click",()=>{clearOwnerState();renderTokenNotice(false);logoutAndLeave();});
+// Explicit sign-out: protected state and DOM are cleared at once (even while a link press is held),
+// background loads stop, and no deferred or late work can render anything afterwards.
+byId("logout").addEventListener("click",()=>{clearTimeout(pollTimer);signedOut();renderTokenNotice(false);leaving=true;linkGuard.cancel("render");logoutAndLeave();});
 // Copying happens only on this explicit click; nothing is copied or sent automatically.
 byId("token-copy").addEventListener("click",async()=>{
   const secret=tokenNotice?.secret;if(!secret)return;

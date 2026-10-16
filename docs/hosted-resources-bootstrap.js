@@ -12,9 +12,13 @@ import {
   toRenderTrip,
   tripIdFromQuery,
   tripPath
-} from "./hosted-client.js?v=v-baed9ddaa9e3";
+} from "./hosted-client.js?v=v-5baa7e555e23";
+import { createLinkActivationGuard } from "./link-activation.js?v=v-5baa7e555e23";
 
 const MAX_AUTOMATIC_ATTEMPTS = 4;
+// A newer trip version reloads the page; never while a press on a resource or booking link is in
+// progress, so the browser can open that link first (see link-activation.js).
+const linkGuard = createLinkActivationGuard({ root: document });
 const STRINGS = {
   en: { loading: "Loading…", offline: "This page can’t be reached right now.", retry: "Try again", notFound: "This trip isn’t available.", allTrips: "All trips", loadError: "This page could not start.", reload: "Reload" },
   "zh-Hans": { loading: "正在加载…", offline: "暂时无法打开此页面。", retry: "重试", notFound: "这趟行程不可用。", allTrips: "全部行程", loadError: "此页面无法启动。", reload: "重新加载" },
@@ -90,15 +94,16 @@ async function start(trip) {
   const backHref = tripPath(tripId);
   document.querySelectorAll(".back-link").forEach((node) => { node.href = backHref; });
   try {
-    await import("./resources.js?v=v-baed9ddaa9e3");
+    await import("./resources.js?v=v-5baa7e555e23");
     overlay.remove();
     document.documentElement.classList.remove("hosted-booting");
     const poller = createTripPoller({
       load: () => hostedApi.getTrip(tripId),
-      onData: (payload) => { if (expectTrip(payload, tripId).version !== trip.version) location.reload(); },
+      onData: (payload) => { if (expectTrip(payload, tripId).version !== trip.version) linkGuard.whenIdle("reload", () => location.reload()); },
       onError: (error, { final }) => {
         if (!final) return;
         poller.stop();
+        linkGuard.cancel("reload");
         document.querySelector("main")?.replaceChildren();
         if (error.status === 401) redirectToLogin();
         else {

@@ -212,7 +212,34 @@ assert.equal(checkVenueQuery("Booking 1234 5678 90").errorKey, "queryPrivate", "
     assert.equal(new URL(injected[0]).searchParams.get("key"), FAKE_KEY);
     assert.equal(new URL(injected[0]).searchParams.get("language"), "ja");
     assert.equal(loader.reset(), false, "a loaded library is never reloaded");
-    assert.deepEqual(loader.stats, { configRequests: 1, scriptLoads: 1, libraryImports: 1 });
+    assert.deepEqual(loader.stats, { configRequests: 1, scriptLoads: 1, libraryImports: 1, cancelled: 0 });
+    assert.equal(loader.cancel(), false, "a finished load is never cancelled");
+    assert.equal(loader.state, "ready");
+  }
+  {
+    // cancel(): a load abandoned while its configuration request is outstanding injects no script,
+    // imports no library and its late answer is ignored; a later load starts cleanly.
+    const win = {};
+    const injected = [];
+    let release = null;
+    let configCalls = 0;
+    const loader = createGooglePlacesLoader({
+      win,
+      fetchConfig: () => { configCalls += 1; return new Promise((resolve) => { release = () => resolve({ enabled: true, apiKey: FAKE_KEY }); }); },
+      injectScript: async (src) => { injected.push(src); win.google = fakeLibrary(newGoogleRecord()); }
+    });
+    const abandoned = loader.load();
+    await sleep(1);
+    assert.equal(loader.cancel(), true);
+    assert.equal(loader.state, "idle");
+    release();
+    await assert.rejects(abandoned, (error) => error.code === "cancelled", "the late answer is ignored");
+    assert.deepEqual([injected.length, loader.state], [0, "idle"], "no script after a cancel, and the state is not overwritten");
+    const again = loader.load();
+    await sleep(1);
+    release();
+    await again;
+    assert.deepEqual([configCalls, injected.length, loader.state, loader.stats.cancelled], [2, 1, "ready", 1]);
   }
   {
     let configCalls = 0;
@@ -505,6 +532,10 @@ function fixtureTrip() {
     return linked({ id: `plan-extra-${n}`, name: place.name, period: "evening", time: `1${n}:30`, sortTime: `1${n}:30`, planType: "shopping", place, lat: place.lat, lng: place.lng, address: place.address }, extraPlace(n));
   });
   return {
+    // This suite exercises active Google behaviour, so its trip is opted in. Section A keeps the
+    // trip opted in but turns the site-wide feature off; the per-trip off/old-data/dynamic cases
+    // are in test-google-place-photos-trip-ui.mjs.
+    googlePlacePhotosEnabled: true,
     id: TRIP_ID, version: 3, archived: false, title: "Fictional Lantern Weekend", timezone: "UTC", country: "Fictionland", route: "Sample Bay",
     updatedAt: "2031-01-03T00:00:00.000Z", createdAt: "2031-01-01T00:00:00.000Z", dateRange: { start: DAY_ONE, end: "2031-05-05" },
     reminders: [], participantGroups: [], tips: [],
@@ -800,9 +831,12 @@ function assertNoPersistedGoogleContent(page, label) {
 }
 
 try {
-  // A. Disabled (session without the feature): zero Google activity; OSM and Commons unchanged.
+  // A. Disabled site-wide (session without the feature, as with the flag off or no key) while the
+  //    trip itself is opted in: the trip choice cannot bypass the global gate. Zero Google activity;
+  //    OSM and Commons unchanged.
   {
     const server = createFakeServer(fixtureTrip(), { google: false });
+    assert.equal(server.trip.googlePlacePhotosEnabled, true, "fixture: the trip is opted in");
     const page = await loadPage({ server });
     for (const id of ["plan-garden", "plan-museum", "plan-pier", "plan-extra-1"]) await setCardOpen(page, id, true);
     assert.equal(page.configRequests(), 0, "disabled: no configuration request");

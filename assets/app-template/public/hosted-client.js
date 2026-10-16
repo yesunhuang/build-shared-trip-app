@@ -9,6 +9,9 @@
 // Role/capability data from /api/session only adjusts the UI; the server
 // enforces every permission independently.
 
+// Re-exported so the home page (which imports only this module) shares the same link guard.
+export { createLinkActivationGuard } from "./link-activation.js?v=__CACHE_VERSION__";
+
 export const TRIP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const LANGUAGE_STORAGE_KEY = "shared-trips-language";
 export const DEFAULT_TIMEOUT_MS = 12000;
@@ -259,6 +262,62 @@ export const hostedApi = Object.freeze({
 
 // The session lists the optional Google Places UI Kit only when the operator enabled it.
 export function sessionHasGooglePlaces(session) { return session?.features?.googlePlacesUiKit === true; }
+
+// Per-trip choice (trip.googlePlacePhotosEnabled, default false), edited in "Edit trip" on the home
+// page and the trip page by the owner and content managers. Both this choice and the site-wide
+// session feature are needed before a trip page does any Google work.
+export const GOOGLE_PLACE_PHOTOS_FIELD = "googlePlacePhotosEnabled";
+export function tripHasGooglePlacePhotos(trip) { return trip?.[GOOGLE_PLACE_PHOTOS_FIELD] === true; }
+const GOOGLE_PLACE_PHOTOS_TEXT = Object.freeze({
+  en: {
+    label: "Show Google place details and photos in this trip",
+    hint: "Off by default. It works only when Google place details are also turned on for this site. When it is on, opening a plan that is linked to a Google place loads that place’s details and photos from Google. OpenStreetMap locations and the photos you chose stay as they are. Turning it off keeps the saved links but stops loading anything from Google."
+  },
+  "zh-Hans": {
+    label: "在此行程中显示 Google 地点详情和照片",
+    hint: "默认关闭。只有本站也开启了 Google 地点详情时才会生效。开启后，打开已关联 Google 地点的计划时，会从 Google 加载该地点的详情和照片。OpenStreetMap 位置和你选择的照片保持不变。关闭后会保留已保存的关联，但不再从 Google 加载任何内容。"
+  },
+  "zh-Hant": {
+    label: "在此行程中顯示 Google 地點詳情與照片",
+    hint: "預設關閉。只有本站也開啟了 Google 地點詳情時才會生效。開啟後，開啟已連結 Google 地點的計畫時，會從 Google 載入該地點的詳情與照片。OpenStreetMap 位置和你選擇的照片維持不變。關閉後會保留已儲存的連結，但不再從 Google 載入任何內容。"
+  },
+  ja: {
+    label: "この旅行で Google の場所の詳細と写真を表示する",
+    hint: "初期設定はオフです。このサイトで Google の場所の詳細も有効になっている場合にだけ機能します。オンにすると、Google の場所にリンクした予定を開いたときに、その場所の詳細と写真を Google から読み込みます。OpenStreetMap の場所や選んだ写真はそのままです。オフにしても保存済みのリンクは残りますが、Google からは何も読み込みません。"
+  }
+});
+export const GOOGLE_PLACE_PHOTOS_LANGUAGES = Object.freeze(Object.keys(GOOGLE_PLACE_PHOTOS_TEXT));
+export function googlePlacePhotosText(language, key) {
+  return GOOGLE_PLACE_PHOTOS_TEXT[language]?.[key] ?? GOOGLE_PLACE_PHOTOS_TEXT.en[key] ?? "";
+}
+
+/**
+ * An accessible checkbox row for the trip choice: a real <input type="checkbox"> inside its <label>,
+ * with the hint linked through aria-describedby. Only builds DOM; saving is up to the caller.
+ */
+export function buildGooglePlacePhotosField(doc, { language = "en", checked = false, idPrefix = "trip" } = {}) {
+  const label = doc.createElement("label");
+  label.className = "field field--checkbox google-place-photos-field";
+  const input = doc.createElement("input");
+  input.type = "checkbox";
+  input.name = GOOGLE_PLACE_PHOTOS_FIELD;
+  input.value = "true";
+  input.checked = checked === true;
+  input.id = `${idPrefix}-google-place-photos`;
+  const copy = doc.createElement("span");
+  copy.className = "field-checkbox__copy";
+  const title = doc.createElement("span");
+  title.className = "field-checkbox__label";
+  title.textContent = googlePlacePhotosText(language, "label");
+  const hint = doc.createElement("span");
+  hint.className = "form-hint field-checkbox__hint";
+  hint.id = `${input.id}-hint`;
+  hint.textContent = googlePlacePhotosText(language, "hint");
+  input.setAttribute("aria-describedby", hint.id);
+  copy.append(title, hint);
+  label.append(input, copy);
+  return label;
+}
 
 // Extracts and verifies a trip from a {trip} response. A response for any other
 // trip id is rejected rather than displayed.

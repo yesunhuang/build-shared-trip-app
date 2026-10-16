@@ -2,12 +2,15 @@
 
 The self-hosted trip page can show Google's own standard **Place Details (compact)** component inside an expanded plan card. It does this for a plan that an editor has deliberately linked to a public business or landmark on Google. The OpenStreetMap map, saved OSM places and Commons photos stay exactly as they are. The feature is **off by default**, needs an owner-supplied browser key that this repository never contains, and does nothing in the legacy static generator.
 
+It is also **opt-in per trip**. A trip shows Google details only when all three are true: the site flag is on, a browser key is configured, and the trip's **Show Google place details and photos in this trip** setting (`googlePlacePhotosEnabled`) is on. That setting is off for new trips and for every trip saved before it existed. See [Per-trip setting](#per-trip-setting).
+
 The automated tests use a mocked Google library. Local browser checks use fictional data and a Google mock, with Google network access blocked. Real SDK rendering and billing remain unverified; see [Verification status](#verification-status).
 
 ## Contents
 
 - [What is used, and what is not](#what-is-used-and-what-is-not)
 - [What is stored](#what-is-stored)
+- [Per-trip setting](#per-trip-setting)
 - [Linking a plan: conservative by design](#linking-a-plan-conservative-by-design)
 - [Showing a linked plan](#showing-a-linked-plan)
 - [Layout and styling limits](#layout-and-styling-limits)
@@ -54,11 +57,24 @@ The values above are placeholders. The rules are in [input-schema.md § Google p
 - **Enforced in the shared mutation path.** Every write runs through the same validation: web replace_content and upsert_plan, MCP `apply_trip_changes`, create and import. An association carried over unchanged survives unrelated edits. When the location changes or is cleared, it is removed automatically. A new or changed association that does not match the plan's current location, or sits on a plan without a location, refuses the whole batch. IDs, versions, conflicts and durable `requestId` retries are unchanged.
 - **Portable.** The field travels with SQLite backups, exports and imports like other plan content. It contains only the Place ID. No schema migration is needed; older trips without the field are unaffected.
 
+## Per-trip setting
+
+`trip.googlePlacePhotosEnabled` is one strictly validated trip-level boolean ([input-schema.md § Per-trip Google setting](input-schema.md#per-trip-google-setting-self-hosted-optional)):
+
+- **Default off.** New trips start with `false`. Trips stored before the field existed have no such key; they read as `false` (API, MCP `get_trip`, export) and the stored row is not rewritten by reading. The next ordinary write stores the explicit value. There is no bulk rewrite and no SQL migration.
+- **Who can change it.** The owner and content managers, in **Edit trip** on the home page or the trip page (and **Create trip**), or through MCP `update_trip`, `create_trip`, `import_trip` and `replace_content`. All paths use the same validation: only `true` or `false`; strings, numbers, `null` and objects are refused and the batch is not applied. Viewers can read the value but the server refuses any change from them, from anonymous visitors and from pending or revoked accounts. It is trip content, not an account or security permission, and MCP still has exactly six tools and no Google search tool.
+- **Independent of the site switch.** It can be saved while the site-wide feature is off or no key is configured; it then does nothing. It never turns the site feature on, and the site feature never turns a trip on.
+- **Rolling back the app.** A build from before this setting does not know the field, so its validation would refuse a snapshot restore or import that contains it. Before going back to such a build, remove `googlePlacePhotosEnabled` from exports, or stay on this build. This is a compatibility note, not a migration; nothing is rewritten automatically.
+- **Opting out keeps data.** Turning it off keeps every `googlePlaceAssociation`, OSM `place`, Commons/manual `photo`, attribution and ID unchanged. Turning it on again shows the same saved links.
+- **Inert trips.** In a trip with the setting off, the page fetches no configuration, injects no Google script, imports no library, builds no component, sends no query and shows no Google section or editor controls, even when the site feature is on. Unrelated edits keep saved associations, which are still validated against each plan's location.
+- **Turned off while a page is open.** Open pages see the change on their next poll. They then discard shown and parked components, close any open Google search or preview in the plan editor, abandon a library load that is still in progress before its next step, and ignore late Google events. Nothing pending is saved.
+- **Zero initial work versus already-loaded code.** A page that opens an opted-out trip does no Google work at all. If the same page had already loaded the Maps JavaScript library earlier (because the trip was on until a poll turned it off), that third-party code stays loaded until the page is closed or reloaded; the app cannot unload it and does not claim to. It is simply not used again for this trip, and a request the browser had already sent cannot be withdrawn. If the trip is turned on again in the same page, the already-loaded library is reused (no second configuration request or script), and components are built again only when a linked plan is expanded.
+
 ## Linking a plan: conservative by design
 
 The official components expose only a place's ID and a temporary location or viewport to this app. Without raw Places data, which is not used, or reading the component's rendered content, which is not allowed, the app cannot check whether a result's name matches the plan or whether it is truly a public venue. So the app **never links a plan automatically** and never picks the first or "best" search result. It links a place only after an editor's explicit choice. Some plans will deliberately stay unlinked; that is the intended trade-off, not a missing feature.
 
-In **Add/Edit plan**, owners and content managers (never viewers) see an optional **Google place details** section:
+In **Add/Edit plan** of an opted-in trip, owners and content managers (never viewers) see an optional **Google place details** section:
 
 1. It is usable only when the plan has a location. Opening the editor sends nothing.
 2. Google work happens only when the location is being created or changed in the editor, or when the editor presses **Find on Google** / **Choose a different Google place** to correct a link. A new or changed location opens the form, but still sends nothing by itself.
@@ -71,6 +87,7 @@ MCP clients and agents can store an association through `apply_trip_changes` wit
 
 ## Showing a linked plan
 
+- **Opted-in trips only.** Everything below applies only while the trip's setting is on; otherwise there is no Google section in any card.
 - **Lazy.** Opening, reloading or polling a trip makes no Google request and builds no component, whatever the number of linked plans. Expanding a linked plan (or selecting its marker) starts, for the whole page, one same-origin configuration request, one Maps JavaScript script, one `importLibrary("places")` and one component for that plan.
 - **One active plan.** Expanding another linked plan parks the previous component hidden but connected, and reuses it if that plan is shown again. An open card whose component is not active offers **Show Google place details** instead of a new request. At most three components are retained; older inactive ones are dropped. No inactive plan is preloaded.
 - **Deduplicated.** The library promise, component construction and place-request assignment happen once per trip/plan/Place ID/binding. Repeated expansion, re-renders, language changes, polls and unrelated edits reuse the same element. During a re-render the element is moved with `Element.moveBefore` where the browser supports it, otherwise with an ordinary append. Whether the SDK issues a new request after an ordinary reconnection is SDK behaviour that this app does not control and has not tested.
@@ -113,7 +130,7 @@ Usage is per component request or instantiation, not per photo byte. Matching se
 
 For a separate initial-linking example, 29 matching searches add 29 Query events: $0 with an otherwise unused allowance, or $0.029 added to 29,000 detail events (combined $19.029, approximately $19.03). Selecting a result uses its exposed ID; an additional Place ID preview is another component request.
 
-Lazy loading avoids up-front component creation. Actual counts depend on cards opened, reloads, retention evictions, explicit retries and SDK reconnections. Google's metering has not been tested. Budgets, alerts and quotas are owner decisions in the Google Cloud console.
+Lazy loading avoids up-front component creation. A trip opened with its setting off starts no Google work. Actual counts depend on cards opened, reloads, retention evictions, explicit retries and SDK reconnections. Google's metering has not been tested. Budgets, alerts and quotas are owner decisions in the Google Cloud console.
 
 ## Configuration
 
@@ -124,6 +141,8 @@ Lazy loading avoids up-front component creation. Actual counts depend on cards o
 
 Off, or on without a key: the session has no feature flag, the configuration route returns `{enabled: false}`, and trip pages fetch no configuration, load no Google script, build no component and send no query. Saved associations remain stored and inert, and import/export keep them. The legacy static generator never enables the feature.
 
+On with a key, each trip still decides for itself with its **Edit trip** setting (off by default). The configuration route itself is site-level and not trip-scoped; the per-trip gate is applied by the trip page, which never calls it for an opted-out trip.
+
 ## Future owner setup (pending, not done)
 
 None of these steps has been taken for any deployment. They are owner decisions and actions:
@@ -132,9 +151,10 @@ None of these steps has been taken for any deployment. They are owner decisions 
 2. In the owner's own Google Cloud project with a billing account, enable the APIs that Google's Places UI Kit setup documentation lists. Consider budgets, alerts and per-day quotas.
 3. Create a **browser** API key restricted by website (HTTP referrer) to the exact origin, for example `https://trips.example.org/*`, and by API to only what the UI Kit needs. Never reuse a server key or any other credential.
 4. Add `SHARED_TRIP_GOOGLE_PLACES_UI_KIT=1` and the key to the private env file outside the checkout, pass them through the reviewed Compose file, and restart the app.
-5. With a fictional trip, check in a real browser at desktop and phone widths: no Google request before a linked plan is expanded, Google's attribution is visible, link/correct/remove behaves as described, and request counts are plausible. Record the evidence separately and do not reuse real trip data for screenshots.
+5. Turn on **Show Google place details and photos in this trip** only for the trips that should use it.
+6. With a fictional trip, check in a real browser at desktop and phone widths: no Google request in an opted-out trip, no Google request before a linked plan is expanded in an opted-in trip, Google's attribution is visible, link/correct/remove behaves as described, and request counts are plausible. Record the evidence separately and do not reuse real trip data for screenshots.
 
-To disable, unset the flag (or the key) and restart. Saved links stay in the trips and reappear only if the feature is enabled again.
+To disable for the whole site, unset the flag (or the key) and restart. To disable for one trip, turn its setting off. Saved links stay in the trips and reappear only when both are enabled again.
 
 ## Verification status
 
@@ -144,8 +164,11 @@ To disable, unset the flag (or the key) and restart. Saved links stay in the tri
 | Zero Google activity when disabled; lazy single-plan loading; construction/assignment/query counts; reuse across re-renders, polls and edits; bounded retention; stale/cross-trip scoping; failure/timeout without retry; public-venue guard; user-only selection; cancel and location-change invalidation; Place ID preview; four languages; phone host; static generator inert | `scripts/test-google-places-ui-kit.mjs` (in `npm run test:ui`), mocked Google library in jsdom | Passed locally with mocked Google services |
 | Real SDK rendering, attribution, events and metering; real key restrictions; billing | Owner-configured live browser check | **Not verified** |
 | App layout and editor interaction in Chrome; lazy expansion, explicit selection, note edits, cancellation, reload and localization | Chrome at 1280, 390 and 375 px; fictional data, Google mock, Google origins blocked by fixture CSP | Passed; phone widths are browser emulation. Google's own component layout remains unverified |
+| Per-trip setting on the server: strict boolean, default off for new and older trips (read, write, restart, export/import), independence, roles, atomicity, conflicts, retries, MCP, inert while the site feature or key is off, data preserved | `scripts/test-google-place-photos-trip.mjs` (in `npm run test:server`) | Passed locally through HTTP and the official MCP SDK with fictional data and no provider requests |
+| Per-trip setting in the page: zero activity when off, poll opt-out and cancel, loader reuse, Edit trip checkbox | `scripts/test-trip-google-setting-and-links-ui.mjs` and `scripts/test-home-trip-setting-and-links-ui.mjs` (in `npm run test:ui`), mocked Google, simulated input | Passed in the full regression, including the amended Google suite, stale-response opt-out protection, native-link simulations and immediate auth clearing |
+| Per-trip setting in a real browser | Fictional data, Google mock | Passed in Chrome at desktop and phone widths with mocked Google; native local-target navigation and independent trip settings checked. Physical touch and the real Google SDK remain untested |
 
-The full regression, regenerated fictional demo, fresh generation/static QA and acceptance evidence are recorded in [checkpoint 017](../doc/Progress/progress_2026_10_16_cpx017_codex_b.md).
+[Checkpoint 017](../doc/Progress/progress_2026_10_16_cpx017_codex_b.md) records the initial integration. [Checkpoint 018](../doc/Progress/progress_2026_10_16_cpx018_codex_b.md) records the per-trip amendment, full regression, fresh generation/static QA and mocked-Google browser acceptance.
 
 ## Sources (read 2026-10-15)
 

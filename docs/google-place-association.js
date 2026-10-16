@@ -20,7 +20,7 @@
 // A changed or cleared location produces a different binding (or none), and the association is
 // then stale.
 
-import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-baed9ddaa9e3";
+import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-5baa7e555e23";
 
 export const GOOGLE_PLACE_ASSOCIATION_FIELD = "googlePlaceAssociation";
 export const GOOGLE_PLACE_ASSOCIATION_KEYS = Object.freeze(["placeId", "locationBinding", "publicVenueConfirmed"]);

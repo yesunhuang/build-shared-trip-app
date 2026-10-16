@@ -32,11 +32,19 @@ export const LIMITS = Object.freeze({
   tripJsonChars: 1_500_000
 });
 
+// Per-trip choice to show optional Google place details/photos (Places UI Kit) for this trip. A
+// strict boolean, false by default: trips stored before this field existed simply lack it and are
+// read as false (no bulk rewrite or SQL migration). It is ordinary trip content, written through
+// the same validated operations (update_trip, replace_content, create, import) by the owner and
+// content managers only. It never enables anything by itself: the operator's site-wide setting and
+// browser key are also required (see server/google-places.mjs).
+export const GOOGLE_PLACE_PHOTOS_FIELD = "googlePlacePhotosEnabled";
+
 // Writable content fields of a canonical trip.
 export const CONTENT_KEYS = Object.freeze([
   "title", "shortName", "metaDescription", "timezone", "country", "dateRange", "route",
   "days", "reminders", "participantGroups", "tips", "disclaimer", "theme", "i18n",
-  "weather", "resources", "content"
+  "weather", "resources", "content", GOOGLE_PLACE_PHOTOS_FIELD
 ]);
 // Read-only aliases emitted for the existing runtime template.
 export const ALIAS_KEYS = Object.freeze(["slug", "startDate", "endDate", "routeDecoration"]);
@@ -752,6 +760,25 @@ function normalizeArray(raw, path, issues, max, label, normalizeItem) {
 }
 
 /**
+ * trip.googlePlacePhotosEnabled: exactly true or false. Absent means false (the default for older
+ * trips and new trips). Strings ("true"), numbers (1), null and objects are refused, so a forced or
+ * malformed write can never switch it on by accident.
+ */
+function googlePlacePhotosValue(value, path, issues) {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") {
+    issues.add(path, "must be true or false");
+    return false;
+  }
+  return value;
+}
+
+/** Read projection: the effective per-trip choice (stored rows without the field read as false). */
+export function tripGooglePlacePhotosEnabled(trip) {
+  return isPlainObject(trip) && trip[GOOGLE_PLACE_PHOTOS_FIELD] === true;
+}
+
+/**
  * Normalize a full content object (no system/alias keys). Returns
  * { content, issues, parsedPlaces } — callers throw when issues are present.
  */
@@ -831,6 +858,7 @@ export function normalizeContent(raw, { prefix = "trip" } = {}) {
   assignDefined(out, "i18n", i18nValue(raw.i18n, `${prefix}.i18n`, issues));
   assignDefined(out, "resources", freeObject(raw.resources, `${prefix}.resources`, issues));
   assignDefined(out, "content", freeObject(raw.content, `${prefix}.content`, issues));
+  out[GOOGLE_PLACE_PHOTOS_FIELD] = googlePlacePhotosValue(raw[GOOGLE_PLACE_PHOTOS_FIELD], `${prefix}.${GOOGLE_PLACE_PHOTOS_FIELD}`, issues);
 
   // Missing required IDs on nested objects are reported above (idValue).
   if (issues.ok && JSON.stringify(out).length > LIMITS.tripJsonChars) {

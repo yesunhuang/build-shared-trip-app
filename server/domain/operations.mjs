@@ -3,7 +3,7 @@
 
 import crypto from "node:crypto";
 import { DomainError, conflict, validationError } from "./errors.mjs";
-import { ALIAS_KEYS, CONTENT_KEYS, LIMITS, SYSTEM_KEYS, isPlainObject, isValidId } from "./validate.mjs";
+import { ALIAS_KEYS, CONTENT_KEYS, GOOGLE_PLACE_PHOTOS_FIELD, LIMITS, SYSTEM_KEYS, isPlainObject, isValidId } from "./validate.mjs";
 
 export const OPERATION_TYPES = Object.freeze([
   "update_trip", "upsert_day", "delete_day", "upsert_plan", "delete_plan",
@@ -26,6 +26,8 @@ const OPERATION_KEYS = Object.freeze({
 // day/reminder collections (use the dedicated operations or replace_content).
 const UPDATABLE_FIELDS = new Set(CONTENT_KEYS.filter((key) => !["days", "reminders"].includes(key)));
 const REQUIRED_CONTENT = new Set(["title"]);
+// Strict booleans: null is not "remove", it is refused (send false to turn the choice off).
+const BOOLEAN_CONTENT = new Set([GOOGLE_PLACE_PHOTOS_FIELD]);
 
 export function newId(prefix) {
   return `${prefix}-${crypto.randomBytes(6).toString("hex")}`;
@@ -139,6 +141,8 @@ export function applyOperations(current, changes, { expectedVersion }) {
             issues.push({ path: `${path}.fields.${key}`, message: "field cannot be changed with update_trip" });
           } else if (fields[key] === null && REQUIRED_CONTENT.has(key)) {
             issues.push({ path: `${path}.fields.${key}`, message: "field is required" });
+          } else if (BOOLEAN_CONTENT.has(key) && typeof fields[key] !== "boolean") {
+            issues.push({ path: `${path}.fields.${key}`, message: "must be true or false" });
           }
         }
         if (issues.length) throw validationError(issues);

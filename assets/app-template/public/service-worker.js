@@ -16,6 +16,7 @@ const LOCAL_SHELL = [
   "/daily-guide.js?v=__CACHE_VERSION__",
   "/i18n.js?v=__CACHE_VERSION__",
   "/map-links.js?v=__CACHE_VERSION__",
+  "/link-activation.js?v=__CACHE_VERSION__",
   "/google-place-links.js?v=__CACHE_VERSION__",
   "/google-maps-place-url.js?v=__CACHE_VERSION__",
   "/place-picker.js?v=__CACHE_VERSION__",

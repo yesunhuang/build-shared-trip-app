@@ -20,6 +20,7 @@ The two forms share field shapes for days, plans, reminders, localization, maps,
   - [Selected OpenStreetMap place (self-hosted)](#selected-openstreetmap-place-self-hosted)
   - [Selected Commons photo (self-hosted)](#selected-commons-photo-self-hosted)
   - [Google place association (self-hosted, optional)](#google-place-association-self-hosted-optional)
+  - [Per-trip Google setting (self-hosted, optional)](#per-trip-google-setting-self-hosted-optional)
 - [Recommendations](#recommendations)
 - [Weather](#weather)
 - [Resources](#resources)
@@ -47,13 +48,15 @@ The server owns `id`, `version`, and `updatedAt`. Clients never choose a new tri
   "reminders": [],
   "participantGroups": [],
   "tips": [],
-  "i18n": {}
+  "i18n": {},
+  "googlePlacePhotosEnabled": false
 }
 ```
 
 - `days[].slots` holds plans, using the [plan shape](#days-and-plans) below. A self-hosted plan may also carry a [selected OpenStreetMap `place`](#selected-openstreetmap-place-self-hosted), a [selected Commons `photo`](#selected-commons-photo-self-hosted) and an optional [`googlePlaceAssociation`](#google-place-association-self-hosted-optional). Reminders, participant groups, and `i18n` patches use the same shapes as the legacy input.
 - Optional compatibility content, such as `resources`, `weather`, recommendations, and day-level `i18n`, is kept when present. It never needs to be invented.
 - Responses also include the read-only aliases `slug` (= `id`), `startDate`, `endDate`, and `routeDecoration` (= `route`) for the shared template. Treat them as read-only; edit `dateRange` and `route` through canonical fields; the ID cannot change.
+- `googlePlacePhotosEnabled` is the optional [per-trip Google setting](#per-trip-google-setting-self-hosted-optional): exactly `true` or `false`, `false` when absent.
 - Other optional top-level fields: `shortName`, `metaDescription`, `theme` (`ink`/`accent`/`background` hex colors), `disclaimer`, and `content`. Plans, days, reminders, and groups may carry a `compat` object. Import preserves unmapped nested fields in `compat.unmapped` and unmapped root fields in `content.importExtras`, with warnings.
 
 To change a trip, send operations (`update_trip`, `upsert_day`, `upsert_plan`, `upsert_reminder`, the matching `delete_*` operations, `archive_trip`, and `replace_content`) with `expectedVersion` and `requestId`. See [self-hosted.md](self-hosted.md#http-interface).
@@ -393,7 +396,21 @@ The values above are placeholders. The rules are:
 - An association carried over unchanged is kept through unrelated edits (including moving the plan to another day). When the location changes or is cleared, the server removes it automatically, through web or MCP. `null` removes it explicitly.
 - Create and import validate every association against its plan, so a tampered or stale import is refused. Export, import and backups carry the field unchanged. It is additive JSON and needs no schema migration.
 
-The field has no effect while the feature is disabled. It never changes the map, markers, `place`, `photo` or any other plan field.
+The field has no effect while the feature is disabled, or while the trip's own [`googlePlacePhotosEnabled`](#per-trip-google-setting-self-hosted-optional) is off. It never changes the map, markers, `place`, `photo` or any other plan field.
+
+### Per-trip Google setting (self-hosted, optional)
+
+```json
+{ "googlePlacePhotosEnabled": true }
+```
+
+A trip-level choice whether this trip's opened plans may show Google place details and photos for their saved `googlePlaceAssociation` ([google-places-ui-kit.md § Per-trip setting](google-places-ui-kit.md#per-trip-setting)).
+
+- Exactly `true` or `false`. Strings such as `"true"`, numbers, `null`, arrays and objects are refused on `update_trip`, `replace_content`, create and import, over HTTP and MCP alike, and the whole batch is not applied. In `update_trip`, `null` does not remove it; send `false`.
+- Absent means `false`. New trips start with `false`. Trips stored before the field existed are read as `false` (reads, `get_trip`, export) without rewriting the stored row; the next ordinary write stores the explicit value. Exports carry it and imports keep it; an import without it is `false`. No schema migration is involved.
+- The owner and content managers may change it (it is trip content, like `title`); viewers, anonymous, pending and revoked users cannot.
+- It has an effect only when the operator has also enabled the site-wide feature with a browser key. It can be saved while that is off, and it never enables it.
+- Changing it never changes plans, `place`, `photo`, `googlePlaceAssociation`, IDs or any other field.
 
 ## Recommendations
 

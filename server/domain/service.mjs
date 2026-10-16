@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
-import { normalizeContent, applyGooglePlaceAssociations, applyParsedPlaces, applySelectedPlaces, assertSafePayload, isValidId } from "./validate.mjs";
+import {
+  GOOGLE_PLACE_PHOTOS_FIELD, normalizeContent, applyGooglePlaceAssociations, applyParsedPlaces, applySelectedPlaces, assertSafePayload,
+  isValidId, tripGooglePlacePhotosEnabled
+} from "./validate.mjs";
 import { applyContentRules } from "./content-rules.mjs";
 import { applyOperations, newId, deriveStart, deriveEnd } from "./operations.mjs";
 import { importContent } from "./legacy.mjs";
@@ -32,8 +35,13 @@ function validate(raw, previous) {
   applyContentRules(previous, content);
   return content;
 }
+// Read projection. Rows stored before trip.googlePlacePhotosEnabled existed are left untouched in
+// the database and read as false; the next ordinary write stores the explicit value.
 function withAliases(trip) {
-  return { ...trip, slug: trip.id, startDate: deriveStart(trip), endDate: deriveEnd(trip), routeDecoration: trip.route };
+  return {
+    ...trip, [GOOGLE_PLACE_PHOTOS_FIELD]: tripGooglePlacePhotosEnabled(trip),
+    slug: trip.id, startDate: deriveStart(trip), endDate: deriveEnd(trip), routeDecoration: trip.route
+  };
 }
 
 export class TripService {

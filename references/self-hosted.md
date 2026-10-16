@@ -191,10 +191,11 @@ Off by default and separate from the lookups above. With `SHARED_TRIP_GOOGLE_PLA
 - **Key delivery.** The key comes only from `GET /api/google-places/config` (no-store, signed-in sessions and the owner bearer; never MCP or OAuth tokens). `/api/session` shows `features.googlePlacesUiKit: true` only while enabled.
 - **Stored data.** Only `googlePlaceAssociation` (Place ID, location binding, public-venue flag). The shared validators drop it when the plan's location changes or is cleared and refuse a mismatched or malformed one, for web and MCP alike.
 - **Who.** Owners and content managers link and correct; viewers see linked details but cannot change them. No role gains any other privilege.
+- **Per trip.** Each trip's **Edit trip** checkbox *Show Google place details and photos in this trip* (`googlePlacePhotosEnabled`, strict boolean, off by default and for trips saved before it existed) must also be on. Only owners and content managers can change it, through the same validated `update_trip`/`replace_content`/create/import paths as other trip content. A trip with it off makes no Google request and shows no Google controls; turning it off keeps saved links, places and photos. It can be saved while the site feature is off and never enables it.
 
 ## Synchronization and connection failures
 
-Trip pages poll every 20 seconds. Errors use bounded retries; Reconnect and online/focus/visibility events resume them. Home lists also refresh. An open page retains authenticated content in memory during brief outages; fresh offline navigation shows a generic connection page. A revoked account's next refresh, or the next refresh after its role changes, returns 401, which clears the page.
+Trip pages poll every 20 seconds. Errors use bounded retries; Reconnect and online/focus/visibility events resume them. Home lists also refresh. A refresh that arrives while a link is being pressed waits until the browser has opened that link, so cards are never rebuilt under a finger or mouse button. An open page retains authenticated content in memory during brief outages; fresh offline navigation shows a generic connection page. A revoked account's next refresh, or the next refresh after its role changes, returns 401, which clears the page.
 
 Protected payloads never enter persistent browser storage or the service-worker cache. The service worker must also never cache `/oauth/*` or `/.well-known/oauth-*` responses. Offline writes fail explicitly; there is no offline queue. Editors retain their opening version to reject later conflicting changes. After an uncertain response, reconnect and read before editing again.
 
@@ -204,7 +205,7 @@ Sign-out clears content and revokes the session. During an outage, a non-secret 
 
 Import accepts structured authoring JSON, a runtime trip object, or a shared-trip-export file. Compatible IDs and localization are retained. Available incoming trip IDs are preserved; importing again creates another trip rather than overwriting. Retrying the same requestId creates nothing twice. The owner and approved content managers can import; every approved role can export. The same import and export are also available as the MCP tools `import_trip` and `export_trip`, sharing validation and storage with HTTP.
 
-Safe unmapped fields are retained in compatibility content and reported. Legacy transport configuration is inert; import never contacts Firebase. Selected `place` and `photo` snapshots, and any `googlePlaceAssociation`, travel with import and export unchanged. Neither operation performs a place or photo lookup or contacts Google. Import refuses an association whose binding does not match its plan's location. Validation errors reject the whole import. Export restores content, IDs, versions, and archive state into empty storage. Database snapshots also retain retry records and account state.
+Safe unmapped fields are retained in compatibility content and reported. Legacy transport configuration is inert; import never contacts Firebase. Selected `place` and `photo` snapshots, any `googlePlaceAssociation`, and the trip's `googlePlacePhotosEnabled` setting travel with import and export unchanged (an export from before the setting existed imports as off). Neither operation performs a place or photo lookup or contacts Google. Import refuses an association whose binding does not match its plan's location. Validation errors reject the whole import. Export restores content, IDs, versions, and archive state into empty storage. Database snapshots also retain retry records and account state.
 
 ## Deploy on a small VPS
 
@@ -295,6 +296,8 @@ Schemas use PRAGMA user_version:
 - v6: the owner-deletion release adds the empty `trip_tombstones` table only (trip ID, deleted version, deletion time). Every existing trip, retry record, account, credential, OAuth grant and audit row is untouched. The audit log gains the `trip.delete` action and the `operator` channel.
 
 The place and photo lookup feature adds only optional JSON fields to trip content (`plan.place` and the extended Commons `plan.photo`). No schema migration is planned for it. A release that predates these fields may reject edits or imports of trips that contain them, so export affected trips before rolling back across it.
+
+The Google releases also add `plan.googlePlaceAssociation` and `trip.googlePlacePhotosEnabled` to trip JSON without a SQL migration. Older builds can reject these fields on edits or imports. Retain upgraded data and a validated pre-upgrade snapshot for a compatible rollback. Before using a build without the per-trip gate, disable Google globally: that older code does not honor the trip's choice.
 
 Before migrating an older database, the service writes a snapshot named for the target schema, such as `shared-trip.sqlite.before-v3-<time>`, beside it with VACUUM INTO and never deletes it automatically. The migration runs in one transaction. Newer-than-supported schemas are rejected ("Database requires a newer application").
 

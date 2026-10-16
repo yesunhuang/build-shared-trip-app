@@ -281,7 +281,9 @@ function defaultInjectScript(src, { win, timeoutMs, setTimer, clearTimer }) {
 /**
  * fetchConfig() must resolve to the protected /api/google-places/config body. A failed load stays
  * failed (no automatic retries) until reset() is called from an explicit "Try again". "disabled"
- * is permanent for the page.
+ * is permanent for the page. cancel() abandons a load that is still in progress (the trip was opted
+ * out): the next step (script, library import) is skipped and its result is ignored; a request the
+ * browser has already sent cannot be withdrawn, and code already loaded stays loaded.
  */
 export function createGooglePlacesLoader({
   win, fetchConfig, language = "en", injectScript = defaultInjectScript, timeoutMs = LIBRARY_TIMEOUT_MS,
@@ -289,23 +291,28 @@ export function createGooglePlacesLoader({
 }) {
   let pending = null;
   let state = "idle";
-  const stats = { configRequests: 0, scriptLoads: 0, libraryImports: 0 };
+  let generation = 0;
+  const stats = { configRequests: 0, scriptLoads: 0, libraryImports: 0, cancelled: 0 };
   const failureListeners = new Set();
   const fail = () => { if (state === "ready" || state === "loading") state = "failed"; failureListeners.forEach((listener) => listener()); };
   if (typeof win.gm_authFailure !== "function") win.gm_authFailure = fail;
 
-  async function run() {
+  async function run(ticket) {
+    const current = () => { if (ticket !== generation) throw loaderError("cancelled"); };
     stats.configRequests += 1;
     let config;
-    try { config = await fetchConfig(); } catch { throw loaderError("unavailable"); }
+    try { config = await fetchConfig(); } catch { current(); throw loaderError("unavailable"); }
+    current();
     if (config?.enabled !== true || typeof config.apiKey !== "string" || !config.apiKey) throw loaderError("disabled");
     if (typeof win.google?.maps?.importLibrary !== "function") {
       stats.scriptLoads += 1;
       await injectScript(mapsScriptUrl(config.apiKey, language), { win, timeoutMs, setTimer, clearTimer });
+      current();
     }
     if (typeof win.google?.maps?.importLibrary !== "function") throw loaderError("unavailable");
     stats.libraryImports += 1;
     const library = await win.google.maps.importLibrary("places");
+    current();
     if (!library || typeof library !== "object") throw loaderError("unavailable");
     return library;
   }
@@ -314,8 +321,9 @@ export function createGooglePlacesLoader({
     load() {
       if (!pending) {
         state = "loading";
-        pending = run().then((library) => { state = "ready"; return library; }, (error) => {
-          state = error?.code === "disabled" ? "disabled" : "failed";
+        const ticket = generation;
+        pending = run(ticket).then((library) => { if (ticket === generation) state = "ready"; return library; }, (error) => {
+          if (ticket === generation) state = error?.code === "disabled" ? "disabled" : "failed";
           throw error?.code ? error : loaderError("unavailable");
         });
         pending.catch(() => {});
@@ -325,6 +333,15 @@ export function createGooglePlacesLoader({
     /** Explicit retry only; never called automatically. */
     reset() {
       if (state !== "failed") return false;
+      pending = null;
+      state = "idle";
+      return true;
+    },
+    /** Abandon an in-progress load (late results are ignored). A finished load is kept. */
+    cancel() {
+      if (state !== "loading") return false;
+      generation += 1;
+      stats.cancelled += 1;
       pending = null;
       state = "idle";
       return true;
