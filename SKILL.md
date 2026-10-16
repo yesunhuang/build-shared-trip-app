@@ -34,6 +34,8 @@ Treat every trip as clean-room data. Never carry itinerary content, travelers, I
 
 These apply to self-hosted data and to legacy generator input.
 
+- Self-hosted [trip branding](references/trip-branding.md) is optional trip content: use an approved bounded PNG logo and an accessible light preset/custom theme through the shared editor or typed MCP fields. Read first and retain the existing logo when replacing only its theme. Do not infer artwork, publish private branding, change the installed app identity or activate providers as part of branding.
+
 - Put flights and stays in chronological plans. They are itinerary POIs, not a separate booking page.
 - When a plan has a meaningful location, derive its address, label, and marker from a verified source. For legacy generator input that source is a full Google Maps browser place URL. On the self-hosted service, it is either such a URL or a selected OpenStreetMap `place` snapshot ([input-schema.md](references/input-schema.md#selected-openstreetmap-place-self-hosted)) with mirrored `lat`/`lng`/`address`. A deliberately locationless placeholder may omit both and stays timeline-only. Whenever a Google URL is supplied, reject Share short links and viewport-only coordinates.
 - Never invent a Google Maps place identifier, OSM ID, or coordinates, or build `/maps/place/name/@coordinates` as though it were a verified venue. A named-search fallback does not verify an exact place. A coordinate-based navigation link for an OSM place is not a Google venue link.

@@ -6,6 +6,7 @@ import {
   ui
 } from "./i18n.js?v=__CACHE_VERSION__";
 import { getTripResources } from "./trip-resources.js?v=__CACHE_VERSION__";
+import { applyTripBranding } from "./trip-branding.js?v=__CACHE_VERSION__";
 
 const languageSelect = document.getElementById("language-select");
 const paymentContent = document.getElementById("payment-page-content");
@@ -27,6 +28,7 @@ window.addEventListener("storage", (event) => {
 });
 
 function render() {
+  try { applyTripBranding(document,JSON.parse(document.getElementById("trip-data").textContent)); } catch { /* generic shell */ }
   document.documentElement.lang = languageMeta(currentLanguage).htmlLang;
   document.title = `${ui(currentLanguage, "travelResources")} · ${ui(currentLanguage, "brandName")}`;
   languageSelect.value = currentLanguage;

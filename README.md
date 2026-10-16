@@ -1,5 +1,7 @@
 # Build Shared Trip App
 
+Each self-hosted trip can have its own [logo and color theme](references/trip-branding.md), with a mobile-friendly editor, accessible light presets/custom colors, reset and typed MCP editing. Embedded sanitized logos travel with database backups and JSON exports; the shared installed app keeps its identity.
+
 Plan cards show a distinct map-icon address row and compact labelled icon links. Safe links in review, description and notes join the group without changing saved text. Up to six editable, ordered [related links](references/plan-related-links.md), such as booking pages, remain available to owners and content managers in the plan editor.
 
 **A self-hosted, multilingual travel planner for you and a few companions. One small server holds every trip, invited companions you approve can view them or, if you choose, help edit them, and an MCP endpoint lets an AI you configure read and edit the same itineraries.**

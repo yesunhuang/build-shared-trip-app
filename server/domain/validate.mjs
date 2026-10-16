@@ -10,6 +10,7 @@ import {
 } from "../../assets/app-template/public/google-place-association.js";
 import { validationError } from "./errors.mjs";
 import { relatedLinksProblems } from "../../assets/app-template/public/related-links.js";
+import { normalizeBranding } from "./branding.mjs";
 
 export const LOCALES = Object.freeze(["en", "zh-Hans", "zh-Hant", "ja"]);
 export const PERIODS = Object.freeze(["morning", "noon", "evening"]);
@@ -45,7 +46,7 @@ export const GOOGLE_PLACE_PHOTOS_FIELD = "googlePlacePhotosEnabled";
 export const CONTENT_KEYS = Object.freeze([
   "title", "shortName", "metaDescription", "timezone", "country", "dateRange", "route",
   "days", "reminders", "participantGroups", "tips", "disclaimer", "theme", "i18n",
-  "weather", "resources", "content", GOOGLE_PLACE_PHOTOS_FIELD
+  "weather", "resources", "content", "branding", GOOGLE_PLACE_PHOTOS_FIELD
 ]);
 // Read-only aliases emitted for the existing runtime template.
 export const ALIAS_KEYS = Object.freeze(["slug", "startDate", "endDate", "routeDecoration"]);
@@ -865,6 +866,7 @@ export function normalizeContent(raw, { prefix = "trip" } = {}) {
   assignDefined(out, "i18n", i18nValue(raw.i18n, `${prefix}.i18n`, issues));
   assignDefined(out, "resources", freeObject(raw.resources, `${prefix}.resources`, issues));
   assignDefined(out, "content", freeObject(raw.content, `${prefix}.content`, issues));
+  assignDefined(out, "branding", normalizeBranding(raw.branding, `${prefix}.branding`, issues));
   out[GOOGLE_PLACE_PHOTOS_FIELD] = googlePlacePhotosValue(raw[GOOGLE_PLACE_PHOTOS_FIELD], `${prefix}.${GOOGLE_PLACE_PHOTOS_FIELD}`, issues);
 
   // Missing required IDs on nested objects are reported above (idValue).

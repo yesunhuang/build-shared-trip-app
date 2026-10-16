@@ -1,5 +1,7 @@
 # Feature contract
 
+Self-hosted trips support independent [branding](trip-branding.md): an embedded bounded raster logo, accessible light presets/custom colors and explicit reset. The native mobile-friendly editor and typed MCP fields share owner/content-manager authorization and version-aware atomic writes. Logo/theme data survive export/import, snapshots and restart; existing trips and the global installed identity remain unchanged. Provider components, checklist semantics, weather, maps and the Google allowance are preserved.
+
 Card address text uses saved Maps/selected-place destinations, with ordinary encoded name/address search fallback; multiple destinations stay individually labelled and only links have an arrow. Plans support up to six ordered editable [related links](plan-related-links.md), preserved through shared version-aware HTTP/MCP/import/export paths. Viewers may open links but cannot edit them.
 
 Preserve these behaviors unless the user explicitly requests a design change. The trip-page UI is shared by two modes:

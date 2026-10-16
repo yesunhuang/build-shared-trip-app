@@ -2,6 +2,8 @@
 
 ## Reusable repository
 
+Per-trip branding is private trip content. Logos are embedded, sanitized raster bytes in the trip JSON and therefore travel with database snapshots, exports and durable retry results. Keep real artwork, alternative text and branded previews outside public Git. The editor converts files locally; it does not send them to an image service. Removing a logo from a trip does not erase earlier private backups or exports. See [trip-branding.md](trip-branding.md).
+
 The framework, its self-hosted service code, and the fictional demo are independent of any real trip server or data. The approved showcase screenshots intentionally reveal their displayed trip title, destinations, and dates. They are static visual references, not reusable itinerary data; do not infer permission to reuse other travelers' data or connect to their server.
 
 The source repository (`https://github.com/yesunhuang/build-shared-trip-app`) is public. This means:

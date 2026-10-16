@@ -27,6 +27,34 @@
   font-synthesis: none;
 }
 
+/* Trip branding editor; the app manifest, provider components and checklist palette keep their identity. */
+.branding-editor { width: min(38rem,calc(100vw - 1.5rem)); max-height: calc(100dvh - 2rem); margin: max(1rem,env(safe-area-inset-top)) auto; padding: 1.2rem; overflow: auto; overscroll-behavior: contain; color: var(--text); background: var(--card); border: 2px solid var(--ink); border-radius: 18px; }
+.branding-editor::backdrop { background: rgba(0,0,0,.55); }
+.branding-editor h2 { margin-top: 0; overflow-wrap: anywhere; }
+.branding-editor fieldset { min-width: 0; margin: 1rem 0; padding: .8rem; border: 1px solid var(--line); border-radius: 10px; }
+.branding-editor legend { padding: 0 .3rem; font-weight: 750; }
+.branding-editor .field { display: grid; min-width: 0; gap: .35rem; margin: .65rem 0; }
+.branding-editor input,.branding-editor select { width: 100%; max-width: 100%; min-width: 0; min-height: 44px; padding: .5rem; color: #17362f; background: #ffffff; border: 1px solid #66736e; border-radius: 8px; }
+.branding-editor input[type=color] { padding: .2rem; cursor: pointer; }
+.branding-editor button,[data-action="edit-branding"] { min-height: 44px; }
+.branding-colors { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .6rem; }
+.branding-colors[hidden] { display: none; }
+.branding-colors .branding-hint { grid-column: 1/-1; }
+.branding-hint { font-size: .85rem; line-height: 1.5; color: var(--text); }
+.branding-preview { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; min-height: 100px; padding: .8rem; border: 3px solid; border-radius: 12px; overflow-wrap: anywhere; }
+.branding-preview img { width: 80px; height: 80px; object-fit: contain; background: #ffffff; border-radius: 8px; }
+.branding-preview strong { flex: 1 1 10rem; min-width: 0; }
+.branding-preview [hidden] { display: none; }
+.branding-actions { display: flex; flex-wrap: wrap; gap: .6rem; position: sticky; bottom: -.5rem; padding-block: .8rem; background: var(--card); }
+.branding-actions button { flex: 1 1 9rem; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+.branding-editor .branding-error { color: #9b2922; font-weight: 650; }
+.branding-editor :focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+.branding-editor :disabled { opacity: .65; cursor: default; }
+img[data-trip-logo="true"] { object-fit: contain; background: #fff; }
+html[data-trip-branding] :focus-visible { outline-color: var(--ink); }
+html[data-trip-branding] .site-header :focus-visible { outline-color: #ffffff; }
+@media(max-width:400px) { .branding-colors { grid-template-columns: 1fr; } .branding-editor { padding: .8rem; } }
+
 * {
   box-sizing: border-box;
 }

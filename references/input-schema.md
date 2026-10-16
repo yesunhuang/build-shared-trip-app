@@ -59,7 +59,7 @@ The server owns `id`, `version`, and `updatedAt`. Clients never choose a new tri
 - Optional compatibility content, such as `resources`, `weather`, recommendations, and day-level `i18n`, is kept when present. It never needs to be invented.
 - Responses also include the read-only aliases `slug` (= `id`), `startDate`, `endDate`, and `routeDecoration` (= `route`) for the shared template. Treat them as read-only; edit `dateRange` and `route` through canonical fields; the ID cannot change.
 - `googlePlacePhotosEnabled` is the optional [per-trip Google setting](#per-trip-google-setting-self-hosted-optional): exactly `true` or `false`, `false` when absent.
-- Other optional top-level fields: `shortName`, `metaDescription`, `theme` (`ink`/`accent`/`background` hex colors), `disclaimer`, and `content`. Plans, days, reminders, and groups may carry a `compat` object. Import preserves unmapped nested fields in `compat.unmapped` and unmapped root fields in `content.importExtras`, with warnings.
+- Other optional top-level fields: `shortName`, `metaDescription`, legacy `theme` (`ink`/`accent`/`background` hex colors), `branding` ([bounded embedded logo and accessible light theme](trip-branding.md)), `disclaimer`, and `content`. Plans, days, reminders, and groups may carry a `compat` object. Import preserves unmapped nested fields in `compat.unmapped` and unmapped root fields in `content.importExtras`, with warnings.
 
 To change a trip, send operations (`update_trip`, `upsert_day`, `upsert_plan`, `upsert_reminder`, the matching `delete_*` operations, `archive_trip`, and `replace_content`) with `expectedVersion` and `requestId`. See [self-hosted.md](self-hosted.md#http-interface).
 
