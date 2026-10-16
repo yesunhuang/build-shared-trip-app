@@ -2817,8 +2817,12 @@ details[open] > summary .summary-chevron,
 
 .weather-peek__unavailable {
   grid-column: 1 / -1;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--ink-2);
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
 }
 
 .weather-peek__temperature strong {
