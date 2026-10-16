@@ -8,7 +8,7 @@ const jsonObject = z.record(z.string(), z.unknown());
 const domainObject = (keys) => z.strictObject(Object.fromEntries([...keys].map((key) => [
   key, key === "id" ? z.string().optional().describe("Stable ID; omit only when creating a new item.") : z.unknown().optional()
 ])));
-const plan = domainObject(PLAN_KEYS);
+const plan = domainObject(PLAN_KEYS).extend({ relatedLinks: z.unknown().optional().describe("Ordered array of at most six user-authored links, each {id,label,url}; stable unique IDs within the plan, nonempty label up to 80 characters, absolute HTTP/HTTPS URL up to 2048 characters without credentials or controls. Send [] to clear. Shared validation applies.") });
 const day = domainObject(DAY_KEYS);
 const reminder = domainObject(REMINDER_KEYS);
 // Values stay z.unknown(): the shared domain validation (validate.mjs) is the single authority, so

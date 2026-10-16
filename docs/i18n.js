@@ -1,6 +1,6 @@
-import { UI_ZH_HANT } from "./translations-zh-hant.js?v=v-3a14a0772b6d";
-import { UI_ZH_HANS } from "./translations-zh-hans.js?v=v-3a14a0772b6d";
-import { UI_JA } from "./translations-ja.js?v=v-3a14a0772b6d";
+import { UI_ZH_HANT } from "./translations-zh-hant.js?v=v-37500925c97c";
+import { UI_ZH_HANS } from "./translations-zh-hans.js?v=v-37500925c97c";
+import { UI_JA } from "./translations-ja.js?v=v-37500925c97c";
 
 const seedTrip = readSeedTrip();
 // Self-hosted pages share one non-sensitive language preference across trips.
@@ -364,6 +364,7 @@ export function localizeTrip(trip, language) {
       const patch = value.i18n?.[language];
       if (patch && typeof patch === "object") {
         Object.entries(patch).forEach(([childKey, childValue]) => {
+          if (childKey === "relatedLinks") return;
           if (isRoot && childKey === "title") return;
           localized[childKey] = walk(childValue, childKey);
         });

@@ -1,5 +1,7 @@
 # Build Shared Trip App
 
+Plan cards include clickable location/address text and up to six editable, ordered [related links](references/plan-related-links.md), such as booking pages. Owners and content managers can manage them in the plan editor.
+
 **A self-hosted, multilingual travel planner for you and a few companions. One small server holds every trip, invited companions you approve can view them or, if you choose, help edit them, and an MCP endpoint lets an AI you configure read and edit the same itineraries.**
 
 Run one Node.js service on your own machine or a small VPS. From the home page you can create or import trips. Each trip opens at a stable `/trips/<trip-id>` link with the desktop map and timeline, the phone swipe-sheet planner, reminders, weather, and four languages. You install the PWA once and switch between trips inside it. No Firebase account and no separate deployment per trip are needed.

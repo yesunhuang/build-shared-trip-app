@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFullGoogleMapsPlaceUrl } from "../assets/app-template/public/google-maps-place-url.js";
+import { relatedLinksProblems } from "../assets/app-template/public/related-links.js";
 
 export const REQUIRED_LOCALES = Object.freeze(["en", "zh-Hans", "zh-Hant", "ja"]);
 export const TRANSLATED_LOCALES = Object.freeze(REQUIRED_LOCALES.filter((locale) => locale !== "en"));
@@ -188,6 +189,7 @@ export function validateTrip(input, options = {}) {
 function validatePlan(plan, location, context) {
   const { error, warn, groupIds, groupCount, planIds, allowExample } = context;
   if (!isPlainObject(plan)) return error(location, "must be an object");
+  if (plan.relatedLinks !== undefined) for (const problem of relatedLinksProblems(plan.relatedLinks)) error(`${location}.relatedLinks${problem.key}`, problem.message);
   requireString(plan, "id", location, error, { max: 80 });
   if (plan.id && !ID.test(plan.id)) error(`${location}.id`, "must use letters, numbers, underscores, or hyphens");
   if (planIds.has(plan.id)) error(`${location}.id`, "must be unique within its day");

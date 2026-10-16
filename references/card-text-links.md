@@ -18,13 +18,13 @@ Headings, titles, chips, inputs, editor fields, day summaries/tips, guide notes,
 
 ## Location line
 
-The address links to the **same** URL that the card's own map action uses. That URL is `googleMapsDestinations(slot, { allowSearchFallback: false })`, the same call `googleMapsAnchor` makes. The address becomes a link only when there is exactly one destination. The URL is passed through unchanged, so `location.href === mapAction.href`.
+The address uses `googleMapsDestinations(slot, { allowNameFallback: true })` with the ordinary search fallback enabled. A saved validated destination or selected-place coordinate URL is preferred and matches the existing map action. If no destination is saved, the name/address forms an encoded ordinary Maps search URL. This constructs a navigation URL only, without a Places request or invented Place ID.
 
 - Verified stored Google Maps URL (`normalizeGoogleMapsUrl`): linked.
 - Selected OpenStreetMap place with saved coordinates: linked to the existing coordinate navigation URL. No Google place is implied.
-- No target, an unsafe or look-alike URL, or several verified destinations: the address stays plain text. The map button(s) are unchanged.
+- Unsafe or look-alike saved URLs are ignored; available name/address text can still form a safe search. Several verified destinations appear as separately labelled anchors beside the address. Explicitly omitted locations stay plain, missing location data produces no row, and nonlink metadata has no decorative link arrow. Existing map buttons are unchanged.
 
-No URL, place ID or search link is built for the location line. The anchor's accessible name is `<localized "open Google Maps">: <address>`.
+The anchor's accessible name is `<localized "open Google Maps">: <address or destination label>`. See [related links](plan-related-links.md) for the additional ordered, editable per-plan link collection.
 
 ## Supported syntax (deliberately small)
 

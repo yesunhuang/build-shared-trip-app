@@ -34,6 +34,7 @@ function fixtureTrip() {
     id: TRIP_ID, version: 1, archived: false, title: "Fictional Harbour Weekend", timezone: "UTC", country: "Fictionland", route: "Sample Bay",
     updatedAt: "2031-01-03T00:00:00.000Z", createdAt: "2031-01-01T00:00:00.000Z", dateRange: { start: DAY_ONE, end: "2031-06-11" },
     reminders: [], participantGroups: [], tips: [],
+    googlePlaceLinks: { "plan-multi": [{ url: GOOGLE_URL, labels: { en: "Museum", ja: "美術館" } }, { url: "https://www.google.com/maps/search/?api=1&query=Fictional+Second+Entrance", labels: { en: "Second entrance", ja: "別の入口" } }] },
     hotelAreas: [{ area: "Fictional Harbour", reason: "Near the quay", options: [
       { name: "Invented Harbour Inn", tier: "planned", note: "Rooms: [Fictional rooms](https://example.org/rooms) (no booking)." }
     ] }],
@@ -44,6 +45,7 @@ function fixtureTrip() {
           review: "Tickets at https://tickets.example.org/museum?day=1&lang=en, or see [the fictional guide](https://example.org/guide_(museum)).",
           description: "Description: [Accessible entrance](https://example.org/entrance). Literal <img src=x onerror=alert(1)>.",
           notes: "Bring <b>cash</b> <script>alert(1)</script> javascript:alert(1) [x](javascript:alert(2)) ![photo](https://img.example.org/p.png)",
+          relatedLinks: [{ id: "booking", label: "Booking <img src=x onerror=alert(1)>", url: "https://example.org/fictional-booking" }, { id: "guide", label: "Guide", url: "https://example.org/fictional-guide" }],
           i18n: { ja: { review: "チケットはhttps://tickets.example.org/ja。[架空ガイド](https://example.org/ja/guide)をご覧ください。", description: "説明：[入口](https://example.org/温泉)をご覧ください。", address: "サンプル埠頭1" } } },
         { id: "plan-park", name: "Invented Dune Park", period: "afternoon", time: "13:00", sortTime: "13:00", planType: "sight",
           place: clone(OSM_PLACE), lat: OSM_PLACE.lat, lng: OSM_PLACE.lng, address: OSM_PLACE.address,
@@ -53,6 +55,9 @@ function fixtureTrip() {
           address: "3 Sample Lane", review: "Timeline-only placeholder", description: "Timeline-only placeholder" },
         { id: "plan-unsafe", name: "Invented Unsafe Pier", period: "evening", time: "20:00", sortTime: "20:00", planType: "sight",
           address: "9 Sample Pier", mapsUrl: "javascript:alert(1)", review: "https://user:pw@evil.example/ and //evil.example/x" },
+        { id: "plan-multi", name: "Invented two-stop route", address: "Fictional museum and entrance", period: "evening", time: "20:15" },
+        { id: "plan-omitted", name: "Deliberately omitted", address: "Private location omitted", mapLocationOmitted: true, period: "evening", time: "20:30" },
+        { id: "plan-empty", name: "", period: "evening", time: "20:45" },
         { id: "plan-lookalike", name: "Invented Lookalike Pier", period: "evening", time: "21:00", sortTime: "21:00", planType: "sight",
           address: "10 Sample Pier", googleMapsUrl: "https://evil.example/maps/place/Invented+Pier" }
       ], recommendations: {
@@ -63,8 +68,8 @@ function fixtureTrip() {
   };
 }
 
-function createFakeServer(initialTrip) {
-  const server = { trip: clone(initialTrip), log: [], deny: 0 };
+function createFakeServer(initialTrip, role = "viewer") {
+  const server = { trip: clone(initialTrip), log: [], deny: 0, role };
   const json = (status, payload) => ({ status, payload });
   server.remote = (mutate) => {
     const next = clone(server.trip);
@@ -73,17 +78,25 @@ function createFakeServer(initialTrip) {
     next.updatedAt = new Date(Date.parse(server.trip.updatedAt) + 60000).toISOString();
     server.trip = next;
   };
-  server.handle = async (method, url) => {
+  server.handle = async (method, url, body) => {
     server.log.push({ method, path: url.pathname });
     if (method === "GET" && url.pathname === "/api/session") {
       if (server.deny === 401) return json(401, { error: { code: "unauthorized", message: "Sign in required." } });
-      return json(200, { authenticated: true, role: "viewer", capabilities: { editTrips: false } });
+      return json(200, { authenticated: true, role: server.role, capabilities: { editTrips: server.role !== "viewer" } });
     }
     const match = /^\/api\/trips\/([^/]+)(\/.*)?$/.exec(url.pathname);
     if (!match || decodeURIComponent(match[1]) !== server.trip.id) return json(404, { error: { code: "not_found", message: "Not found." } });
     if (server.deny === 401) return json(401, { error: { code: "unauthorized", message: "Sign in required." } });
     if (server.deny === 403) return json(403, { error: { code: "forbidden", message: "Access revoked." } });
     if (method === "GET" && !match[2]) return json(200, { trip: clone(server.trip) });
+    if (method === "POST" && match[2] === "/changes") {
+      if (server.role === "viewer") return json(403, { error: { code: "forbidden" } });
+      const input = JSON.parse(body);
+      if (input.expectedVersion !== server.trip.version) return json(409, { error: { code: "version_conflict" } });
+      assert.equal(input.changes[0].type, "replace_content");
+      server.remote((trip) => Object.assign(trip, input.changes[0].trip));
+      return json(200, { trip: clone(server.trip) });
+    }
     return json(404, { error: { code: "not_found", message: "Not found." } });
   };
   return server;
@@ -359,12 +372,24 @@ try {
     }
     assert.equal(page.locationLink("plan-museum").textContent, "1 Sample Quay");
     assert.equal(page.mapAction("plan-museum").textContent.length > 0, true, "the map button is unchanged and still present");
+    const multiple = [...page.location("plan-multi").querySelectorAll("a")];
+    assert.deepEqual(multiple.map((link) => link.textContent), ["Museum", "Second entrance"], "multiple destinations remain separately labelled");
+    assert.equal(multiple[0].href, GOOGLE_URL);
+    assert.equal(page.locationLink("plan-omitted"), null, "explicit omission stays nonlink");
+    assert.equal(page.location("plan-empty"), null, "missing name/address has no invented location row");
+    const css = fs.readFileSync(path.join(PUBLIC_DIR, "styles.css"), "utf8");
+    assert.ok(!css.includes(".meta-list li::before"), "no decorative link arrow on nonlink metadata");
+    assert.ok(css.includes(".location-link::after"), "only the real anchor owns its affordance");
     for (const id of ["plan-cafe", "plan-unsafe", "plan-lookalike"]) {
-      assert.equal(page.locationLink(id), null, `${id}: no location link without a valid target`);
+      const slot = slotOf(fixtureTrip(), id);
+      assert.equal(page.locationLink(id)?.href, `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${slot.name}, ${slot.address}`)}`, `${id}: ordinary encoded address search without a saved URL`);
       assert.equal(page.mapAction(id), null, `${id}: and no map action either`);
-      assert.equal(page.location(id).querySelector("a"), null, `${id}: plain location text`);
       assert.ok(page.location(id).textContent.includes(slotOf(fixtureTrip(), id).address), `${id}: address still shown`);
     }
+    const related = [...page.item("plan-museum").querySelectorAll("a.related-link")];
+    assert.deepEqual(related.map((link) => link.href), ["https://example.org/fictional-booking", "https://example.org/fictional-guide"]);
+    assert.ok(related[0].textContent.includes("<img")); assert.equal(related[0].children.length, 0, "labels are escaped text");
+    assert.equal(doc.getElementById("related-links-editor")?.closest("dialog")?.open, false, "viewer has no open link editor");
 
     // A2. Text links in review, notes, recommendation description and hotel note.
     const reviewLinks = page.textLinks("plan-museum", ".timeline-card__review");
@@ -401,6 +426,8 @@ try {
 
     // A3. Native activation through a background refresh: location, raw and Markdown text links.
     await heldActivation(page, server, () => page.locationLink("plan-museum"), "location link");
+    await heldActivation(page, server, () => page.locationLink("plan-cafe"), "fallback address link");
+    await heldActivation(page, server, () => page.item("plan-museum").querySelector("a.related-link"), "related booking link");
     await heldActivation(page, server, () => page.textLinks("plan-museum", ".timeline-card__review")[0], "raw review link");
     await heldActivation(page, server, () => page.textLinks("plan-park", ".note-line")[0], "Markdown notes link");
     for (const modifier of ["ctrlKey", "metaKey", "shiftKey"]) {
@@ -456,6 +483,7 @@ try {
     assert.equal(page.locationLink("plan-park").href, page.mapAction("plan-park").href, "phone: OSM location link equals the map action");
     await heldActivation(page, server, () => page.textLinks("plan-museum", ".timeline-card__review")[1], "phone touch Markdown link", { pointerType: "touch", phone: true });
     await heldActivation(page, server, () => page.locationLink("plan-museum"), "phone touch location link", { pointerType: "touch", phone: true });
+    await heldActivation(page, server, () => page.item("plan-museum").querySelector("a.related-link"), "phone touch related link", { pointerType: "touch", phone: true });
     const handle = doc.getElementById("itinerary-sheet-handle");
     pointer(page, handle, "pointerdown", { pointerType: "touch" });
     assert.equal(doc.documentElement.classList.contains("is-sheet-dragging"), true, "the sheet handle still starts its own gesture");
@@ -467,7 +495,46 @@ try {
   }
 
   // -------------------------------------------------------------------------------------------
-  // C. Permission loss while a text link is held. A refresh deferred by the press must never
+  // C. Authorized editor controls: order/IDs/save/poll/reopen, client validation and conflicts.
+  for (const phone of [false, true]) {
+    const server = createFakeServer(fixtureTrip(), "content-manager");
+    const page = await loadPage({ server, phone });
+    const { doc, window } = page;
+    const open = async () => { page.item("plan-museum").querySelector(".icon-button").click(); await until(() => doc.getElementById("item-dialog").open, "editor open"); };
+    await open();
+    const editor = doc.getElementById("related-links-editor");
+    assert.ok(editor.closest(".form-grid"), "all link rows share the dialog's scrollable content area");
+    const rows = () => [...editor.querySelectorAll(".related-link-row")];
+    const input = (node, value) => { node.value = value; node.dispatchEvent(new window.Event("input", { bubbles: true })); };
+    assert.equal(rows().length, 2);
+    rows()[1].querySelectorAll("button")[0].click();
+    assert.equal(rows()[0].querySelector("input").value, "Guide");
+    editor.querySelector(":scope > button").click();
+    input(rows()[2].querySelector('input[type="text"]'), "Extra booking");
+    input(rows()[2].querySelector('input[type="url"]'), "javascript:alert(1)");
+    const form = doc.getElementById("item-form"), before = server.trip.version;
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); await wait(60);
+    assert.equal(server.trip.version, before, "unsafe client URL never sent");
+    input(rows()[2].querySelector('input[type="url"]'), "https://example.org/extra");
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await until(() => server.trip.version === before + 1 && !doc.getElementById("item-dialog").open, "related links saved");
+    const saved = slotOf(server.trip, "plan-museum").relatedLinks;
+    assert.deepEqual(saved.map((link) => link.id).slice(0, 2), ["guide", "booking"]);
+    assert.equal(saved[2].label, "Extra booking"); assert.ok(saved[2].id);
+    await poll(page); await open();
+    assert.deepEqual(rows().map((row) => row.querySelector('input[type="text"]').value), saved.map((link) => link.label), "retained through poll/reopen");
+    rows()[0].querySelectorAll("button")[2].click(); assert.equal(rows().length, 2);
+    input(rows()[0].querySelector('input[type="text"]'), "Local conflict draft");
+    server.remote((trip) => { slotOf(trip, "plan-museum").notes = "Concurrent fictional edit"; });
+    await poll(page);
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); await wait(60);
+    assert.ok(doc.getElementById("item-dialog").open, "conflict preserves editor draft");
+    assert.equal(rows()[0].querySelector('input[type="text"]').value, "Local conflict draft");
+    assert.deepEqual(slotOf(server.trip, "plan-museum").relatedLinks, saved, "stale draft did not overwrite links");
+    assert.ok(zeroGoogle(page), "editor save, poll and conflict do no Google/place/photo work");
+  }
+
+  // D. Permission loss while a text link is held. A refresh deferred by the press must never
   //    revive the page: a 401 clears the visible page at once; a 403 replaces the trip at once.
   {
     const server = createFakeServer(fixtureTrip());
@@ -507,7 +574,7 @@ try {
   }
 
   assert.equal(lookupCalls().length, 0, "zero Google/place/photo lookup requests in the whole run");
-  console.log("Card text link DOM simulation passed (jsdom, emulated desktop 1280 px and phone 390 px, simulated input, fictional data): location lines link to exactly the existing validated map-action URL (full Maps URL, OSM saved coordinates) and stay plain without a valid target; reviews, notes, recommendation descriptions and hotel notes render raw and Markdown links as native new-tab noopener anchors, with hostile/HTML/image text literal; Japanese text keeps links and localized names; mouse, Ctrl/Meta/Shift, middle-click, keyboard and touch activations reach the original anchor through a background refresh, propagate natively and do not toggle or select cards; the phone sheet handle still works; 401/403 during a held link clear protected UI at once; zero Google/place/photo lookups. No browser, device or provider claim.");
+  console.log("Card links DOM simulation passed: saved Maps/OSM destinations, encoded address fallback, separate multiple destinations, explicit omissions and honest arrows; escaped ordered related-link labels; manager add/edit/reorder/remove, client unsafe-URL denial, stable IDs through save/poll/reopen and stale-draft preservation; raw/Markdown text, localization, native mouse/modifier/middle/keyboard/touch through refresh and immediate auth-loss clearing; zero Google/place/photo calls. jsdom desktop/phone emulation only, no physical-device/provider claim.");
 } finally {
   epoch += 1;
   timers.forEach(nativeClear);

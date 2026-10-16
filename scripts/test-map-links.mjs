@@ -32,6 +32,7 @@ const destinations = app.slice(app.indexOf("function googleMapsDestinations("), 
 const context = vm.createContext({ normalizeGoogleMapsUrl, buildGoogleMapsUrl, getGooglePlaceLinks: () => [] });
 vm.runInContext(destinations, context);
 assert.equal(context.googleMapsDestinations({ name: "Free afternoon" }).length, 0, "Locationless plans must not acquire a Maps action");
+assert.equal(new URL(context.googleMapsDestinations({ name: "Fictional public place" }, { allowNameFallback: true })[0].url).searchParams.get("query"), "Fictional public place", "address text may explicitly request name fallback without changing map buttons");
 assert.equal(context.googleMapsDestinations({ name: "Omitted", lat: 1, lng: 2, mapLocationOmitted: true, googleMapsUrl: real }).length, 0);
 assert.equal(context.googleMapsDestinations({ googleMapsUrl: real })[0].url, real);
 assert.equal(context.googleMapsDestinations({ name: "Place", lat: 1, lng: 2 }, { allowSearchFallback: false }).length, 0);

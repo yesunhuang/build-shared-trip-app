@@ -1,5 +1,7 @@
 # Input schema
 
+Plans also support the optional ordered [related-links collection](plan-related-links.md): at most six stable `{id,label,url}` entries, shared HTTP/MCP validation, native card anchors and authorized-editor controls. Missing means unchanged on a plan patch; `[]` clears it.
+
 This file describes trip content in two forms:
 
 - the **self-hosted canonical trip**, which the server stores, the browser and MCP edit, and import/export carries; and

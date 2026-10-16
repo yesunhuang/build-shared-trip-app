@@ -9,6 +9,7 @@ import {
   GOOGLE_PLACE_ASSOCIATION_FIELD, googlePlaceAssociationProblems, locationBindingForPlan, normalizeGooglePlaceAssociation
 } from "../../assets/app-template/public/google-place-association.js";
 import { validationError } from "./errors.mjs";
+import { relatedLinksProblems } from "../../assets/app-template/public/related-links.js";
 
 export const LOCALES = Object.freeze(["en", "zh-Hans", "zh-Hant", "ja"]);
 export const PERIODS = Object.freeze(["morning", "noon", "evening"]);
@@ -58,7 +59,7 @@ export const DAY_KEYS = new Set([
 ]);
 export const PLAN_KEYS = new Set([
   "id", "name", "period", "time", "sortTime", "sortOrder", "planType", "booked",
-  "participantGroupIds", "review", "notes", "description", "googleMapsUrl", "mapsUrl",
+  "participantGroupIds", "review", "notes", "description", "relatedLinks", "googleMapsUrl", "mapsUrl",
   "googleMapsPlaceName", "googleMapsPlaceLabel", "googleMapsFeatureId", "address", "lat", "lng",
   "approximateLocation", "place", "photo", "photoSourceId", "booking", "routeGroup", "i18n", "compat",
   GOOGLE_PLACE_ASSOCIATION_FIELD
@@ -392,6 +393,7 @@ function i18nValue(value, path, issues) {
       issues.add(`${path}.${locale}`, "must be an object of translated fields");
       continue;
     }
+    if (Object.hasOwn(patch, "relatedLinks")) issues.add(`${path}.${locale}.relatedLinks`, "links are structural plan content, not a translation override");
     const copy = freeJson(patch, `${path}.${locale}`, issues, 1);
     if (copy && Object.keys(copy).length) out[locale] = copy;
   }
@@ -621,6 +623,11 @@ function normalizePlan(raw, path, issues, ctx) {
   }
   checkKeys(raw, PLAN_KEYS, path, issues);
   const out = {};
+  if (raw.relatedLinks !== undefined) {
+    const problems = relatedLinksProblems(raw.relatedLinks);
+    for (const problem of problems) issues.add(`${path}.relatedLinks${problem.key}`, problem.message);
+    if (!problems.length) out.relatedLinks = raw.relatedLinks.map(({ id, label, url }) => ({ id, label, url }));
+  }
   assignDefined(out, "id", idValue(raw.id, `${path}.id`, issues));
   assignDefined(out, "name", text(raw.name, `${path}.name`, issues, { max: 200, required: true }));
   if (raw.period !== undefined && raw.period !== null && raw.period !== "") {

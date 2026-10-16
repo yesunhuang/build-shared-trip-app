@@ -44,6 +44,7 @@ import {
 import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=__CACHE_VERSION__";
 import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=__CACHE_VERSION__";
 import { linkedTextElement, locationTextNode } from "./text-links.js?v=__CACHE_VERSION__";
+import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=__CACHE_VERSION__";
 import { optimizedPhotoUrl } from "./photo-assets.js?v=__CACHE_VERSION__";
 import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=__CACHE_VERSION__";
 import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=__CACHE_VERSION__";
@@ -1563,13 +1564,24 @@ function renderSlot(day, slot, slotIndex) {
     slot.ticketPrice ? ui(currentLanguage, "referenceLabel", { value: slot.ticketPrice }) : "",
     slot.transport?.mode ? ui(currentLanguage, "nextLabel", { value: `${slot.transport.mode}${slot.transport.duration ? ` · ${slot.transport.duration}` : ""}` }) : ""
   ].filter(Boolean);
-  if (slot.address || meta.length) {
+  if (slot.address || (!slot.mapLocationOmitted && (slot.name || slot.place?.name)) || meta.length) {
     const list = element("ul", "meta-list");
-    if (slot.address) list.append(planLocationItem(slot));
+    if (slot.address || (!slot.mapLocationOmitted && (slot.name || slot.place?.name))) list.append(planLocationItem(slot));
     meta.forEach((item) => list.append(textElement("li", "", item)));
     body.append(list);
   }
   if (slot.notes) body.append(linkedTextElement(document, "p", "note-line", slot.notes));
+  if (Array.isArray(slot.relatedLinks) && slot.relatedLinks.length && !relatedLinksProblems(slot.relatedLinks).length) {
+    const section = element("section", "plan-related-links");
+    const words = RELATED_LINK_WORDS[currentLanguage] || RELATED_LINK_WORDS.en;
+    section.setAttribute("aria-label", words[0]);
+    const list = element("ol", "plan-related-links__list");
+    for (const link of slot.relatedLinks) {
+      const item = element("li"); item.dataset.linkId = link.id;
+      item.append(externalAnchor(link.label, link.url, "related-link")); list.append(item);
+    }
+    section.append(textElement("h4", "", words[0]), list); body.append(section);
+  }
   const bookingDetails = renderTimelineBookingDetails(flightBooking, hotelBooking);
   if (bookingDetails) body.append(bookingDetails);
   const placeSource = renderPlaceSource(slot);
@@ -1636,16 +1648,24 @@ function sameCardText(first, second) {
   return normalize(first) === normalize(second);
 }
 
-// The plan's location line. It links to the SAME validated destination as the card's own map action
-// (googleMapsAnchor with allowSearchFallback: false), and only when that action has exactly one
-// destination; otherwise, or without a valid target, it stays plain text. No URL is built here.
+// Saved destinations/selected coordinates first, then an ordinary encoded Maps search. Multiple
+// destinations stay separate and labelled; omitted locations remain deliberately inert.
 function planLocationItem(slot) {
   const item = element("li", "");
-  const destinations = googleMapsDestinations(slot, { allowSearchFallback: false });
-  const url = destinations.length === 1 ? destinations[0].url : "";
-  item.append(locationTextNode(document, slot.address, url, {
-    ariaLabel: url ? `${ui(currentLanguage, "openGoogleMaps")}: ${slot.address}` : ""
-  }));
+  const label = slot.address || slot.place?.name || slot.googleMapsPlaceLabel || slot.name || "";
+  const destinations = googleMapsDestinations(slot, { allowNameFallback: true });
+  const appendLink = (text, url) => {
+    const link = locationTextNode(document, text, url, { ariaLabel: `${ui(currentLanguage, "openGoogleMaps")}: ${text}` });
+    item.append(link);
+  };
+  if (destinations.length === 1) appendLink(label, destinations[0].url);
+  else if (destinations.length > 1) {
+    item.append(document.createTextNode(`${label} · `));
+    destinations.forEach((destination, index) => {
+      if (index) item.append(document.createTextNode(" · "));
+      appendLink(destination.labels?.[currentLanguage] || destination.labels?.en || `${ui(currentLanguage, "openGoogleMaps")} ${index + 1}`, destination.url);
+    });
+  } else item.textContent = label;
   return item;
 }
 
@@ -2739,6 +2759,7 @@ function reminderDeadline(reminder) {
   return deadline.toISOString().slice(0, 10);
 }
 
+let relatedLinksEditor = null;
 function openItemDialog(dayId, slotId = "") {
   if (HOSTED_READ_ONLY) return;
   if (HOSTED) els.form.dataset.hostedVersion = String(hostedServerTrip.version);
@@ -2788,6 +2809,9 @@ function openItemDialog(dayId, slotId = "") {
   updateGoogleMapsLinkState();
   // Shows any saved place/photo from trip data only; nothing is looked up here.
   startEditorSession(dayId, slotId, slot);
+  relatedLinksEditor = createRelatedLinksEditor({ doc: document,
+    container: document.getElementById("related-links-editor"), links: slot?.relatedLinks || [],
+    language: currentLanguage, makeId: () => uid("link") });
   els.dialog.showModal();
   focusDialogFieldOnDesktop(els.form.elements.name);
 }
@@ -3739,6 +3763,8 @@ function focusDialogFieldOnDesktop(field) {
 
 async function handleItemSubmit(event) {
   event.preventDefault();
+  const relatedLinks = relatedLinksEditor?.read();
+  if (!relatedLinks) return;
   const data = new FormData(els.form);
   const dayId = data.get("dayId");
   const slotId = data.get("slotId");
@@ -3797,6 +3823,7 @@ async function handleItemSubmit(event) {
     time: String(data.get("time") || "").trim(),
     review: reviewChanged ? submittedReview : (existingSlot.review || "")
   };
+  if (relatedLinks.length || existingSlot?.relatedLinks !== undefined) slotPatch.relatedLinks = relatedLinks;
   const scheduleChanged = !existingSlot
     || String(existingSlot.time || "").trim() !== slotPatch.time
     || String(existingSlot.period || "") !== slotPatch.period;
@@ -4477,7 +4504,7 @@ function googleMapsAnchor(location, options) {
   return group;
 }
 
-function googleMapsDestinations(location = {}, { allowSearchFallback = true } = {}) {
+function googleMapsDestinations(location = {}, { allowSearchFallback = true, allowNameFallback = false } = {}) {
   if (location.mapLocationOmitted) return [];
   const stored = normalizeGoogleMapsUrl(location.googleMapsUrl || location.mapsUrl || "");
   if (stored) return [{ url: stored }];
@@ -4492,7 +4519,7 @@ function googleMapsDestinations(location = {}, { allowSearchFallback = true } = 
     if (coordinateUrl) return [{ url: coordinateUrl }];
   }
   if (!allowSearchFallback) return [];
-  if (!String(location.address || "").trim() && !(Number.isFinite(location.lat) && Number.isFinite(location.lng))) return [];
+  if (!String(location.address || "").trim() && !(Number.isFinite(location.lat) && Number.isFinite(location.lng)) && !allowNameFallback) return [];
   const fallbackUrl = buildGoogleMapsUrl(location);
   return fallbackUrl ? [{ url: fallbackUrl }] : [];
 }

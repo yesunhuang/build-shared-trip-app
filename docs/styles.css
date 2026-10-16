@@ -1556,11 +1556,19 @@ html.is-itinerary-view .page-shell::before {
   list-style: none;
 }
 
-.meta-list li::before {
-  margin-right: 0.48rem;
-  color: var(--accent);
-  content: "↗";
-}
+.location-link::after { color: var(--accent); content: " ↗"; }
+
+.plan-related-links h4 { margin-bottom: 0.35rem; }
+.plan-related-links__list { padding-left: 1.25rem; overflow-wrap: anywhere; }
+.plan-related-links__list li { margin: 0.35rem 0; }
+.plan-related-links__list a { display: inline-block; min-height: 44px; align-content: center; }
+.related-links-editor { margin: 0.8rem 0; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 0.8rem; }
+.related-links-editor legend { padding: 0 0.3rem; font-weight: 700; }
+.related-links-editor__list { display: grid; gap: 0.8rem; }
+.related-link-row { min-width: 0; display: grid; gap: 0.4rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--line); }
+.related-link-controls { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.related-link-controls button, .related-links-editor > button { min-height: 44px; }
+.related-links-editor input { min-width: 0; width: 100%; }
 
 .note-line,
 .day-tip {

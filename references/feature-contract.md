@@ -1,5 +1,7 @@
 # Feature contract
 
+Card address text uses saved Maps/selected-place destinations, with ordinary encoded name/address search fallback; multiple destinations stay individually labelled and only links have an arrow. Plans support up to six ordered editable [related links](plan-related-links.md), preserved through shared version-aware HTTP/MCP/import/export paths. Viewers may open links but cannot edit them.
+
 Preserve these behaviors unless the user explicitly requests a design change. The trip-page UI is shared by two modes:
 
 | | **Self-hosted (default)** | **Legacy generator (opt-in)** |

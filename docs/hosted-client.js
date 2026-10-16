@@ -10,7 +10,7 @@
 // enforces every permission independently.
 
 // Re-exported so the home page (which imports only this module) shares the same link guard.
-export { createLinkActivationGuard } from "./link-activation.js?v=v-3a14a0772b6d";
+export { createLinkActivationGuard } from "./link-activation.js?v=v-37500925c97c";
 
 export const TRIP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const LANGUAGE_STORAGE_KEY = "shared-trips-language";
