@@ -1,4 +1,4 @@
-import { getGooglePlaceLinks } from "./google-place-links.js?v=v-ca3e13bbf8c9";
+import { getGooglePlaceLinks } from "./google-place-links.js?v=v-9f11ec915b16";
 import {
   GOOGLE_PLACE_PHOTOS_FIELD,
   buildGooglePlacePhotosField,
@@ -21,7 +21,7 @@ import {
   toRenderTrip,
   tripHasGooglePlacePhotos,
   tripIdFromPath
-} from "./hosted-client.js?v=v-ca3e13bbf8c9";
+} from "./hosted-client.js?v=v-9f11ec915b16";
 import {
   GOOGLE_PLACE_ASSOCIATION_FIELD,
   associationForPlan,
@@ -29,7 +29,7 @@ import {
   locationBindingForPlan,
   normalizeGooglePlaceAssociation,
   placeIdFromUserInput
-} from "./google-place-association.js?v=v-ca3e13bbf8c9";
+} from "./google-place-association.js?v=v-9f11ec915b16";
 import {
   VENUE_QUERY_MAX,
   checkVenueQuery,
@@ -40,15 +40,15 @@ import {
   createPlacePreviewSession,
   createPlaceSearchSession,
   googleText
-} from "./google-places-ui-kit.js?v=v-ca3e13bbf8c9";
-import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-ca3e13bbf8c9";
-import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=v-ca3e13bbf8c9";
-import { linkedTextElement, locationTextNode } from "./text-links.js?v=v-ca3e13bbf8c9";
-import { projectCardLinks, renderCardLinkGroup, cardLinkIcon } from "./card-link-presentation.js?v=v-ca3e13bbf8c9";
-import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=v-ca3e13bbf8c9";
-import { optimizedPhotoUrl } from "./photo-assets.js?v=v-ca3e13bbf8c9";
-import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-ca3e13bbf8c9";
-import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-ca3e13bbf8c9";
+} from "./google-places-ui-kit.js?v=v-9f11ec915b16";
+import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-9f11ec915b16";
+import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=v-9f11ec915b16";
+import { linkedTextElement, locationTextNode } from "./text-links.js?v=v-9f11ec915b16";
+import { projectCardLinks, renderCardLinkGroup, cardLinkIcon } from "./card-link-presentation.js?v=v-9f11ec915b16";
+import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=v-9f11ec915b16";
+import { optimizedPhotoUrl } from "./photo-assets.js?v=v-9f11ec915b16";
+import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-9f11ec915b16";
+import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-9f11ec915b16";
 import {
   getInitialLanguage,
   languageStorageKey,
@@ -56,23 +56,23 @@ import {
   localizeTrip,
   saveLanguage,
   ui
-} from "./i18n.js?v=v-ca3e13bbf8c9";
+} from "./i18n.js?v=v-9f11ec915b16";
 import {
   createWeatherForecastController,
   localizeForecastLocation,
   weatherCodeIcon,
   weatherCodeKey
-} from "./weather-forecast.js?v=v-ca3e13bbf8c9";
+} from "./weather-forecast.js?v=v-9f11ec915b16";
 import {
   applyDayWeatherChangesLocally,
   buildDayWeatherChanges,
   isValidCoordinate as isValidWeatherCoordinate,
   pointKey as weatherPointKey,
   resolveDayWeather
-} from "./weather-association.js?v=v-ca3e13bbf8c9";
-import { createDayWeatherEditor, weatherEditorText } from "./weather-editor.js?v=v-ca3e13bbf8c9";
-import { getFlightBookings } from "./flight-bookings.js?v=v-ca3e13bbf8c9";
-import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-ca3e13bbf8c9";
+} from "./weather-association.js?v=v-9f11ec915b16";
+import { createDayWeatherEditor, weatherEditorText } from "./weather-editor.js?v=v-9f11ec915b16";
+import { getFlightBookings } from "./flight-bookings.js?v=v-9f11ec915b16";
+import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-9f11ec915b16";
 import {
   OSM_COPYRIGHT_URL,
   coordinateGoogleMapsUrl,
@@ -86,7 +86,7 @@ import {
   placeForSaving,
   readSavedPhoto,
   readSavedPlace
-} from "./place-picker.js?v=v-ca3e13bbf8c9";
+} from "./place-picker.js?v=v-9f11ec915b16";
 
 const FIREBASE_SDK_VERSION = "12.15.0";
 // Self-hosted mode is decided before any Firebase code path. It never loads the
@@ -98,7 +98,7 @@ let firebaseConfig = {};
 let tripDocumentPath = "";
 const firebaseConfigPromise = HOSTED
   ? Promise.resolve()
-  : import("./firebase-config.js?v=v-ca3e13bbf8c9")
+  : import("./firebase-config.js?v=v-9f11ec915b16")
     .then((module) => {
       firebaseConfig = module.firebaseConfig || {};
       tripDocumentPath = module.tripDocumentPath || "";
@@ -526,11 +526,29 @@ function renderEssentials() {
   heading.append(headingCopy);
   if (weatherStatus.childNodes.length) heading.append(weatherStatus);
   if (weatherForecastState.neededPoints) {
-    const retry = textElement("button", "weather-retry", ui(currentLanguage, "retryWeather"));
+    const retry = element("button", "weather-retry");
+    const busy = ["loading", "refreshing"].includes(weatherForecastState.status);
     retry.type = "button";
-    retry.disabled = !weatherForecastState.canRetry || ["loading", "refreshing"].includes(weatherForecastState.status);
+    retry.disabled = !weatherForecastState.canRetry || busy;
     retry.setAttribute("aria-label", ui(currentLanguage, "retryWeather"));
-    if (retry.disabled) retry.title = ui(currentLanguage, "weatherRetryWait");
+    retry.setAttribute("aria-busy", String(busy));
+    retry.dataset.state = busy ? "loading" : retry.disabled ? "cooldown" : "ready";
+    const hint = busy ? ui(currentLanguage, weatherForecastState.hasData ? "refreshingForecast" : "loadingForecastShort")
+      : retry.disabled ? ui(currentLanguage, "weatherRetryWait") : "";
+    retry.title = [ui(currentLanguage, "retryWeather"), hint].filter(Boolean).join(" — ");
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M3 12a9 9 0 0 1 15.4-6.4L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.4 6.4L3 16M3 21v-5h5");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    icon.append(path);
+    retry.append(icon);
     retry.addEventListener("click", () => refreshWeatherForecast({ force: true }));
     heading.append(retry);
   }

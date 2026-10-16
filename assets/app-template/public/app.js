@@ -526,11 +526,29 @@ function renderEssentials() {
   heading.append(headingCopy);
   if (weatherStatus.childNodes.length) heading.append(weatherStatus);
   if (weatherForecastState.neededPoints) {
-    const retry = textElement("button", "weather-retry", ui(currentLanguage, "retryWeather"));
+    const retry = element("button", "weather-retry");
+    const busy = ["loading", "refreshing"].includes(weatherForecastState.status);
     retry.type = "button";
-    retry.disabled = !weatherForecastState.canRetry || ["loading", "refreshing"].includes(weatherForecastState.status);
+    retry.disabled = !weatherForecastState.canRetry || busy;
     retry.setAttribute("aria-label", ui(currentLanguage, "retryWeather"));
-    if (retry.disabled) retry.title = ui(currentLanguage, "weatherRetryWait");
+    retry.setAttribute("aria-busy", String(busy));
+    retry.dataset.state = busy ? "loading" : retry.disabled ? "cooldown" : "ready";
+    const hint = busy ? ui(currentLanguage, weatherForecastState.hasData ? "refreshingForecast" : "loadingForecastShort")
+      : retry.disabled ? ui(currentLanguage, "weatherRetryWait") : "";
+    retry.title = [ui(currentLanguage, "retryWeather"), hint].filter(Boolean).join(" — ");
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    icon.setAttribute("focusable", "false");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M3 12a9 9 0 0 1 15.4-6.4L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.4 6.4L3 16M3 21v-5h5");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    icon.append(path);
+    retry.append(icon);
     retry.addEventListener("click", () => refreshWeatherForecast({ force: true }));
     heading.append(retry);
   }

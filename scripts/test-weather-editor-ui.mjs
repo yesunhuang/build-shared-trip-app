@@ -15,6 +15,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { WEATHER_EDITOR_LANGUAGES, createDayWeatherEditor, weatherEditorText } from "../assets/app-template/public/weather-editor.js";
+import { ui } from "../assets/app-template/public/i18n.js";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../assets/app-template/public/", import.meta.url));
 const nativeTimeout = globalThis.setTimeout;
@@ -595,12 +596,34 @@ try {
       for (const language of ["zh-Hans", "zh-Hant", "ja", "en"]) {
         const select = page.doc.getElementById("language-select"); select.value = language; select.dispatchEvent(new page.window.Event("change"));
         const message = page.doc.querySelector('[data-weather-error="http"]'); assert.ok(message && message.textContent && !message.textContent.includes("weatherHttpError"));
+        const iconButton = page.doc.querySelector(".weather-retry");
+        assert.equal(iconButton.tagName, "BUTTON"); assert.equal(iconButton.type, "button");
+        assert.equal(iconButton.getAttribute("aria-label"), ui(language, "retryWeather"));
+        assert.equal(iconButton.title, ui(language, "retryWeather"));
+        assert.equal(iconButton.textContent, "", "refresh is icon-only, with a localized accessible name");
+        assert.equal(iconButton.querySelector("svg").getAttribute("aria-hidden"), "true");
+        assert.equal(iconButton.querySelector("svg").getAttribute("focusable"), "false");
+        assert.equal(iconButton.parentElement.className, "weather-compact__header", "refresh remains beside the header");
       }
       assert.equal(meteoLog.length, 3, "language changes do not retry an outage");
       const retry = page.doc.querySelector(".weather-retry"); assert.equal(retry.disabled, false, "manual retry becomes available after cooldown");
+      retry.focus(); assert.equal(page.doc.activeElement, retry, "native button accepts keyboard focus");
+      let releaseRefresh; heldWeather = new Promise((resolve) => { releaseRefresh = resolve; });
       weatherFailure = null; retry.click(); retry.click();
+      await until(() => page.doc.querySelector('.weather-retry[data-state="loading"]'), "icon shows the in-flight state");
+      await until(() => meteoLog.length === 4, "one manual refresh dispatched");
+      const loadingRetry = page.doc.querySelector(".weather-retry");
+      assert.equal(loadingRetry.disabled, true); assert.equal(loadingRetry.getAttribute("aria-busy"), "true");
+      assert.ok(loadingRetry.title.includes(ui("en", "loadingForecastShort")));
+      loadingRetry.click(); assert.equal(meteoLog.length, 4, "disabled loading control cannot dispatch another request");
+      releaseRefresh();
       await until(() => page.doc.querySelector(".weather-peek__temperature") && !page.doc.querySelector(".weather-request-message"), "manual retry recovers");
       assert.equal(meteoLog.length, 4, "double activation shares one recovery request");
+      const cooldownRetry = page.doc.querySelector(".weather-retry");
+      assert.equal(cooldownRetry.dataset.state, "cooldown"); assert.equal(cooldownRetry.disabled, true);
+      assert.equal(cooldownRetry.getAttribute("aria-busy"), "false");
+      assert.ok(cooldownRetry.title.includes(ui("en", "weatherRetryWait")));
+      cooldownRetry.click(); assert.equal(meteoLog.length, 4, "cooldown cannot be bypassed by repeated clicks");
       assert.equal(JSON.stringify(outageServer.trip), before, "weather recovery never mutates stored trip choices/content/version");
     } finally { Date.now = originalNow; weatherFailure = null; }
     assert.deepEqual(page.errors, []);
