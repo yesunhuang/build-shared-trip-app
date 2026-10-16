@@ -17,7 +17,7 @@ Browser session cookies are refused at /mcp with 401, including owner, content-m
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | list_trips | none | Summaries |
-| get_trip | tripId | Trip and current version |
+| get_trip | tripId | Trip/current version, saved associations, and read-only `planLocationBindings` |
 | create_trip | requestId, trip | Draft with stable ID (`googlePlacePhotosEnabled` defaults to `false`) |
 | apply_trip_changes | tripId, requestId, expectedVersion, changes | Stored trip, new version, generated IDs |
 | import_trip | requestId, data | New trip and mapping warnings (same as `POST /api/import`) |
@@ -43,11 +43,32 @@ On conflict, read again and reconcile with a new requestId. After an uncertain r
 
 **Google place links.** `upsert_plan` also accepts the optional `googlePlaceAssociation` (`placeId`, `locationBinding`, `publicVenueConfirmed: true`; see [input-schema.md](input-schema.md#google-place-association-self-hosted-optional)). Validation is the same as for the browser. Any Google name, address, location, rating or photo field is refused. A mismatched binding refuses the batch, and a location change or clear drops a carried-over link automatically. MCP has no Google tool, and no MCP call contacts Google or reads the browser key. Never invent a Place ID or derive one from coordinates or names. Store only an ID that a person chose for that exact public venue, and leave a plan unlinked when unsure.
 
+In MCP metadata revision **1.1.0**, discovery describes the association's three fields and explicit `null` removal, the nullable selected `place`, ordered `relatedLinks`, and the per-trip Google boolean as structural JSON Schema. These are discovery descriptions over permissive Zod inputs: the shared domain remains the runtime validation authority, including its `validation_failed` errors. Tests exercise the actual SDK wire schema and rejected writes, rather than checking source strings.
+
+`get_trip` adds `planLocationBindings` alongside `trip`: an array of `{dayId, planId, locationBinding}` for that read's current version. A locationless plan has `locationBinding: null`. The binding is calculated by the existing shared location helper; clients need no browser session, provider lookup or duplicate hashing implementation. This metadata is never saved inside a trip or included in exports. Existing stored associations remain at `trip.days[].slots[].googlePlaceAssociation`.
+
+For an explicitly authorized public-venue association:
+
+1. Read `get_trip`, identify the stable day/plan IDs, and copy that plan's non-null binding from `planLocationBindings`. Use `trip.version` as `expectedVersion`.
+2. Send only `upsert_plan` with the existing plan `id` and `googlePlaceAssociation: {placeId: <person-confirmed ID>, locationBinding: <binding from this read>, publicVenueConfirmed: true}`. Never guess an ID or treat this field as permission to search or import Google content.
+3. Read back the saved association. To remove it, send `googlePlaceAssociation: null` with a fresh version and request ID; the location, photo and related links remain.
+4. After uncertainty retry the identical payload/request ID. After a conflict re-read and reconcile; a location change may invalidate the earlier binding and association. Avoid full-trip replacement as a workaround for a missing client field.
+
+The existing content-manager MCP authorization suffices for these content edits. A signed-out website does not prevent an already-authorized MCP connection from editing; browser cookies do not authorize MCP.
+
 **Per-trip Google setting.** The trip field `googlePlacePhotosEnabled` (`true`/`false`, `false` when absent) decides whether a trip's opened plans may show Google place details at all ([input-schema.md](input-schema.md#per-trip-google-setting-self-hosted-optional)). Change it with `update_trip` (`{"type":"update_trip","fields":{"googlePlacePhotosEnabled":true}}`), or send it in `create_trip`, `import_trip` or `replace_content`; all use the same validation as the browser, so `"true"`, `1` or `null` return `validation_failed` and change nothing. `get_trip` and `export_trip` show `false` for trips saved before the field existed. Owner and content-manager credentials (including OAuth) may change it; it is trip content and grants nothing else. It does not enable the site-wide feature, which stays an operator setting, and there is still no Google search tool. Turn it on only when the user asks for Google details in that trip.
 
 When switching a selected OSM place to a Google Maps URL, send `place: null` together with the new `googleMapsUrl`. A stored place otherwise remains the location source. Clearing the place can restore a retained Google URL; clear that URL too when removing the location entirely.
 
 ## Client configuration
+
+### Refresh the same installed connection
+
+Server discovery and the client's generated tool schema are separate evidence. Check the actual `tools/list` schema for `apply_trip_changes` (`upsert_plan.plan.googlePlaceAssociation`, `place`, `relatedLinks`; `update_trip.fields.googlePlacePhotosEnabled`) and `create_trip.trip.googlePlacePhotosEnabled`, then compare the fields exposed in the target conversation. Seeing six tool names or a successful read does not establish write-argument visibility.
+
+For a directly connected custom MCP server, the [official OpenAI refresh procedure](https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata) is to update the server when needed, open that **existing** connection in ChatGPT Plugins, choose **Refresh**, verify the changed metadata, and start a new conversation with the same installed plugin selected. Keep the existing identity, endpoint, audience and OAuth scope/grant configuration; do not disconnect or create a replacement connection as a schema workaround. Published plugins instead use their documented tool-update review flow; do not confuse that with a custom connection refresh.
+
+This repository cannot update a host's cached/generated schema. If the current tool surface exposes no metadata-refresh operation, the existing connection's owner or workspace administrator must use its supported details-page control. If that control is absent or requests a new authorization/permission change, retain the current connection and report that exact blocker. A schema refresh is not a reason to demand website sign-in or provision another credential.
 
 For clients supporting Streamable HTTP with custom headers:
 
