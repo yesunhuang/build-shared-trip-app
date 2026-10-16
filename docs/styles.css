@@ -3406,8 +3406,8 @@ details[open] > summary .summary-chevron,
 .day-todos {
   margin: 0 0 0.9rem 2.8rem;
   padding: 0.7rem 0.85rem 0.25rem;
-  background: var(--accent-soft);
-  border: 1px solid rgba(219, 117, 73, 0.25);
+  background: var(--checklist-surface);
+  border: 1px solid var(--checklist-border);
   border-radius: 13px;
 }
 
@@ -3440,6 +3440,83 @@ details[open] > summary .summary-chevron,
 
 .day-todos .todo-text {
   font-size: 0.8rem;
+}
+
+/* Local checklist palette: trip accents, maps, weather and cards keep their own colors. */
+.checklist-panel,
+.day-todos {
+  --checklist-surface: #e3ece1;
+  --checklist-ink: #254a36;
+  --checklist-muted: #49664e;
+  --checklist-border: #58765c;
+  --checklist-badge: #c7dac5;
+  --checklist-check: #315f43;
+  --checklist-warning: #8f352d;
+  color: var(--checklist-ink);
+  background: var(--checklist-surface);
+  border-color: var(--checklist-border);
+}
+
+:is(.checklist-panel, .day-todos) :is(.quick-panel__heading, .todo-deadline, .todo-text, .summary-chevron),
+.day-todos__heading h3 {
+  color: var(--checklist-ink);
+}
+
+:is(.checklist-panel, .day-todos) :is(.todo-item, .quick-panel__body) {
+  border-color: var(--checklist-border);
+}
+
+:is(.checklist-panel, .day-todos) .count-chip {
+  color: var(--checklist-ink);
+  background: var(--checklist-badge);
+  border: 1px solid var(--checklist-border);
+}
+
+:is(.checklist-panel, .day-todos) :is(.todo-edit, .button) {
+  color: var(--checklist-ink);
+  background: var(--checklist-surface);
+  border-color: var(--checklist-border);
+}
+
+:is(.checklist-panel, .day-todos) :is(.todo-edit, .button):hover:not(:disabled) {
+  background: var(--checklist-badge);
+}
+
+:is(.checklist-panel, .day-todos) .muted,
+:is(.checklist-panel, .day-todos) .todo-item.is-complete :is(.todo-text, .todo-deadline) {
+  color: var(--checklist-muted);
+}
+
+:is(.checklist-panel, .day-todos) input[type="checkbox"] {
+  accent-color: var(--checklist-check);
+  outline: 1px solid var(--checklist-border);
+  outline-offset: 1px;
+}
+
+:is(.checklist-panel, .day-todos) input[type="checkbox"]:disabled {
+  outline-style: dashed;
+}
+
+:is(.checklist-panel, .day-todos) :is(button, input, summary):focus-visible {
+  outline: 3px solid var(--checklist-check);
+  outline-offset: 3px;
+}
+
+:is(.checklist-panel, .day-todos) .todo-item.is-overdue .todo-deadline {
+  color: var(--checklist-warning);
+}
+
+:is(.checklist-panel, .day-todos) .todo-item.is-overdue .todo-deadline::before {
+  content: "!";
+  display: inline-grid;
+  place-items: center;
+  width: 1.1em;
+  height: 1.1em;
+  margin-inline-end: 0.3em;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .timeline {

@@ -13,7 +13,7 @@
 // serialization (punycode host, percent-encoded path/query) while the visible text stays exactly
 // what the author wrote. No event handler is attached: the browser's own activation (click, Enter,
 // modifiers, middle-click, long-press) is untouched.
-import { safeLinkUrl } from "./link-activation.js?v=v-9f11ec915b16";
+import { safeLinkUrl } from "./link-activation.js?v=v-875f6f65f5c8";
 
 /** Longer strings are rendered as one plain text node (server text fields are capped at 4,000). */
 export const TEXT_LINK_MAX_INPUT = 8000;
