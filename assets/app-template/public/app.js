@@ -44,6 +44,7 @@ import {
 import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=__CACHE_VERSION__";
 import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=__CACHE_VERSION__";
 import { linkedTextElement, locationTextNode } from "./text-links.js?v=__CACHE_VERSION__";
+import { projectCardLinks, renderCardLinkGroup, cardLinkIcon } from "./card-link-presentation.js?v=__CACHE_VERSION__";
 import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=__CACHE_VERSION__";
 import { optimizedPhotoUrl } from "./photo-assets.js?v=__CACHE_VERSION__";
 import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=__CACHE_VERSION__";
@@ -1549,11 +1550,12 @@ function renderSlot(day, slot, slotIndex) {
   summary.append(photo, summaryCopy, textElement("span", "timeline-card__chevron", "⌄"));
 
   const body = element("div", "timeline-card__body");
-  if (slot.review) body.append(linkedTextElement(document, "p", "timeline-card__review", slot.review));
+  const presentation = projectCardLinks(slot);
+  if (presentation.texts.review) body.append(textElement("p", "timeline-card__review", presentation.texts.review));
   // The plan's (localized) description, with safe links like the review. Skipped when it repeats
   // the review so the same paragraph is never shown twice.
   if (typeof slot.description === "string" && slot.description.trim() && !sameCardText(slot.description, slot.review)) {
-    body.append(linkedTextElement(document, "p", "timeline-card__description", slot.description));
+    if (presentation.texts.description) body.append(textElement("p", "timeline-card__description", presentation.texts.description));
   }
 
   const meta = [
@@ -1568,24 +1570,18 @@ function renderSlot(day, slot, slotIndex) {
   // free afternoon or other timeline-only plan into an unrelated name search.
   const locationLabel = slot.address || slot.place?.name || slot.googleMapsPlaceLabel || slot.googleMapsPlaceName
     || (googleMapsDestinations(slot, { allowSearchFallback: false }).length ? slot.name : "");
-  if (locationLabel || meta.length) {
+  const locationRow = locationLabel ? planLocationItem(slot, locationLabel, presentation.links) : null;
+  if (locationRow) body.append(locationRow);
+  const locationHrefs = new Set([...(locationRow?.querySelectorAll("a[href]") || [])].map((link) => link.href));
+  if (meta.length) {
     const list = element("ul", "meta-list");
-    if (locationLabel) list.append(planLocationItem(slot, locationLabel));
     meta.forEach((item) => list.append(textElement("li", "", item)));
     body.append(list);
   }
-  if (slot.notes) body.append(linkedTextElement(document, "p", "note-line", slot.notes));
-  if (Array.isArray(slot.relatedLinks) && slot.relatedLinks.length && !relatedLinksProblems(slot.relatedLinks).length) {
-    const section = element("section", "plan-related-links");
-    const words = RELATED_LINK_WORDS[currentLanguage] || RELATED_LINK_WORDS.en;
-    section.setAttribute("aria-label", words[0]);
-    const list = element("ol", "plan-related-links__list");
-    for (const link of slot.relatedLinks) {
-      const item = element("li"); item.dataset.linkId = link.id;
-      item.append(externalAnchor(link.label, link.url, "related-link")); list.append(item);
-    }
-    section.append(textElement("h4", "", words[0]), list); body.append(section);
-  }
+  if (presentation.texts.notes) body.append(textElement("p", "note-line", presentation.texts.notes));
+  const words = RELATED_LINK_WORDS[currentLanguage] || RELATED_LINK_WORDS.en;
+  const linkGroup = renderCardLinkGroup(document, presentation.links.filter((link) => !locationHrefs.has(link.href)), words[0]);
+  if (linkGroup) body.append(linkGroup);
   const bookingDetails = renderTimelineBookingDetails(flightBooking, hotelBooking);
   if (bookingDetails) body.append(bookingDetails);
   const placeSource = renderPlaceSource(slot);
@@ -1599,7 +1595,13 @@ function renderSlot(day, slot, slotIndex) {
   if (googleHost) body.append(googleHost);
   const actions = element("div", "timeline-card__actions");
   const mapsAction = googleMapsAnchor(slot, { allowSearchFallback: false });
-  if (mapsAction) actions.append(mapsAction);
+  // The location row carries the same native Maps action; do not duplicate it in the footer.
+  if (mapsAction?.matches("a")) {
+    if (!locationHrefs.has(mapsAction.href)) actions.append(mapsAction);
+  } else if (mapsAction) {
+    for (const link of mapsAction.querySelectorAll("a")) if (locationHrefs.has(link.href)) link.remove();
+    if (mapsAction.querySelector("a")) actions.append(mapsAction);
+  }
   if (!slot.syntheticBooking && !HOSTED_READ_ONLY) {
     const edit = textElement("button", "icon-button", ui(currentLanguage, "edit"));
     edit.type = "button";
@@ -1654,19 +1656,31 @@ function sameCardText(first, second) {
 
 // Saved destinations/selected coordinates first, then an ordinary encoded Maps search. Multiple
 // destinations stay separate and labelled; omitted locations remain deliberately inert.
-function planLocationItem(slot, label) {
-  const item = element("li", "");
-  const destinations = googleMapsDestinations({ ...slot, name: slot.place?.name || slot.googleMapsPlaceName || slot.googleMapsPlaceLabel || slot.name }, { allowNameFallback: true });
-  const appendLink = (text, url) => {
+function planLocationItem(slot, label, related = []) {
+  const item = element("div", "plan-location");
+  const byUrl = new Map();
+  for (const destination of googleMapsDestinations({ ...slot, name: slot.place?.name || slot.googleMapsPlaceName || slot.googleMapsPlaceLabel || slot.name }, { allowNameFallback: true })) {
+    if (!byUrl.has(destination.url)) byUrl.set(destination.url, { url: destination.url, labels: [] });
+    const text = destination.labels?.[currentLanguage] || destination.labels?.en;
+    if (text && !byUrl.get(destination.url).labels.includes(text)) byUrl.get(destination.url).labels.push(text);
+  }
+  const destinations = [...byUrl.values()];
+  const appendLink = (text, url, destinationLabels = []) => {
     const link = locationTextNode(document, text, url, { ariaLabel: `${ui(currentLanguage, "openGoogleMaps")}: ${text}` });
+    if (link.nodeType === 1) {
+      const aliases = [...new Set([...destinationLabels, ...(related.find((entry) => entry.href === link.href)?.labels || [])])].filter((entry) => entry !== text);
+      const copy = textElement("span", "plan-location__label", text);
+      if (aliases.length) copy.append(textElement("span", "plan-location__aliases", ` · ${aliases.join(" · ")}`));
+      link.replaceChildren(cardLinkIcon(document, "map"), copy);
+      if (aliases.length) link.setAttribute("aria-label", `${ui(currentLanguage, "openGoogleMaps")}: ${copy.textContent}`);
+    }
     item.append(link);
   };
-  if (destinations.length === 1) appendLink(label, destinations[0].url);
+  if (destinations.length === 1) appendLink(label, destinations[0].url, destinations[0].labels);
   else if (destinations.length > 1) {
-    item.append(document.createTextNode(`${label} · `));
+    item.append(textElement("span", "plan-location__context", label));
     destinations.forEach((destination, index) => {
-      if (index) item.append(document.createTextNode(" · "));
-      appendLink(destination.labels?.[currentLanguage] || destination.labels?.en || `${ui(currentLanguage, "openGoogleMaps")} ${index + 1}`, destination.url);
+      appendLink(destination.labels.join(" · ") || `${ui(currentLanguage, "openGoogleMaps")} ${index + 1}`, destination.url);
     });
   } else item.textContent = label;
   return item;

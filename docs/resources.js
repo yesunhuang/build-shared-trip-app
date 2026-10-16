@@ -4,8 +4,8 @@ import {
   languageMeta,
   saveLanguage,
   ui
-} from "./i18n.js?v=v-7f36dcbf02d6";
-import { getTripResources } from "./trip-resources.js?v=v-7f36dcbf02d6";
+} from "./i18n.js?v=v-7d714f2937ad";
+import { getTripResources } from "./trip-resources.js?v=v-7d714f2937ad";
 
 const languageSelect = document.getElementById("language-select");
 const paymentContent = document.getElementById("payment-page-content");

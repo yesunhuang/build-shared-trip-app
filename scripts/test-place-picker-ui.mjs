@@ -512,7 +512,7 @@ try {
   assert.match(popupHref(stubMarker("plan-garden")), /^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=40\.2%2C10\.3$/, "coordinate navigation for a chosen place");
   assert.ok(!/!1s|place_id/.test(popupHref(stubMarker("plan-garden"))), "no invented Google place identifier");
   assert.equal(popupHref(stubMarker("plan-museum")), GOOGLE_URL, "stored full Google link is kept");
-  assert.equal(page.item("plan-garden").querySelector(".google-maps-link").href, "https://www.google.com/maps/search/?api=1&query=40.2%2C10.3");
+  assert.equal(page.item("plan-garden").querySelector(".plan-location .location-link").href, "https://www.google.com/maps/search/?api=1&query=40.2%2C10.3");
 
   stubMarker("plan-garden").handlers.click();
   await until(() => page.item("plan-garden").classList.contains("is-map-selected"), "marker selects its card");

@@ -14,6 +14,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { MAPS_JS_URL } from "../assets/app-template/public/google-places-ui-kit.js";
+import "./test-card-link-presentation.mjs";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../assets/app-template/public/", import.meta.url));
 const ORIGIN = "http://fictional-trips.test";
@@ -34,7 +35,7 @@ function fixtureTrip() {
     id: TRIP_ID, version: 1, archived: false, title: "Fictional Harbour Weekend", timezone: "UTC", country: "Fictionland", route: "Sample Bay",
     updatedAt: "2031-01-03T00:00:00.000Z", createdAt: "2031-01-01T00:00:00.000Z", dateRange: { start: DAY_ONE, end: "2031-06-11" },
     reminders: [], participantGroups: [], tips: [],
-    googlePlaceLinks: { "plan-multi": [{ url: GOOGLE_URL, labels: { en: "Museum", ja: "美術館" } }, { url: "https://www.google.com/maps/search/?api=1&query=Fictional+Second+Entrance", labels: { en: "Second entrance", ja: "別の入口" } }] },
+    googlePlaceLinks: { "plan-multi": [{ url: GOOGLE_URL, labels: { en: "Museum", ja: "美術館" } }, { url: "https://www.google.com/maps/search/?api=1&query=Fictional+Second+Entrance", labels: { en: "Second entrance", ja: "別の入口" } }, { url: GOOGLE_URL, labels: { en: "Gallery", ja: "ギャラリー" } }] },
     hotelAreas: [{ area: "Fictional Harbour", reason: "Near the quay", options: [
       { name: "Invented Harbour Inn", tier: "planned", note: "Rooms: [Fictional rooms](https://example.org/rooms) (no booking)." }
     ] }],
@@ -55,11 +56,15 @@ function fixtureTrip() {
           address: "3 Sample Lane", review: "Timeline-only placeholder", description: "Timeline-only placeholder" },
         { id: "plan-unsafe", name: "Invented Unsafe Pier", period: "evening", time: "20:00", sortTime: "20:00", planType: "sight",
           address: "9 Sample Pier", mapsUrl: "javascript:alert(1)", review: "https://user:pw@evil.example/ and //evil.example/x" },
-        { id: "plan-multi", name: "Invented two-stop route", address: "Fictional museum and entrance", period: "evening", time: "20:15" },
+        { id: "plan-multi", name: "Invented two-stop route", address: "Fictional museum and entrance", period: "evening", time: "20:15",
+          relatedLinks: [{ id: "directions", label: "Directions", url: GOOGLE_URL }] },
         { id: "plan-omitted", name: "Deliberately omitted", address: "Private location omitted", mapLocationOmitted: true, period: "evening", time: "20:30" },
         { id: "plan-empty", name: "", period: "evening", time: "20:45" },
         { id: "plan-no-location", name: "Fictional free afternoon", period: "evening", time: "20:46" },
-        { id: "plan-named-place", name: "Fictional visit", googleMapsPlaceName: "Invented Named Gallery", period: "evening", time: "20:47" },
+        { id: "plan-named-place", name: "Fictional visit", googleMapsPlaceName: "Invented Named Gallery", period: "evening", time: "20:47",
+          review: "A fictional gallery visit. [Booking](https://example.org/gallery-booking) · [Menu](https://example.org/gallery-menu).",
+          notes: "https://example.org/gallery-booking",
+          relatedLinks: [{ id: "reserve", label: "Reserve", url: "https://example.org/gallery-booking" }] },
         { id: "plan-lookalike", name: "Invented Lookalike Pier", period: "evening", time: "21:00", sortTime: "21:00", planType: "sight",
           address: "10 Sample Pier", googleMapsUrl: "https://evil.example/maps/place/Invented+Pier" }
       ], recommendations: {
@@ -258,10 +263,13 @@ async function loadPage({ server, phone = false }) {
   const page = { window, doc, errors, google, activations, opened };
   page.item = (id) => doc.querySelector(`.timeline-item[data-slot-id="${id}"]`);
   page.card = (id) => page.item(id)?.querySelector(".timeline-card");
-  page.location = (id) => page.item(id)?.querySelector(".timeline-card__body .meta-list li:first-child");
+  page.location = (id) => page.item(id)?.querySelector(".timeline-card__body .plan-location");
   page.locationLink = (id) => page.location(id)?.querySelector("a.location-link") || null;
-  page.mapAction = (id) => page.item(id)?.querySelector(".timeline-card__actions a.google-maps-link") || null;
-  page.textLinks = (id, selector) => [...(page.item(id)?.querySelectorAll(`${selector} a.text-link`) || [])];
+  page.mapAction = (id) => page.locationLink(id) || page.item(id)?.querySelector(".timeline-card__actions a.google-maps-link") || null;
+  page.textLinks = (id, selector) => {
+    const field = selector === ".timeline-card__review" ? "review" : selector === ".timeline-card__description" ? "description" : "notes";
+    return [...(page.item(id)?.querySelectorAll(`a.card-destination-link[data-source-fields~="${field}"]`) || [])];
+  };
   return page;
 }
 
@@ -375,37 +383,45 @@ try {
     assert.equal(page.locationLink("plan-museum").textContent, "1 Sample Quay");
     assert.equal(page.mapAction("plan-museum").textContent.length > 0, true, "the map button is unchanged and still present");
     const multiple = [...page.location("plan-multi").querySelectorAll("a")];
-    assert.deepEqual(multiple.map((link) => link.textContent), ["Museum", "Second entrance"], "multiple destinations remain separately labelled");
+    assert.deepEqual(multiple.map((link) => link.textContent), ["Museum · Gallery · Directions", "Second entrance"], "multiple destinations remain separate; repeated destination labels share one anchor");
     assert.equal(multiple[0].href, GOOGLE_URL);
+    assert.equal(page.item("plan-multi").querySelectorAll("a.related-link").length, 0, "a related Maps label accompanies the row rather than duplicating its action");
     assert.equal(page.locationLink("plan-omitted"), null, "explicit omission stays nonlink");
     assert.equal(page.location("plan-empty"), null, "missing name/address has no invented location row");
     assert.equal(page.location("plan-no-location"), null, "a plan title alone is not an address or place name");
     assert.equal(page.locationLink("plan-named-place")?.textContent, "Invented Named Gallery");
     assert.equal(new URL(page.locationLink("plan-named-place").href).searchParams.get("query"), "Invented Named Gallery", "explicit place name, not a generic plan title, supplies the name-only fallback");
+    assert.equal(page.item("plan-named-place").querySelector(".timeline-card__review").textContent, "A fictional gallery visit.");
+    assert.equal(page.item("plan-named-place").querySelector(".note-line"), null, "link-only notes do not leave an empty paragraph");
+    assert.deepEqual([...page.item("plan-named-place").querySelectorAll("a.related-link")].map((a) => [a.textContent, a.href]), [["Reserve · Booking", "https://example.org/gallery-booking"], ["Menu", "https://example.org/gallery-menu"]], "one compact action per exact destination; explicit labels retained");
+    assert.equal(slotOf(server.trip, "plan-named-place").review, slotOf(fixtureTrip(), "plan-named-place").review, "stored prose remains verbatim");
     const css = fs.readFileSync(path.join(PUBLIC_DIR, "styles.css"), "utf8");
     assert.ok(!css.includes(".meta-list li::before"), "no decorative link arrow on nonlink metadata");
-    assert.ok(css.includes(".location-link::after"), "only the real anchor owns its affordance");
+    assert.ok(!css.includes(".location-link::after"), "decorative arrows replaced by local map icons");
+    assert.ok(page.locationLink("plan-museum").querySelector('svg[aria-hidden="true"]'), "native map anchor has a decorative local icon");
+    for (const id of ["plan-museum", "plan-park", "plan-multi"]) assert.equal(page.item(id).querySelectorAll(".timeline-card__actions a.google-maps-link").length, 0, "no duplicate footer map actions");
     for (const id of ["plan-cafe", "plan-unsafe", "plan-lookalike"]) {
       const slot = slotOf(fixtureTrip(), id);
       assert.equal(page.locationLink(id)?.href, `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${slot.name}, ${slot.address}`)}`, `${id}: ordinary encoded address search without a saved URL`);
-      assert.equal(page.mapAction(id), null, `${id}: and no map action either`);
+      assert.equal(page.item(id).querySelector(".timeline-card__actions a.google-maps-link"), null, `${id}: no duplicate footer action`);
       assert.ok(page.location(id).textContent.includes(slotOf(fixtureTrip(), id).address), `${id}: address still shown`);
     }
     const related = [...page.item("plan-museum").querySelectorAll("a.related-link")];
-    assert.deepEqual(related.map((link) => link.href), ["https://example.org/fictional-booking", "https://example.org/fictional-guide"]);
-    assert.ok(related[0].textContent.includes("<img")); assert.equal(related[0].children.length, 0, "labels are escaped text");
+    assert.deepEqual(related.slice(0, 2).map((link) => link.href), ["https://example.org/fictional-booking", "https://example.org/fictional-guide"]);
+    assert.ok(related[0].textContent.includes("<img")); assert.equal(related[0].querySelectorAll("img,script").length, 0, "labels are escaped text beside a local icon");
     assert.equal(doc.getElementById("related-links-editor")?.closest("dialog")?.open, false, "viewer has no open link editor");
 
     // A2. Text links in review, notes, recommendation description and hotel note.
     const reviewLinks = page.textLinks("plan-museum", ".timeline-card__review");
     assert.deepEqual(reviewLinks.map((link) => [link.textContent, link.href]), [
-      ["https://tickets.example.org/museum?day=1&lang=en", "https://tickets.example.org/museum?day=1&lang=en"],
+      ["tickets.example.org", "https://tickets.example.org/museum?day=1&lang=en"],
       ["the fictional guide", "https://example.org/guide_(museum)"]
     ], "raw URL (trailing comma excluded) and Markdown link with balanced parentheses");
     assert.ok(textOf(page.item("plan-museum").querySelector(".timeline-card__review")).endsWith(", or see the fictional guide."), "punctuation preserved as text; Markdown syntax replaced by its label");
     assert.ok(page.item("plan-museum").querySelector(".timeline-card__review").classList.contains("timeline-card__review"), "class retained");
     const description = page.item("plan-museum").querySelector(".timeline-card__description");
-    assert.equal(description.querySelector("a").href, "https://example.org/entrance", "a distinct description renders a native link beside the review");
+    assert.equal(description.querySelector("a"), null, "description prose has no buried action");
+    assert.equal(page.textLinks("plan-museum", ".timeline-card__description")[0].href, "https://example.org/entrance", "description destination is a separate native icon link");
     assert.ok(description.textContent.includes("<img src=x onerror=alert(1)>"));
     assert.equal(description.querySelectorAll("img,script").length, 0, "hostile description stays text");
     assert.equal(page.textLinks("plan-park", ".timeline-card__description")[0].href, "https://example.org/park-info", "description-only plan renders its URL");
@@ -461,7 +477,7 @@ try {
     await until(() => textOf(page.item("plan-museum")?.querySelector(".timeline-card__review")).startsWith("チケットは"), "Japanese review");
     const jaLinks = page.textLinks("plan-museum", ".timeline-card__review");
     assert.deepEqual(jaLinks.map((link) => [link.textContent, link.href]), [
-      ["https://tickets.example.org/ja", "https://tickets.example.org/ja"], ["架空ガイド", "https://example.org/ja/guide"]
+      ["tickets.example.org", "https://tickets.example.org/ja"], ["架空ガイド", "https://example.org/ja/guide"]
     ], "links inside Japanese text; full-width punctuation stays text");
     assert.ok(textOf(page.item("plan-museum").querySelector(".timeline-card__review")).includes("。"), "Japanese punctuation preserved");
     assert.ok(textOf(page.item("plan-museum").querySelector(".timeline-card__description")).startsWith("説明："));
@@ -579,7 +595,7 @@ try {
   }
 
   assert.equal(lookupCalls().length, 0, "zero Google/place/photo lookup requests in the whole run");
-  console.log("Card links DOM simulation passed: saved Maps/OSM destinations, encoded address fallback, separate multiple destinations, explicit omissions and honest arrows; escaped ordered related-link labels; manager add/edit/reorder/remove, client unsafe-URL denial, stable IDs through save/poll/reopen and stale-draft preservation; raw/Markdown text, localization, native mouse/modifier/middle/keyboard/touch through refresh and immediate auth-loss clearing; zero Google/place/photo calls. jsdom desktop/phone emulation only, no physical-device/provider claim.");
+  console.log("Card presentation DOM simulation passed: distinct local-icon Maps rows, encoded address fallback, separate multiple destinations, explicit omissions; compact deduplicated labelled links and verbatim stored prose; manager add/edit/reorder/remove, unsafe-URL denial, stable IDs through save/poll/reopen and stale drafts; localization and native mouse/modifier/middle/keyboard/touch through refresh and auth-loss clearing; zero Google/place/photo calls. jsdom desktop/phone emulation only.");
 } finally {
   epoch += 1;
   timers.forEach(nativeClear);

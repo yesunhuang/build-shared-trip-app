@@ -740,7 +740,7 @@ try {
     const page = await loadPage({ server });
     const { window, doc } = page;
     await setCardOpen(page, "plan-museum", true);
-    const mapsLink = () => page.item("plan-museum").querySelector(".timeline-card__actions a.google-maps-link");
+    const mapsLink = () => page.item("plan-museum").querySelector(".plan-location a.location-link, .timeline-card__actions a.google-maps-link");
     let anchor = mapsLink();
     assert.ok(anchor, "the plan has a Google Maps link");
     assert.equal(anchor.href, new URL(GOOGLE_URL).href, "the validated Maps URL is used unchanged");
@@ -866,7 +866,7 @@ try {
     const { doc } = page;
     assert.ok(doc.documentElement.classList.contains("is-itinerary-view"), "phone sheet view");
     await setCardOpen(page, "plan-museum", true);
-    const anchor = page.item("plan-museum").querySelector(".timeline-card__actions a.google-maps-link");
+    const anchor = page.item("plan-museum").querySelector(".plan-location a.location-link, .timeline-card__actions a.google-maps-link");
     pointer(page, anchor, "pointerdown", { pointerType: "touch" }); touch(page, anchor, "touchstart");
     pointer(page, page.window, "pointermove", { pointerType: "touch", clientY: 260 });
     assert.equal(doc.documentElement.classList.contains("is-sheet-dragging"), false, "a touch on a link never starts the sheet drag");

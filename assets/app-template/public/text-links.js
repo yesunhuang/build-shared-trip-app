@@ -258,7 +258,7 @@ function readImageSyntax(text, index) {
  * Pure (no DOM). null/undefined give []. Joining all segment texts reproduces the input, except
  * that each accepted Markdown link is replaced by its label.
  */
-export function parseTextLinks(value) {
+export function parseTextLinks(value, { sourceInfo = false, strictConstructs = false } = {}) {
   const text = typeof value === "string" ? value : value == null ? "" : String(value);
   if (!text) return [];
   if (text.length > TEXT_LINK_MAX_INPUT) return [{ type: "text", text }];
@@ -271,27 +271,36 @@ export function parseTextLinks(value) {
     if (previous?.type === "text") previous.text += text.slice(plainStart, end);
     else segments.push({ type: "text", text: text.slice(plainStart, end) });
   };
-  const pushLink = (start, end, label, href) => {
+  const pushLink = (start, end, label, href, kind) => {
     pushText(start);
-    segments.push({ type: "link", text: label, href });
+    segments.push({ type: "link", text: label, href, ...(sourceInfo ? { kind } : {}) });
     links += 1;
     plainStart = end;
   };
   let index = 0;
   while (index < text.length && links < TEXT_LINK_MAX_LINKS) {
     const char = text[index];
-    if (char === "!" && text[index + 1] === "[") { index = readImageSyntax(text, index); continue; }
+    // Card projection must not extract a partial URL from malformed Markdown or HTML.
+    // The legacy inline renderer retains its established parsing behavior.
+    if (strictConstructs && char === "<") {
+      const end = text.indexOf(">", index + 1);
+      index = end < 0 ? text.length : end + 1; continue;
+    }
+    if (char === "!" && text[index + 1] === "[") { index = strictConstructs ? literalConstructEnd(text, index + 1) : readImageSyntax(text, index); continue; }
     // A backslash escapes a following "[" or raw "http" from linking.
-    if (char === "\\" && /[[hH]/.test(text[index + 1] || "")) { index += 2; continue; }
+    if (char === "\\" && /[[hH]/.test(text[index + 1] || "")) {
+      index = strictConstructs && text[index + 1] === "[" ? literalConstructEnd(text, index + 1) : index + 2; continue;
+    }
     if (char === "[") {
       const found = readMarkdownLink(text, index);
-      if (found) { pushLink(index, found.end, found.label, found.href); index = found.end; continue; }
+      if (found) { pushLink(index, found.end, found.label, found.href, "markdown"); index = found.end; continue; }
+      if (strictConstructs) { index = literalConstructEnd(text, index); continue; }
       index += 1; continue;
     }
     if (char === "h" || char === "H") {
       const found = readRawUrl(text, index);
       if (found) {
-        if (found.href) pushLink(index, found.end, found.text, found.href);
+        if (found.href) pushLink(index, found.end, found.text, found.href, "raw");
         index = Math.max(found.end, index + 1);
         continue;
       }
@@ -300,6 +309,22 @@ export function parseTextLinks(value) {
   }
   pushText(text.length);
   return segments;
+}
+
+function literalConstructEnd(text, start) {
+  let cursor = start, depth = 0;
+  while (cursor < text.length && text[cursor] !== "\n") {
+    if (text[cursor] === "[") depth += 1;
+    if (text[cursor++] === "]" && --depth === 0) break;
+  }
+  while (text[cursor] === " " || text[cursor] === "\t") cursor += 1;
+  if (text[cursor] !== "(") return Math.max(cursor, start + 1);
+  depth = 0;
+  while (cursor < text.length && text[cursor] !== "\n") {
+    if (text[cursor] === "(") depth += 1;
+    if (text[cursor++] === ")" && --depth === 0) break;
+  }
+  return cursor;
 }
 
 /** Native external anchor (no handlers). Callers pass an already validated href. */

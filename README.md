@@ -1,6 +1,6 @@
 # Build Shared Trip App
 
-Plan cards include clickable location/address text and up to six editable, ordered [related links](references/plan-related-links.md), such as booking pages. Owners and content managers can manage them in the plan editor.
+Plan cards show a distinct map-icon address row and compact labelled icon links. Safe links in review, description and notes join the group without changing saved text. Up to six editable, ordered [related links](references/plan-related-links.md), such as booking pages, remain available to owners and content managers in the plan editor.
 
 **A self-hosted, multilingual travel planner for you and a few companions. One small server holds every trip, invited companions you approve can view them or, if you choose, help edit them, and an MCP endpoint lets an AI you configure read and edit the same itineraries.**
 
