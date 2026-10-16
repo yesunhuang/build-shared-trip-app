@@ -1,4 +1,4 @@
-import { getGooglePlaceLinks } from "./google-place-links.js?v=v-37500925c97c";
+import { getGooglePlaceLinks } from "./google-place-links.js?v=v-7f36dcbf02d6";
 import {
   GOOGLE_PLACE_PHOTOS_FIELD,
   buildGooglePlacePhotosField,
@@ -21,7 +21,7 @@ import {
   toRenderTrip,
   tripHasGooglePlacePhotos,
   tripIdFromPath
-} from "./hosted-client.js?v=v-37500925c97c";
+} from "./hosted-client.js?v=v-7f36dcbf02d6";
 import {
   GOOGLE_PLACE_ASSOCIATION_FIELD,
   associationForPlan,
@@ -29,7 +29,7 @@ import {
   locationBindingForPlan,
   normalizeGooglePlaceAssociation,
   placeIdFromUserInput
-} from "./google-place-association.js?v=v-37500925c97c";
+} from "./google-place-association.js?v=v-7f36dcbf02d6";
 import {
   VENUE_QUERY_MAX,
   checkVenueQuery,
@@ -40,14 +40,14 @@ import {
   createPlacePreviewSession,
   createPlaceSearchSession,
   googleText
-} from "./google-places-ui-kit.js?v=v-37500925c97c";
-import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-37500925c97c";
-import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=v-37500925c97c";
-import { linkedTextElement, locationTextNode } from "./text-links.js?v=v-37500925c97c";
-import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=v-37500925c97c";
-import { optimizedPhotoUrl } from "./photo-assets.js?v=v-37500925c97c";
-import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-37500925c97c";
-import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-37500925c97c";
+} from "./google-places-ui-kit.js?v=v-7f36dcbf02d6";
+import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-7f36dcbf02d6";
+import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=v-7f36dcbf02d6";
+import { linkedTextElement, locationTextNode } from "./text-links.js?v=v-7f36dcbf02d6";
+import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=v-7f36dcbf02d6";
+import { optimizedPhotoUrl } from "./photo-assets.js?v=v-7f36dcbf02d6";
+import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-7f36dcbf02d6";
+import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-7f36dcbf02d6";
 import {
   getInitialLanguage,
   languageStorageKey,
@@ -55,23 +55,23 @@ import {
   localizeTrip,
   saveLanguage,
   ui
-} from "./i18n.js?v=v-37500925c97c";
+} from "./i18n.js?v=v-7f36dcbf02d6";
 import {
   createWeatherForecastController,
   localizeForecastLocation,
   weatherCodeIcon,
   weatherCodeKey
-} from "./weather-forecast.js?v=v-37500925c97c";
+} from "./weather-forecast.js?v=v-7f36dcbf02d6";
 import {
   applyDayWeatherChangesLocally,
   buildDayWeatherChanges,
   isValidCoordinate as isValidWeatherCoordinate,
   pointKey as weatherPointKey,
   resolveDayWeather
-} from "./weather-association.js?v=v-37500925c97c";
-import { createDayWeatherEditor, weatherEditorText } from "./weather-editor.js?v=v-37500925c97c";
-import { getFlightBookings } from "./flight-bookings.js?v=v-37500925c97c";
-import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-37500925c97c";
+} from "./weather-association.js?v=v-7f36dcbf02d6";
+import { createDayWeatherEditor, weatherEditorText } from "./weather-editor.js?v=v-7f36dcbf02d6";
+import { getFlightBookings } from "./flight-bookings.js?v=v-7f36dcbf02d6";
+import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-7f36dcbf02d6";
 import {
   OSM_COPYRIGHT_URL,
   coordinateGoogleMapsUrl,
@@ -85,7 +85,7 @@ import {
   placeForSaving,
   readSavedPhoto,
   readSavedPlace
-} from "./place-picker.js?v=v-37500925c97c";
+} from "./place-picker.js?v=v-7f36dcbf02d6";
 
 const FIREBASE_SDK_VERSION = "12.15.0";
 // Self-hosted mode is decided before any Firebase code path. It never loads the
@@ -97,7 +97,7 @@ let firebaseConfig = {};
 let tripDocumentPath = "";
 const firebaseConfigPromise = HOSTED
   ? Promise.resolve()
-  : import("./firebase-config.js?v=v-37500925c97c")
+  : import("./firebase-config.js?v=v-7f36dcbf02d6")
     .then((module) => {
       firebaseConfig = module.firebaseConfig || {};
       tripDocumentPath = module.tripDocumentPath || "";
@@ -1564,9 +1564,13 @@ function renderSlot(day, slot, slotIndex) {
     slot.ticketPrice ? ui(currentLanguage, "referenceLabel", { value: slot.ticketPrice }) : "",
     slot.transport?.mode ? ui(currentLanguage, "nextLabel", { value: `${slot.transport.mode}${slot.transport.duration ? ` · ${slot.transport.duration}` : ""}` }) : ""
   ].filter(Boolean);
-  if (slot.address || (!slot.mapLocationOmitted && (slot.name || slot.place?.name)) || meta.length) {
+  // A plan title alone is not a place. Clearing/omitting the location must not turn a flight,
+  // free afternoon or other timeline-only plan into an unrelated name search.
+  const locationLabel = slot.address || slot.place?.name || slot.googleMapsPlaceLabel || slot.googleMapsPlaceName
+    || (googleMapsDestinations(slot, { allowSearchFallback: false }).length ? slot.name : "");
+  if (locationLabel || meta.length) {
     const list = element("ul", "meta-list");
-    if (slot.address || (!slot.mapLocationOmitted && (slot.name || slot.place?.name))) list.append(planLocationItem(slot));
+    if (locationLabel) list.append(planLocationItem(slot, locationLabel));
     meta.forEach((item) => list.append(textElement("li", "", item)));
     body.append(list);
   }
@@ -1650,10 +1654,9 @@ function sameCardText(first, second) {
 
 // Saved destinations/selected coordinates first, then an ordinary encoded Maps search. Multiple
 // destinations stay separate and labelled; omitted locations remain deliberately inert.
-function planLocationItem(slot) {
+function planLocationItem(slot, label) {
   const item = element("li", "");
-  const label = slot.address || slot.place?.name || slot.googleMapsPlaceLabel || slot.name || "";
-  const destinations = googleMapsDestinations(slot, { allowNameFallback: true });
+  const destinations = googleMapsDestinations({ ...slot, name: slot.place?.name || slot.googleMapsPlaceName || slot.googleMapsPlaceLabel || slot.name }, { allowNameFallback: true });
   const appendLink = (text, url) => {
     const link = locationTextNode(document, text, url, { ariaLabel: `${ui(currentLanguage, "openGoogleMaps")}: ${text}` });
     item.append(link);

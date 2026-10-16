@@ -11,7 +11,7 @@ import {
   isValidCoordinate,
   pointKey,
   resolveTripWeather
-} from "./weather-association.js?v=v-37500925c97c";
+} from "./weather-association.js?v=v-7f36dcbf02d6";
 
 export const OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
 export const WEATHER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;

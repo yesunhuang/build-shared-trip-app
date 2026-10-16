@@ -1564,9 +1564,13 @@ function renderSlot(day, slot, slotIndex) {
     slot.ticketPrice ? ui(currentLanguage, "referenceLabel", { value: slot.ticketPrice }) : "",
     slot.transport?.mode ? ui(currentLanguage, "nextLabel", { value: `${slot.transport.mode}${slot.transport.duration ? ` · ${slot.transport.duration}` : ""}` }) : ""
   ].filter(Boolean);
-  if (slot.address || (!slot.mapLocationOmitted && (slot.name || slot.place?.name)) || meta.length) {
+  // A plan title alone is not a place. Clearing/omitting the location must not turn a flight,
+  // free afternoon or other timeline-only plan into an unrelated name search.
+  const locationLabel = slot.address || slot.place?.name || slot.googleMapsPlaceLabel || slot.googleMapsPlaceName
+    || (googleMapsDestinations(slot, { allowSearchFallback: false }).length ? slot.name : "");
+  if (locationLabel || meta.length) {
     const list = element("ul", "meta-list");
-    if (slot.address || (!slot.mapLocationOmitted && (slot.name || slot.place?.name))) list.append(planLocationItem(slot));
+    if (locationLabel) list.append(planLocationItem(slot, locationLabel));
     meta.forEach((item) => list.append(textElement("li", "", item)));
     body.append(list);
   }
@@ -1650,10 +1654,9 @@ function sameCardText(first, second) {
 
 // Saved destinations/selected coordinates first, then an ordinary encoded Maps search. Multiple
 // destinations stay separate and labelled; omitted locations remain deliberately inert.
-function planLocationItem(slot) {
+function planLocationItem(slot, label) {
   const item = element("li", "");
-  const label = slot.address || slot.place?.name || slot.googleMapsPlaceLabel || slot.name || "";
-  const destinations = googleMapsDestinations(slot, { allowNameFallback: true });
+  const destinations = googleMapsDestinations({ ...slot, name: slot.place?.name || slot.googleMapsPlaceName || slot.googleMapsPlaceLabel || slot.name }, { allowNameFallback: true });
   const appendLink = (text, url) => {
     const link = locationTextNode(document, text, url, { ariaLabel: `${ui(currentLanguage, "openGoogleMaps")}: ${text}` });
     item.append(link);

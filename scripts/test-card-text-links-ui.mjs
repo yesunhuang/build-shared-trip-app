@@ -58,6 +58,8 @@ function fixtureTrip() {
         { id: "plan-multi", name: "Invented two-stop route", address: "Fictional museum and entrance", period: "evening", time: "20:15" },
         { id: "plan-omitted", name: "Deliberately omitted", address: "Private location omitted", mapLocationOmitted: true, period: "evening", time: "20:30" },
         { id: "plan-empty", name: "", period: "evening", time: "20:45" },
+        { id: "plan-no-location", name: "Fictional free afternoon", period: "evening", time: "20:46" },
+        { id: "plan-named-place", name: "Fictional visit", googleMapsPlaceName: "Invented Named Gallery", period: "evening", time: "20:47" },
         { id: "plan-lookalike", name: "Invented Lookalike Pier", period: "evening", time: "21:00", sortTime: "21:00", planType: "sight",
           address: "10 Sample Pier", googleMapsUrl: "https://evil.example/maps/place/Invented+Pier" }
       ], recommendations: {
@@ -377,6 +379,9 @@ try {
     assert.equal(multiple[0].href, GOOGLE_URL);
     assert.equal(page.locationLink("plan-omitted"), null, "explicit omission stays nonlink");
     assert.equal(page.location("plan-empty"), null, "missing name/address has no invented location row");
+    assert.equal(page.location("plan-no-location"), null, "a plan title alone is not an address or place name");
+    assert.equal(page.locationLink("plan-named-place")?.textContent, "Invented Named Gallery");
+    assert.equal(new URL(page.locationLink("plan-named-place").href).searchParams.get("query"), "Invented Named Gallery", "explicit place name, not a generic plan title, supplies the name-only fallback");
     const css = fs.readFileSync(path.join(PUBLIC_DIR, "styles.css"), "utf8");
     assert.ok(!css.includes(".meta-list li::before"), "no decorative link arrow on nonlink metadata");
     assert.ok(css.includes(".location-link::after"), "only the real anchor owns its affordance");
