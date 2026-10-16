@@ -13,6 +13,7 @@ import { boundedPassword, dummyVerify, hashPassword, normalizeUsername, password
 import { AttemptLimiter, SESSION_COOKIE, SESSION_TTL_MS, SessionStore } from "./auth/sessions.mjs";
 import { CONTENT_MANAGER, LOOKUP_ROUTE, OWNER, capabilitiesFor, isMcpOnlyPrincipal, isProtectedMediaPath, mayAccess } from "./auth/policy.mjs";
 import { LookupService, readLookupConfig } from "./lookups.mjs";
+import { GOOGLE_PLACES_CONFIG_ROUTE, configResponse as googlePlacesConfigResponse, readGooglePlacesConfig, sessionFeatures } from "./google-places.mjs";
 import { McpTokenStore } from "./auth/mcp-tokens.mjs";
 import { AuditLog } from "./audit.mjs";
 import { ContentGateway, actorOf } from "./content-access.mjs";
@@ -55,7 +56,11 @@ export function readConfig(env = process.env) {
   // Public place/photo lookups: disabled unless SHARED_TRIP_LOOKUPS_ENABLED=1 with an identifying
   // SHARED_TRIP_LOOKUP_USER_AGENT (see lookups.mjs). Disabled => no provider is ever contacted.
   const lookups = readLookupConfig(env);
-  return { token, dataDir, host, port, origin, oauthUsername, lookups };
+  // Optional Google Places UI Kit (browser-side standard components only): disabled unless
+  // SHARED_TRIP_GOOGLE_PLACES_UI_KIT=1 with an owner-supplied browser key (see google-places.mjs).
+  // The server itself never contacts Google.
+  const googlePlaces = readGooglePlacesConfig(env, { adminToken: token });
+  return { token, dataDir, host, port, origin, oauthUsername, lookups, googlePlaces };
 }
 function sameSecret(a,b) {
   const hash = (s) => crypto.createHash("sha256").update(String(s || "")).digest();
@@ -115,6 +120,9 @@ export async function startServer(config) {
   }
   catch (error) { try { db.close(); } finally { lock.release(); } throw error; }
   const photoDir = path.resolve(config.photoDir || path.join(config.dataDir, PHOTO_SUBDIR));
+  // Only an explicit enabled config with a key turns the browser feature on; anything else is off.
+  const googlePlaces = config.googlePlaces?.enabled === true && typeof config.googlePlaces.browserKey === "string" && config.googlePlaces.browserKey
+    ? { enabled: true, browserKey: config.googlePlaces.browserKey } : { enabled: false };
   const send = (res,status,payload) => { res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}); res.end(JSON.stringify(payload)); };
 
   // Every protected request re-reads the account, so approval state, role changes and revocation
@@ -269,7 +277,12 @@ export async function startServer(config) {
       if (media) { serveProtectedMedia(req,res,pathname); return; }
       const requireOwner = () => { if (principal?.role !== OWNER) throw forbidden(); };
       if (pathname === "/api/session" && req.method === "GET") {
-        send(res,200,{authenticated:true,role:principal.role,...(principal.username?{username:principal.username}:{}),capabilities:capabilitiesFor(principal)}); return;
+        send(res,200,{authenticated:true,role:principal.role,...(principal.username?{username:principal.username}:{}),capabilities:capabilitiesFor(principal),...sessionFeatures(googlePlaces)}); return;
+      }
+      if (pathname === GOOGLE_PLACES_CONFIG_ROUTE && req.method === "GET") {
+        // Signed-in browser sessions (any role) and the owner bearer only; MCP/OAuth tokens never get
+        // here. The response is no-store like every /api response, and the key is never logged.
+        send(res,200,googlePlacesConfigResponse(googlePlaces)); return;
       }
       if (pathname === "/api/logout" && req.method === "POST") {
         sessions.delete(cookie);

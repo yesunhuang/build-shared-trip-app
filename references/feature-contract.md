@@ -51,6 +51,7 @@ Preserve these behaviors unless the user explicitly requests a design change. Th
 - For a plan with a selected OpenStreetMap place, the navigation action is built from the saved coordinates, and the source link opens the OSM object page. Never present a generated or coordinate-based link as a verified Google Maps venue.
 - On desktop, give the map a substantial sticky column (roughly 44–48% of the workspace) and a viewport-aware height. Keep the timeline readable; do not shrink the map into a thumbnail. Below the desktop breakpoint, preserve the dedicated mobile planner.
 - Show checklist items due on the selected itinerary date near the top of that day's content, before the timeline. Checklist dates may be before, during, or after the trip.
+- Self-hosted, with the optional Google Places UI Kit enabled: expanding a plan linked to a Google place shows Google's standard vertical compact details for that plan only, inside the card. Nothing Google-related loads before a linked plan is expanded. Only one plan is active at a time, and other open linked plans offer **Show Google place details**. The Commons photo, OSM source and map stay unchanged. A Google failure shows a short message with **Try again** and never retries by itself.
 
 Timeline summary tags have two rows:
 
@@ -87,6 +88,7 @@ Show only:
 - Booked / not booked;
 - optional full Google Maps browser place URL;
 - self-hosted, when lookups are enabled: an explicit public-place search and a separate photo search;
+- self-hosted, when the optional Google Places UI Kit is enabled: an optional **Google place details** link for a plan with a location;
 - What to know.
 
 When a full place URL is supplied, parse and save place name, address, final POI coordinates, feature ID, and original URL, then update the timeline and map. When it is blank and no place has been selected, save a timeline-only plan with no marker or Maps action. Preserve legacy coordinates only when editing an older item that already has coordinates but no URL.
@@ -99,6 +101,13 @@ Self-hosted place and photo search applies only when the operator has enabled it
 - Opening the editor, the trip page, reloads, polls and unrelated edits render the saved snapshots and make zero place or photo search calls. There is no background refresh. Remote images and map tiles are still fetched normally. A missing or broken image shows the no-photo state without retrying a lookup.
 - Saved OSM attribution and photo credit, source and license are displayed.
 - With lookups disabled, or for viewers, no search control is usable. Saved places and photos still render.
+
+The optional Google place link is self-hosted only, off by default, and for owners and content managers only ([google-places-ui-kit.md](google-places-ui-kit.md)):
+
+- It is available only for a plan with a location. Opening the editor sends nothing. Google work happens only while the location is being created or changed, or after an explicit **Find on Google** / **Choose a different Google place**.
+- The public-venue box must be ticked before anything is sent, and only the dedicated, initially empty query field is sent. Text with an email address or a long digit run is refused.
+- Google's own selectable list is shown, and nothing is linked until the user picks a result; there is no first-result or automatic match. A pasted Google Maps link with a place ID is previewed, then linked with **Use this place**.
+- **Save** stores only `googlePlaceAssociation` (Place ID, location binding, public-venue flag). Changing the location discards a pending choice and drops the saved link on Save. **Cancel** saves nothing. **Remove Google link** deletes it.
 
 ## Recommendations
 
@@ -147,6 +156,7 @@ Self-hosted place and photo search applies only when the operator has enabled it
 - Every supplied plan link and every recommendation link opens an exact place page.
 - Every mapped plan marker matches its exact link or its selected OpenStreetMap place coordinates. A plan with neither a link nor a selected place has neither a marker nor a generated Maps action. An OSM place's navigation action is coordinate-based and is not labelled as a Google venue.
 - Self-hosted lookups: off by default; with them disabled, both search endpoints refuse requests and contact no provider. When enabled, only the owner and content managers can search, with same-origin checks; viewers, MCP tokens and OAuth tokens are refused. A search changes no trip or version. Save persists exactly the chosen `place`/`photo` with `expectedVersion`/`requestId`; Cancel persists nothing. Opening, reloading, polling and unrelated edits make zero search calls. Repeats are served from the cache and Refresh bypasses it. Upstream requests are serial, at least 1,100 ms apart, time-limited and size-bounded, never use a client-supplied URL, and follow no redirects. Import and export carry snapshots without lookups. MCP keeps exactly six tools, and `apply_trip_changes` accepts the same objects.
+- Self-hosted Google Places UI Kit: off by default. Disabled or keyless means no session flag, no configuration request, no Google script, no component and no query, with OSM and Commons unchanged. The browser key comes only from the protected no-store `/api/google-places/config` for signed-in sessions and the owner bearer, never MCP/OAuth tokens. It is never in static assets, trip data, exports, storage or logs. Only standard compact details and selectable search elements are used, and the app never reads shadow DOM or any place field except the selected ID. Components are built lazily for the expanded plan only, deduplicated across re-renders, polls and unrelated edits, and bounded in memory. `googlePlaceAssociation` stores exactly the Place ID, location binding and public-venue flag. It is refused when malformed or mismatched, and dropped when the location changes or is cleared, through web and MCP. It survives export/import, and IDs, conflicts and retries are unchanged. Viewers can see but not change it. The static generator never loads Google.
 - All plan photos and credits render; missing photos fail gracefully.
 - Tap-only handle interaction does not move the sheet.
 - Add/edit close controls remain reachable on iPhone.
@@ -188,4 +198,7 @@ Record each check as one of: **specified** (a test or procedure exists), **run**
 | External map tiles and other providers in a browser | Live browser session | OSM tiles and a Commons image loaded in the local fictional check; other providers are not covered. See [checkpoint 014](../doc/Progress/progress_2026_10_15_cpx014_codex_b.md). |
 | Place/photo lookups: opt-in gate, roles, same-origin, cache/Refresh, spacing/timeouts, zero lookups on display, Save/Cancel, `place`/`photo` validation, import/export | `scripts/test-place-lookups.mjs` and `scripts/test-place-picker-ui.mjs`, included in `npm test` | Passed with mocked providers; see [checkpoint 014](../doc/Progress/progress_2026_10_15_cpx014_codex_b.md). |
 | Place/photo editor layout and remote image fallback in a browser | Desktop and phone-width browser on fictional data | Local Chrome passed at 1280, 390 and 375 px in four languages. Physical-phone gestures and installation remain unverified. See [checkpoint 014](../doc/Progress/progress_2026_10_15_cpx014_codex_b.md). |
+| Google Places UI Kit: configuration gate, protected key delivery, association validation/clearing, MCP, import/export, retries | `scripts/test-google-place-association.mjs`, included in `npm run test:server` | Specified; not yet run (no real key or Google request is used) |
+| Google Places UI Kit page behaviour: disabled zero activity, lazy single-plan loading, dedupe counts, retention, stale/cross-trip scoping, failure without retry, public-venue guard, user-only selection, cancel/location-change invalidation, four languages, phone host, static generator | `scripts/test-google-places-ui-kit.mjs` with a mocked Google library, included in `npm run test:ui` | Specified; not yet run |
+| Real Google SDK rendering, attribution, metering and billing; key restrictions; browser layout | Owner-configured live browser check ([google-places-ui-kit.md § Future owner setup](google-places-ui-kit.md#future-owner-setup-pending-not-done)) | **Not verified**; pending owner actions |
 | Live Nominatim and Commons requests | Local opt-in integration and restricted production egress using public research queries | Both returned 200 locally and from the deployed app container. Unrelated egress and direct bypass were denied. See [checkpoint 014](../doc/Progress/progress_2026_10_15_cpx014_codex_b.md) for local cache/restart checks and [checkpoint 016](../doc/Progress/progress_2026_10_15_cpx016_codex_b.md) for deployment, preservation and isolated production-image browser acceptance. |

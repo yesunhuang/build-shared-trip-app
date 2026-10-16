@@ -5,6 +5,9 @@
 // applied here. Everything a client submits is treated as data.
 
 import { parseFullGoogleMapsPlaceUrl } from "../../assets/app-template/public/google-maps-place-url.js";
+import {
+  GOOGLE_PLACE_ASSOCIATION_FIELD, googlePlaceAssociationProblems, locationBindingForPlan, normalizeGooglePlaceAssociation
+} from "../../assets/app-template/public/google-place-association.js";
 import { validationError } from "./errors.mjs";
 
 export const LOCALES = Object.freeze(["en", "zh-Hans", "zh-Hant", "ja"]);
@@ -49,7 +52,8 @@ export const PLAN_KEYS = new Set([
   "id", "name", "period", "time", "sortTime", "sortOrder", "planType", "booked",
   "participantGroupIds", "review", "notes", "description", "googleMapsUrl", "mapsUrl",
   "googleMapsPlaceName", "googleMapsPlaceLabel", "googleMapsFeatureId", "address", "lat", "lng",
-  "approximateLocation", "place", "photo", "photoSourceId", "booking", "routeGroup", "i18n", "compat"
+  "approximateLocation", "place", "photo", "photoSourceId", "booking", "routeGroup", "i18n", "compat",
+  GOOGLE_PLACE_ASSOCIATION_FIELD
 ]);
 
 // Selected public place (optional plan.place). Chosen explicitly by an editor from an
@@ -587,6 +591,21 @@ export function normalizeCommonsPhoto(raw, path, issues) {
   return issues.list.length === before ? out : undefined;
 }
 
+/**
+ * plan.googlePlaceAssociation: exactly { placeId, locationBinding, publicVenueConfirmed: true }.
+ * Any other key (a Google name, address, location, rating, photo or photo reference) is rejected,
+ * so Google place content can never be stored. Whether the binding matches the plan's final
+ * location is checked afterwards by applyGooglePlaceAssociations.
+ */
+export function normalizeGooglePlaceAssociationValue(raw, path, issues) {
+  const problems = googlePlaceAssociationProblems(raw);
+  if (problems.length) {
+    for (const { key, message } of problems) issues.add(key ? `${path}.${key}` : path, message);
+    return undefined;
+  }
+  return normalizeGooglePlaceAssociation(raw);
+}
+
 function normalizePlan(raw, path, issues, ctx) {
   if (!isPlainObject(raw)) {
     issues.add(path, "must be an object");
@@ -646,6 +665,10 @@ function normalizePlan(raw, path, issues, ctx) {
     else assignDefined(out, "photo", freeObject(raw.photo, `${path}.photo`, issues));
   }
   assignDefined(out, "photoSourceId", text(raw.photoSourceId, `${path}.photoSourceId`, issues, { max: 200 }));
+  const association = raw[GOOGLE_PLACE_ASSOCIATION_FIELD];
+  if (association !== undefined && association !== null) {
+    assignDefined(out, GOOGLE_PLACE_ASSOCIATION_FIELD, normalizeGooglePlaceAssociationValue(association, `${path}.${GOOGLE_PLACE_ASSOCIATION_FIELD}`, issues));
+  }
   assignDefined(out, "booking", freeObject(raw.booking, `${path}.booking`, issues));
   assignDefined(out, "routeGroup", text(raw.routeGroup, `${path}.routeGroup`, issues, { max: 80 }));
   assignDefined(out, "i18n", i18nValue(raw.i18n, `${path}.i18n`, issues));
@@ -882,4 +905,40 @@ export function applySelectedPlaces(content, previous) {
     });
   });
   issues.throwIfAny("A plan's coordinates or address conflict with its selected place.");
+}
+
+const sameAssociation = (a, b) => isPlainObject(a) && isPlainObject(b)
+  && a.placeId === b.placeId && a.locationBinding === b.locationBinding && a.publicVenueConfirmed === b.publicVenueConfirmed;
+
+/**
+ * Keep every plan.googlePlaceAssociation bound to the plan's own final location. Runs on every write
+ * (web replace_content and upsert_plan, MCP apply_trip_changes, create and import) after
+ * applyParsedPlaces and applySelectedPlaces, so the binding is computed from the stored location.
+ *
+ * - Binding matches the current location: kept (unrelated edits never touch it).
+ * - Carried over unchanged from the stored plan, but the location changed or was cleared: the
+ *   association is stale and is removed, so an old Google place never follows a new location.
+ * - Sent new or changed by the caller (including every association in a create or import) but not
+ *   bound to the current location, or on a plan without a location: the whole write is refused.
+ */
+export function applyGooglePlaceAssociations(content, previous) {
+  const stored = new Map();
+  for (const day of previous?.days || []) for (const slot of day?.slots || []) if (slot?.id) stored.set(slot.id, slot);
+  const issues = new Issues();
+  content.days.forEach((day, dayIndex) => {
+    day.slots.forEach((slot, slotIndex) => {
+      const association = slot[GOOGLE_PLACE_ASSOCIATION_FIELD];
+      if (!association) return;
+      const binding = locationBindingForPlan(slot);
+      if (binding && binding === association.locationBinding) return;
+      if (sameAssociation(stored.get(slot.id)?.[GOOGLE_PLACE_ASSOCIATION_FIELD], association)) {
+        delete slot[GOOGLE_PLACE_ASSOCIATION_FIELD];
+        return;
+      }
+      issues.add(`trip.days[${dayIndex}].slots[${slotIndex}].${GOOGLE_PLACE_ASSOCIATION_FIELD}.locationBinding`, binding
+        ? "does not match this plan's saved location; choose the Google place again for the current location"
+        : "needs a saved location (a selected OpenStreetMap place, a full Google Maps link or saved coordinates)");
+    });
+  });
+  issues.throwIfAny("A Google place link does not match its plan's saved location.");
 }

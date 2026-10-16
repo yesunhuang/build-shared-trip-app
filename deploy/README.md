@@ -20,6 +20,8 @@ Placeholders: `trips.example.org` is fictional. `/PRIVATE/shared-trips/...` stan
 | SHARED_TRIP_LOOKUPS_ENABLED | app only, optional | `1` enables explicit place/photo search. Unset by default. See [Place and photo lookups](#place-and-photo-lookups-optional) before setting it. |
 | SHARED_TRIP_LOOKUP_USER_AGENT | app only, required if lookups are enabled | Application name and version plus your contact email or URL. Not a secret, but it identifies you, so keep it in the private file. |
 | SHARED_TRIP_NOMINATIM_URL | app only, optional | HTTPS Nominatim-compatible search endpoint. When lookups are enabled, it defaults to the public OSMF endpoint. |
+| SHARED_TRIP_GOOGLE_PLACES_UI_KIT | app only, optional | `1` enables the optional Google Places UI Kit. `0` by default. See [Google Places UI Kit](#google-places-ui-kit-optional) before setting it. |
+| SHARED_TRIP_GOOGLE_MAPS_BROWSER_KEY | app only, required if the UI Kit is enabled | The owner's own browser key, restricted to the origin. Empty by default; the feature stays off without it. It is delivered only to signed-in browsers. Keep it in the private file and never commit it. |
 | SHARED_TRIP_DOMAIN | Caddy only | Same hostname as the origin |
 | SHARED_TRIP_DATA_PATH | app `/data` | Data directory owned by UID 1000 on a local filesystem |
 | SHARED_TRIP_BACKUP_PATH | app `/backups` | Separate snapshot storage, owned by UID 1000 |
@@ -290,6 +292,16 @@ To enable on a reviewed release that passes the variables through:
 To disable, remove `SHARED_TRIP_LOOKUPS_ENABLED` (or set it to anything other than `1`) and run `dc up -d app`. Saved places and photos stay in the trips and keep rendering. Saved Commons images and OSM map tiles are fetched by visitors' browsers whether or not lookups are on.
 
 The search endpoints are under `/api/*`, so the existing no-store headers and protected-path rules already cover them. No Caddyfile change is needed for them.
+
+## Google Places UI Kit (optional)
+
+Off by default. Nothing in this template enables it, creates a Google project or key, or has been checked against Google. Read [google-places-ui-kit.md](../references/google-places-ui-kit.md) first, including its usage and cost section and the pending owner setup.
+
+- **No egress change.** Visitors' browsers load Google's script and components. The app container never contacts Google, so the internal-only `backend` network stays as it is.
+- **Key.** Use only your own **browser** key, restricted by website to `https://<public host>/*` and by API to what the UI Kit needs. Never reuse any other credential. With `sudoedit`, add `SHARED_TRIP_GOOGLE_PLACES_UI_KIT=1` and `SHARED_TRIP_GOOGLE_MAPS_BROWSER_KEY=<your-restricted-browser-key>` to the private env file, run `dc config --quiet`, then `dc up -d app`. Do not run plain `docker compose config`, which prints the key.
+- **Caching.** The key is served from `/api/google-places/config`, which is already no-store and protected; no Caddyfile change is needed. Google's own responses go directly from Google to browsers.
+
+To disable, set `SHARED_TRIP_GOOGLE_PLACES_UI_KIT=0` (or clear the key) and run `dc up -d app`. Stored Place ID links stay in the trips and are simply not shown.
 
 ## Existing proxy
 

@@ -111,7 +111,8 @@ Domain responses are JSON with Cache-Control: no-store. Errors use `{ "error": {
 | --- | --- | --- | --- |
 | POST | /api/login | public, same origin | `{token}` (owner) or `{username, password}` (account); returns `{authenticated, role[, username]}` and a session cookie |
 | POST | /api/accept-invite | public, same origin | `{invitation, username, password}`; 201 `{account: {username, status: "pending"}}` (role `viewer`) |
-| GET | /api/session | signed in | `{authenticated, role[, username], capabilities: {readTrips, exportTrips, editTrips, importTrips, manageAccounts, mcp}}`; `role` is `owner`, `viewer`, or `content-manager` |
+| GET | /api/session | signed in | `{authenticated, role[, username], capabilities: {readTrips, exportTrips, editTrips, importTrips, manageAccounts, mcp}}`; `role` is `owner`, `viewer`, or `content-manager`. Adds `features: {googlePlacesUiKit: true}` only while the optional Google Places UI Kit is enabled |
+| GET | /api/google-places/config | owner, manager, viewer (browser session) or owner bearer | `{enabled: false}`, or `{enabled: true, apiKey, libraries: ["places"]}` with the owner's restricted browser key. No-store; never reachable with MCP or OAuth tokens. See [google-places-ui-kit.md](google-places-ui-kit.md) |
 | POST | /api/logout | signed in | Revokes this session |
 | GET | /api/trips | owner, manager, viewer | Summaries, including archived trips |
 | GET | /api/trips/&lt;id&gt; | owner, manager, viewer | Full trip and version |
@@ -182,6 +183,15 @@ Off by default. With `SHARED_TRIP_LOOKUPS_ENABLED=1` and a valid `SHARED_TRIP_LO
 - **Costs and terms.** The default public endpoints need no API key, billing or account, but they come with no SLA and their usage policies apply. Review them before enabling, and choose an endpoint whose terms allow retaining results. Enabling the feature creates no credentials.
 - **Google.** The new search does not use Google. Full Google Maps place URLs keep working as before.
 
+## Google Places UI Kit (opt-in)
+
+Off by default and separate from the lookups above. With `SHARED_TRIP_GOOGLE_PLACES_UI_KIT=1` and an owner-created, origin-restricted `SHARED_TRIP_GOOGLE_MAPS_BROWSER_KEY`, signed-in browsers can show Google's standard compact place details inside an expanded plan that an editor has linked to a public venue. The full contract, the conservative linking rules, usage costs and pending owner setup are in [google-places-ui-kit.md](google-places-ui-kit.md). The main points are:
+
+- **No server egress.** The server never calls Google. Browsers load the Maps JavaScript API and the components themselves, and only after a linked plan is expanded or an editor explicitly searches.
+- **Key delivery.** The key comes only from `GET /api/google-places/config` (no-store, signed-in sessions and the owner bearer; never MCP or OAuth tokens). `/api/session` shows `features.googlePlacesUiKit: true` only while enabled.
+- **Stored data.** Only `googlePlaceAssociation` (Place ID, location binding, public-venue flag). The shared validators drop it when the plan's location changes or is cleared and refuse a mismatched or malformed one, for web and MCP alike.
+- **Who.** Owners and content managers link and correct; viewers see linked details but cannot change them. No role gains any other privilege.
+
 ## Synchronization and connection failures
 
 Trip pages poll every 20 seconds. Errors use bounded retries; Reconnect and online/focus/visibility events resume them. Home lists also refresh. An open page retains authenticated content in memory during brief outages; fresh offline navigation shows a generic connection page. A revoked account's next refresh, or the next refresh after its role changes, returns 401, which clears the page.
@@ -194,7 +204,7 @@ Sign-out clears content and revokes the session. During an outage, a non-secret 
 
 Import accepts structured authoring JSON, a runtime trip object, or a shared-trip-export file. Compatible IDs and localization are retained. Available incoming trip IDs are preserved; importing again creates another trip rather than overwriting. Retrying the same requestId creates nothing twice. The owner and approved content managers can import; every approved role can export. The same import and export are also available as the MCP tools `import_trip` and `export_trip`, sharing validation and storage with HTTP.
 
-Safe unmapped fields are retained in compatibility content and reported. Legacy transport configuration is inert; import never contacts Firebase. Selected `place` and `photo` snapshots travel with import and export unchanged. Neither operation performs a place or photo lookup. Validation errors reject the whole import. Export restores content, IDs, versions, and archive state into empty storage. Database snapshots also retain retry records and account state.
+Safe unmapped fields are retained in compatibility content and reported. Legacy transport configuration is inert; import never contacts Firebase. Selected `place` and `photo` snapshots, and any `googlePlaceAssociation`, travel with import and export unchanged. Neither operation performs a place or photo lookup or contacts Google. Import refuses an association whose binding does not match its plan's location. Validation errors reject the whole import. Export restores content, IDs, versions, and archive state into empty storage. Database snapshots also retain retry records and account state.
 
 ## Deploy on a small VPS
 

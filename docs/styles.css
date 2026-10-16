@@ -4765,3 +4765,54 @@ details[open] > summary .summary-chevron,
   .lookup-result__choose { width: 100%; }
   .lookup-results { max-height: 18rem; }
 }
+
+/* Optional Google Places UI Kit (self-hosted, off by default). Only the outer box is styled: the
+   standard vertical compact component keeps its own content, photos and Google attribution, uses
+   the recommended 180-300 px width (never below 160 px) and has no fixed height. */
+.google-place {
+  display: grid;
+  gap: 0.35rem;
+  width: 100%;
+  max-width: 300px;
+  min-width: 0;
+  margin: 0.6rem 0 0;
+}
+.google-place[hidden],
+.google-place-parking,
+.google-place-parking[hidden] { display: none; }
+.google-place__mount { min-width: 0; }
+.google-place__mount[hidden] { display: none; }
+.google-place__details {
+  display: block;
+  width: 100%;
+  min-width: 160px;
+  max-width: 300px;
+  color-scheme: light;
+}
+.google-place__status { margin: 0; color: var(--muted); font-size: 0.72rem; }
+.google-place__status:empty { display: none; }
+.google-place__action[hidden] { display: none; }
+.google-place__action { justify-self: start; }
+.google-match__current { margin: 0; font-size: 0.78rem; }
+.google-match__actions:empty { display: none; }
+.google-match__actions [hidden],
+.google-match__form[hidden],
+.google-match__use[hidden] { display: none; }
+.google-match__form { display: grid; gap: 0.45rem; min-width: 0; }
+.google-match__venue {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: start;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.google-match__venue input { width: 1.1rem; height: 1.1rem; margin: 0.05rem 0 0; }
+.google-match__results:empty,
+.google-match__preview:empty { display: none; }
+.google-match__results,
+.google-match__preview { min-width: 0; max-width: 100%; }
+.google-match__search { display: block; width: 100%; min-width: 160px; }
+.google-match__preview .google-place__details { max-width: 300px; }
+.google-match__use,
+.google-match__cancel { justify-self: start; }

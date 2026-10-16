@@ -19,6 +19,7 @@ The two forms share field shapes for days, plans, reminders, localization, maps,
 - [Maps and photos](#maps-and-photos)
   - [Selected OpenStreetMap place (self-hosted)](#selected-openstreetmap-place-self-hosted)
   - [Selected Commons photo (self-hosted)](#selected-commons-photo-self-hosted)
+  - [Google place association (self-hosted, optional)](#google-place-association-self-hosted-optional)
 - [Recommendations](#recommendations)
 - [Weather](#weather)
 - [Resources](#resources)
@@ -50,7 +51,7 @@ The server owns `id`, `version`, and `updatedAt`. Clients never choose a new tri
 }
 ```
 
-- `days[].slots` holds plans, using the [plan shape](#days-and-plans) below. A self-hosted plan may also carry a [selected OpenStreetMap `place`](#selected-openstreetmap-place-self-hosted) and a [selected Commons `photo`](#selected-commons-photo-self-hosted). Reminders, participant groups, and `i18n` patches use the same shapes as the legacy input.
+- `days[].slots` holds plans, using the [plan shape](#days-and-plans) below. A self-hosted plan may also carry a [selected OpenStreetMap `place`](#selected-openstreetmap-place-self-hosted), a [selected Commons `photo`](#selected-commons-photo-self-hosted) and an optional [`googlePlaceAssociation`](#google-place-association-self-hosted-optional). Reminders, participant groups, and `i18n` patches use the same shapes as the legacy input.
 - Optional compatibility content, such as `resources`, `weather`, recommendations, and day-level `i18n`, is kept when present. It never needs to be invented.
 - Responses also include the read-only aliases `slug` (= `id`), `startDate`, `endDate`, and `routeDecoration` (= `route`) for the shared template. Treat them as read-only; edit `dateRange` and `route` through canonical fields; the ID cannot change.
 - Other optional top-level fields: `shortName`, `metaDescription`, `theme` (`ink`/`accent`/`background` hex colors), `disclaimer`, and `content`. Plans, days, reminders, and groups may carry a `compat` object. Import preserves unmapped nested fields in `compat.unmapped` and unmapped root fields in `content.importExtras`, with warnings.
@@ -368,6 +369,32 @@ A photo chosen from the editor's Commons search is stored with its full attribut
 
 Both objects are additive trip content. They are stored in SQLite, included in backups and exports, and kept by import, which never performs a lookup.
 
+### Google place association (self-hosted, optional)
+
+A plan can be linked to a public venue on Google so that, when the operator has enabled the optional [Google Places UI Kit](google-places-ui-kit.md), its expanded card shows Google's standard compact place details. The field is separate from `place` and `photo`, and it stores no Google content:
+
+```json
+{
+  "googlePlaceAssociation": {
+    "placeId": "FAKE_place_id_for_docs_0001",
+    "locationBinding": "v1:<64 lower-case hex digits>",
+    "publicVenueConfirmed": true
+  }
+}
+```
+
+The values above are placeholders. The rules are:
+
+- Exactly these three keys. Anything else is rejected, including Google names, addresses, coordinates, ratings, photos, photo names and attribution text. The whole batch fails, and nothing is saved.
+- `placeId` is a Google Place ID: 8-256 letters, digits, `-` or `_`. It must come from an editor's explicit choice in Google's own selectable search, or from a Google Maps link or ID that a person supplied for that exact venue. Never invent one; a `/maps/place/` link's `!1s…` feature ID is not a Place ID.
+- `publicVenueConfirmed` must be `true`: the person confirmed that it is a public business or landmark, not a private home.
+- `locationBinding` is `v1:` plus the SHA-256 of this plan's own location inputs. Those are the selected OSM `place` ID, coordinates (7 decimals) and address; otherwise the full `googleMapsUrl` or a well-formed full place URL in its legacy `mapsUrl` alias; otherwise legacy `lat`/`lng` and `address`. Normalizing the alias on Save keeps the same binding. Names, notes, times, ordering, photos and translations are not part of it. Compute it with `locationBindingForPlan` in `assets/app-template/public/google-place-association.js`, the same function the server uses.
+- The binding must match the plan's saved location after the server derives it, so a plan without a location cannot have an association. In the same request, an association can be sent together with a new location it is bound to.
+- An association carried over unchanged is kept through unrelated edits (including moving the plan to another day). When the location changes or is cleared, the server removes it automatically, through web or MCP. `null` removes it explicitly.
+- Create and import validate every association against its plan, so a tampered or stale import is refused. Export, import and backups carry the field unchanged. It is additive JSON and needs no schema migration.
+
+The field has no effect while the feature is disabled. It never changes the map, markers, `place`, `photo` or any other plan field.
+
 ## Recommendations
 
 Recommendations are optional for self-hosted drafts. When you add them, use this shape. **Legacy generator input** requires each day to have at least:
@@ -472,4 +499,4 @@ These complete-content checks apply only to the legacy generator. They are separ
 node scripts/validate-trip.mjs trip.json
 ```
 
-Validation rejects incomplete translations, invalid non-empty Maps links, missing photos, duplicate ideas, unsafe secrets, invalid participant references, incomplete resources, oversized synchronized data, and stale structural mistakes before they become UI or Firebase failures. A missing plan `googleMapsUrl` is valid; recommendation map links are still mandatory. The self-hosted place and photo lookups do not change these checks. A selected OpenStreetMap `place` is self-hosted content and is not a location source for generator input.
+Validation rejects incomplete translations, invalid non-empty Maps links, missing photos, duplicate ideas, unsafe secrets, invalid participant references, incomplete resources, oversized synchronized data, and stale structural mistakes before they become UI or Firebase failures. A missing plan `googleMapsUrl` is valid; recommendation map links are still mandatory. The self-hosted place and photo lookups do not change these checks. A selected OpenStreetMap `place` is self-hosted content and is not a location source for generator input. A `googlePlaceAssociation` is self-hosted content too. Generated static apps never load Google components.

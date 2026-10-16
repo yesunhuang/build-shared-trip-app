@@ -1,4 +1,4 @@
-import { getGooglePlaceLinks } from "./google-place-links.js?v=v-5e4ebe3cf6e1";
+import { getGooglePlaceLinks } from "./google-place-links.js?v=v-baed9ddaa9e3";
 import {
   createTripPoller,
   downloadJSON,
@@ -14,13 +14,32 @@ import {
   redirectToLogin,
   resourcesPath,
   sessionCanEdit,
+  sessionHasGooglePlaces,
   toRenderTrip,
   tripIdFromPath
-} from "./hosted-client.js?v=v-5e4ebe3cf6e1";
-import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-5e4ebe3cf6e1";
-import { optimizedPhotoUrl } from "./photo-assets.js?v=v-5e4ebe3cf6e1";
-import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-5e4ebe3cf6e1";
-import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-5e4ebe3cf6e1";
+} from "./hosted-client.js?v=v-baed9ddaa9e3";
+import {
+  GOOGLE_PLACE_ASSOCIATION_FIELD,
+  associationForPlan,
+  associationMatchesPlan,
+  locationBindingForPlan,
+  normalizeGooglePlaceAssociation,
+  placeIdFromUserInput
+} from "./google-place-association.js?v=v-baed9ddaa9e3";
+import {
+  VENUE_QUERY_MAX,
+  checkVenueQuery,
+  createGooglePlaceHost,
+  createGooglePlacesLoader,
+  createPlaceDetailsManager,
+  createPlacePreviewSession,
+  createPlaceSearchSession,
+  googleText
+} from "./google-places-ui-kit.js?v=v-baed9ddaa9e3";
+import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-baed9ddaa9e3";
+import { optimizedPhotoUrl } from "./photo-assets.js?v=v-baed9ddaa9e3";
+import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-baed9ddaa9e3";
+import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-baed9ddaa9e3";
 import {
   getInitialLanguage,
   languageStorageKey,
@@ -28,7 +47,7 @@ import {
   localizeTrip,
   saveLanguage,
   ui
-} from "./i18n.js?v=v-5e4ebe3cf6e1";
+} from "./i18n.js?v=v-baed9ddaa9e3";
 import {
   DAY_FORECAST_LOCATIONS,
   fetchTripForecast,
@@ -36,9 +55,9 @@ import {
   localizeForecastLocation,
   weatherCodeIcon,
   weatherCodeKey
-} from "./weather-forecast.js?v=v-5e4ebe3cf6e1";
-import { getFlightBookings } from "./flight-bookings.js?v=v-5e4ebe3cf6e1";
-import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-5e4ebe3cf6e1";
+} from "./weather-forecast.js?v=v-baed9ddaa9e3";
+import { getFlightBookings } from "./flight-bookings.js?v=v-baed9ddaa9e3";
+import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-baed9ddaa9e3";
 import {
   OSM_COPYRIGHT_URL,
   coordinateGoogleMapsUrl,
@@ -52,7 +71,7 @@ import {
   placeForSaving,
   readSavedPhoto,
   readSavedPlace
-} from "./place-picker.js?v=v-5e4ebe3cf6e1";
+} from "./place-picker.js?v=v-baed9ddaa9e3";
 
 const FIREBASE_SDK_VERSION = "12.15.0";
 // Self-hosted mode is decided before any Firebase code path. It never loads the
@@ -64,7 +83,7 @@ let firebaseConfig = {};
 let tripDocumentPath = "";
 const firebaseConfigPromise = HOSTED
   ? Promise.resolve()
-  : import("./firebase-config.js?v=v-5e4ebe3cf6e1")
+  : import("./firebase-config.js?v=v-baed9ddaa9e3")
     .then((module) => {
       firebaseConfig = module.firebaseConfig || {};
       tripDocumentPath = module.tripDocumentPath || "";
@@ -202,6 +221,14 @@ let editorSession = null;
 // Explicit place/photo lookup is a hosted editor feature only. The static
 // generator and approved viewers never render lookup controls.
 const LOOKUP_ENABLED = HOSTED && !HOSTED_READ_ONLY;
+// Optional Google Places UI Kit: hosted pages only, and only when the signed-in session advertises
+// it (the operator enabled it with a browser key). Otherwise no configuration request, Google
+// script, component or query ever happens, and OpenStreetMap/Commons content works unchanged.
+// The loader and manager are created on first need, which is the first expanded plan that has a
+// saved association, or an explicit Google action in the plan editor.
+const GOOGLE_PLACES_ENABLED = HOSTED && sessionHasGooglePlaces(getBootSession());
+let googlePlacesLoader = null;
+let googlePlaceDetails = null;
 const WEATHER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 const FLIGHT_BOOKING_REFS = Object.freeze({});
@@ -263,6 +290,8 @@ function persistLocalTrip() {
 function renderAll() {
   normalizeTrip(currentTrip);
   setGuideTrip(currentTrip);
+  // Retained Google components survive re-renders only while their association is still current.
+  googlePlaceDetails?.retain(currentGooglePlaceKeys());
   if (!currentTrip.days.some((day) => day.id === activeDayId)) activeDayId = initialDayId(currentTrip.days);
   displayTrip = localizeTrip(currentTrip, currentLanguage);
   applyStaticTranslations();
@@ -1065,6 +1094,9 @@ function renderItinerary() {
   const diningOpen = preserveDisclosureState && Boolean(els.days.querySelector(".dining-disclosure[open]"));
   const guideOpen = preserveDisclosureState && Boolean(els.days.querySelector(".day-guide[open]"));
 
+  // Keep the active Google component connected (parked) while its card is rebuilt; the restored
+  // card picks up the same element instead of creating a new one.
+  googlePlaceDetails?.suspend();
   els.days.replaceChildren(day ? renderDay(day, Math.max(0, index)) : renderNoDays());
 
   if (!preserveDisclosureState) {
@@ -1283,6 +1315,11 @@ function renderSlot(day, slot, slotIndex) {
   if (placeSource) body.append(placeSource);
   const photoCredit = renderPhotoCredit(slot);
   if (photoCredit) body.append(photoCredit);
+  // Saved Google association: an empty host only. The standard component is created when this
+  // card is expanded, never on render, poll or reload.
+  const googleDescriptor = googlePlaceDescriptor(slot.id);
+  const googleHost = googleDescriptor ? createGooglePlaceHost(document, currentLanguage) : null;
+  if (googleHost) body.append(googleHost);
   const actions = element("div", "timeline-card__actions");
   const mapsAction = googleMapsAnchor(slot, { allowSearchFallback: false });
   if (mapsAction) actions.append(mapsAction);
@@ -1306,6 +1343,14 @@ function renderSlot(day, slot, slotIndex) {
   card.addEventListener("toggle", () => {
     const restoring = card.dataset.restoring === "true";
     delete card.dataset.restoring;
+    if (googleHost) {
+      const details = googlePlacesRuntime().details;
+      // Expanding loads this plan only. A card re-opened by a re-render reuses the component only if
+      // it was the active one; other open cards get an explicit control instead of a new request.
+      if (card.open && (!restoring || details.isActive(googleDescriptor))) details.show(googleHost, googleDescriptor);
+      else if (card.open) details.idle(googleHost, googleDescriptor);
+      else if (!restoring) details.deactivate(googleDescriptor);
+    }
     const mapped = !slot.mapLocationOmitted && Number.isFinite(slot.lat) && Number.isFinite(slot.lng);
     if (card.open) {
       if (!mapped) return;
@@ -1317,6 +1362,51 @@ function renderSlot(day, slot, slotIndex) {
   });
   article.append(marker, card);
   return article;
+}
+
+// ---------------------------------------------------------------------------
+// Optional Google Places UI Kit (saved associations only). The association is read from the
+// canonical server trip, never from a localized copy, and is shown only while its location binding
+// matches the plan's current location.
+
+function googlePlacesRuntime() {
+  if (!GOOGLE_PLACES_ENABLED) return null;
+  if (!googlePlaceDetails) {
+    googlePlacesLoader = createGooglePlacesLoader({
+      win: window,
+      fetchConfig: () => hostedApi.googlePlacesConfig(),
+      language: currentLanguage
+    });
+    googlePlaceDetails = createPlaceDetailsManager({ doc: document, loader: googlePlacesLoader, language: () => currentLanguage });
+  }
+  return { loader: googlePlacesLoader, details: googlePlaceDetails };
+}
+
+function canonicalPlan(slotId) {
+  for (const day of hostedServerTrip?.days || []) {
+    for (const plan of (Array.isArray(day?.slots) ? day.slots : [])) if (plan?.id === slotId) return plan;
+  }
+  return null;
+}
+
+function googlePlaceDescriptor(slotId) {
+  if (!GOOGLE_PLACES_ENABLED) return null;
+  const plan = canonicalPlan(slotId);
+  if (!plan || !associationMatchesPlan(plan)) return null;
+  const association = normalizeGooglePlaceAssociation(plan[GOOGLE_PLACE_ASSOCIATION_FIELD]);
+  return { tripId: HOSTED_TRIP_ID, planId: plan.id, placeId: association.placeId, binding: association.locationBinding };
+}
+
+function currentGooglePlaceKeys() {
+  const keys = new Set();
+  if (!googlePlaceDetails) return keys;
+  for (const day of hostedServerTrip?.days || []) {
+    for (const plan of (Array.isArray(day?.slots) ? day.slots : [])) {
+      const descriptor = googlePlaceDescriptor(plan?.id);
+      if (descriptor) keys.add(googlePlaceDetails.keyOf(descriptor));
+    }
+  }
+  return keys;
 }
 
 // Shows where a chosen location came from; provider text is plain text only.
@@ -2569,6 +2659,7 @@ function startEditorSession(dayId, slotId, slot) {
     location: { mode: "unchanged", place: null },
     photo: { mode: "unchanged", photo: null, preview: null }
   };
+  session.google = createGoogleEditorState(slotId ? (canonicalPlan(slotId) || slot) : null);
   session.lookups = {
     place: createLookupController({
       request: (query, refresh) => hostedApi.searchPlaces(session.tripId, query, refresh),
@@ -2599,6 +2690,9 @@ function endEditorSession() {
   editorSession = null;
   session.lookups?.place.dispose();
   session.lookups?.photo.dispose();
+  // Cancel or close: any pending Google search, preview or choice is discarded and its late events
+  // are ignored. Nothing is saved.
+  endGoogleEditorState(session);
   ["place", "photo"].forEach((kind) => {
     const parts = lookupParts(session, kind);
     parts.results.replaceChildren();
@@ -2844,6 +2938,8 @@ function renderLookupCurrent(session, kind) {
   }
   if (actions.childNodes.length) box.append(actions);
   current.replaceChildren(box);
+  // Every change to the pending location passes through here (choose, clear, paste a link).
+  if (kind === "place") syncGoogleEditor(session);
 }
 
 function placeSummary(place, heading) {
@@ -2867,6 +2963,13 @@ function refreshLookupLanguage() {
   document.querySelectorAll(".lookup-panel [data-picker-text]").forEach((node) => {
     node.textContent = pickerText(currentLanguage, node.dataset.pickerText);
   });
+  document.querySelectorAll("#google-match [data-google-text]").forEach((node) => {
+    node.textContent = googleText(currentLanguage, node.dataset.googleText);
+  });
+  document.querySelectorAll("#google-match [data-google-placeholder]").forEach((node) => {
+    node.setAttribute("placeholder", googleText(currentLanguage, node.dataset.googlePlaceholder));
+  });
+  if (editorSession?.google) renderGoogleEditor(editorSession);
   document.querySelectorAll(".lookup-panel [data-picker-placeholder]").forEach((node) => {
     node.setAttribute("placeholder", pickerText(currentLanguage, node.dataset.pickerPlaceholder));
   });
@@ -2889,6 +2992,401 @@ function handleGoogleMapsInputForLookup() {
     lookupParts(session, "place").status.textContent = "";
   }
   renderLookupCurrent(session, "place");
+}
+
+// ---------------------------------------------------------------------------
+// Optional Google place link in the plan editor (owner and content managers only).
+// Opening the editor sends nothing. A Google search or preview starts only from the explicit
+// "Search on Google" / "Show this place" buttons, only after the public-venue box is ticked, and
+// only with the dedicated query field (never the plan name, notes, travelers or address). A place
+// is linked only when the user picks it in Google's own list or checks a pasted place ID; there is
+// no automatic or first-result match. Only the Place ID is kept, bound to this plan's location.
+
+function createGoogleEditorState(plan) {
+  if (!GOOGLE_PLACES_ENABLED) return null;
+  ensureGooglePanel();
+  resetGooglePanelFields();
+  const original = plan && associationMatchesPlan(plan) ? normalizeGooglePlaceAssociation(plan[GOOGLE_PLACE_ASSOCIATION_FIELD]) : null;
+  const originalBinding = locationBindingForPlan(plan);
+  return {
+    original, originalPlan: plan, originalBinding, lastBinding: originalBinding,
+    mode: "unchanged", placeId: "", selectionBinding: "", formOpen: false,
+    search: null, preview: null, statusKey: "", statusError: false, ended: false
+  };
+}
+
+function endGoogleEditorState(session) {
+  const state = session?.google;
+  if (!state) return;
+  state.ended = true;
+  stopGoogleWork(state);
+  resetGooglePanelFields();
+}
+
+function googleNode(tag, className, key) {
+  const node = textElement(tag, className, googleText(currentLanguage, key));
+  node.dataset.googleText = key;
+  return node;
+}
+
+function googleButton(className, action, key = "") {
+  const node = textElement("button", className, key ? googleText(currentLanguage, key) : "");
+  node.type = "button";
+  node.dataset.googleAction = action;
+  if (key) node.dataset.googleText = key;
+  return node;
+}
+
+function ensureGooglePanel() {
+  let panel = document.getElementById("google-match");
+  if (panel) return panel;
+  panel = element("section", "lookup-panel google-match");
+  panel.id = "google-match";
+  const title = googleNode("h3", "lookup-panel__title", "sectionTitle");
+  title.id = "google-match-title";
+  panel.setAttribute("aria-labelledby", title.id);
+  const hint = googleNode("p", "form-hint lookup-panel__hint", "sectionHint");
+  const current = element("p", "google-match__current");
+  const actions = element("div", "lookup-current__actions google-match__actions");
+  actions.append(
+    googleButton("button button--quiet button--small", "open"),
+    googleButton("button button--quiet button--small", "remove", "removeLink")
+  );
+
+  const form = element("div", "google-match__form");
+  form.hidden = true;
+  const query = document.createElement("input");
+  query.type = "search";
+  query.id = "google-match-query";
+  query.className = "lookup-search__input";
+  query.maxLength = VENUE_QUERY_MAX;
+  query.autocomplete = "off";
+  query.spellcheck = false;
+  query.setAttribute("enterkeyhint", "search");
+  query.dataset.googlePlaceholder = "queryPlaceholder";
+  query.placeholder = googleText(currentLanguage, "queryPlaceholder");
+  const queryLabel = googleNode("label", "lookup-search__label", "queryLabel");
+  queryLabel.htmlFor = query.id;
+  const privacy = googleNode("p", "lookup-privacy", "privacyNote");
+  privacy.id = "google-match-privacy";
+  query.setAttribute("aria-describedby", privacy.id);
+  const venue = element("label", "google-match__venue");
+  const venueBox = document.createElement("input");
+  venueBox.type = "checkbox";
+  venueBox.id = "google-match-public";
+  venue.append(venueBox, googleNode("span", "", "publicVenueLabel"));
+  const searchRow = element("div", "lookup-search__row");
+  searchRow.append(query, googleButton("button button--small lookup-search__button", "search", "searchGoogle"));
+
+  const placeId = document.createElement("input");
+  placeId.type = "url";
+  placeId.id = "google-match-place-id";
+  placeId.className = "lookup-search__input";
+  placeId.maxLength = 4096;
+  placeId.autocomplete = "off";
+  placeId.spellcheck = false;
+  placeId.setAttribute("autocapitalize", "none");
+  placeId.setAttribute("inputmode", "url");
+  placeId.dataset.googlePlaceholder = "placeIdPlaceholder";
+  placeId.placeholder = googleText(currentLanguage, "placeIdPlaceholder");
+  const placeIdLabel = googleNode("label", "lookup-search__label", "placeIdLabel");
+  placeIdLabel.htmlFor = placeId.id;
+  const placeIdRow = element("div", "lookup-search__row");
+  placeIdRow.append(placeId, googleButton("button button--quiet button--small lookup-search__button", "preview", "showPlace"));
+
+  const status = element("p", "lookup-status google-match__status");
+  status.setAttribute("role", "status");
+  status.setAttribute("aria-live", "polite");
+  const results = element("div", "google-match__results");
+  const preview = element("div", "google-match__preview");
+  const use = googleButton("button button--small google-match__use", "use", "usePlace");
+  use.hidden = true;
+  const cancel = googleButton("button button--quiet button--small google-match__cancel", "cancel", "cancelSearch");
+  form.append(queryLabel, privacy, venue, searchRow, placeIdLabel, placeIdRow, status, results, preview, use, cancel);
+  panel.append(title, hint, current, actions, form);
+
+  // Enter in either field is an explicit action for that field; it never submits the plan.
+  query.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!event.isComposing) googleEditorAction("search");
+  });
+  placeId.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!event.isComposing) googleEditorAction("preview");
+  });
+  venueBox.addEventListener("change", () => googleEditorAction("venue"));
+  panel.addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-google-action]");
+    if (button && panel.contains(button)) googleEditorAction(button.dataset.googleAction);
+  });
+  els.googleMapsLinkPreview.after(panel);
+  return panel;
+}
+
+function googleParts() {
+  const panel = document.getElementById("google-match");
+  if (!panel) return null;
+  return {
+    panel,
+    current: panel.querySelector(".google-match__current"),
+    open: panel.querySelector('[data-google-action="open"]'),
+    remove: panel.querySelector('[data-google-action="remove"]'),
+    form: panel.querySelector(".google-match__form"),
+    query: panel.querySelector("#google-match-query"),
+    venue: panel.querySelector("#google-match-public"),
+    placeId: panel.querySelector("#google-match-place-id"),
+    status: panel.querySelector(".google-match__status"),
+    results: panel.querySelector(".google-match__results"),
+    preview: panel.querySelector(".google-match__preview"),
+    use: panel.querySelector('[data-google-action="use"]')
+  };
+}
+
+function resetGooglePanelFields() {
+  const parts = googleParts();
+  if (!parts) return;
+  parts.query.value = "";
+  parts.venue.checked = false;
+  parts.placeId.value = "";
+  parts.results.replaceChildren();
+  parts.preview.replaceChildren();
+  parts.use.hidden = true;
+  parts.status.textContent = "";
+  delete parts.status.dataset.error;
+  parts.form.hidden = true;
+  parts.panel.removeAttribute("aria-busy");
+}
+
+function stopGoogleWork(state) {
+  state.search?.dispose();
+  state.preview?.dispose();
+  state.search = null;
+  state.preview = null;
+  const parts = googleParts();
+  if (parts) {
+    parts.results.replaceChildren();
+    parts.preview.replaceChildren();
+  }
+}
+
+// The location the editor would save, for display only. Saving recomputes the binding from the
+// exact plan that is sent, and refuses a choice made for a different location.
+function pendingLocationPlan(session) {
+  const googleValue = els.form.elements.googleMapsUrl.value.trim();
+  const parsed = parseFullGoogleMapsPlaceUrl(googleValue);
+  if (session.location.mode === "place" && session.location.place && !googleValue) return { place: session.location.place };
+  if (parsed.ok) return { googleMapsUrl: parsed.url };
+  if (session.location.mode === "cleared") return {};
+  const original = session.google?.originalPlan || {};
+  if (!googleValue && !original.place && parseFullGoogleMapsPlaceUrl(original.googleMapsUrl || original.mapsUrl || "").ok) return {};
+  return original;
+}
+
+function setGoogleStatus(state, key, isError = false) {
+  state.statusKey = key;
+  state.statusError = isError;
+}
+
+function syncGoogleEditor(session) {
+  const state = session?.google;
+  if (!state || state.ended) return;
+  const binding = locationBindingForPlan(pendingLocationPlan(session));
+  if (binding !== state.lastBinding) {
+    state.lastBinding = binding;
+    // A changed location invalidates any pending Google search, preview or choice.
+    stopGoogleWork(state);
+    if (state.mode === "chosen") Object.assign(state, { mode: "unchanged", placeId: "", selectionBinding: "" });
+    // A new or changed location offers the search form; it still sends nothing by itself.
+    state.formOpen = Boolean(binding) && binding !== state.originalBinding;
+    setGoogleStatus(state, "");
+  }
+  renderGoogleEditor(session);
+}
+
+function renderGoogleEditor(session) {
+  const state = session?.google;
+  const parts = googleParts();
+  if (!state || state.ended || !parts) return;
+  const binding = state.lastBinding;
+  const locationChanged = binding !== state.originalBinding;
+  const currentKey = !binding ? "needsLocation"
+    : state.mode === "chosen" ? "chosenPending"
+      : state.mode === "removed" ? "removedPending"
+        : state.original && locationChanged ? "staleLink"
+          : state.original ? "linked" : "notLinked";
+  parts.current.textContent = googleText(currentLanguage, currentKey);
+  parts.current.dataset.state = currentKey;
+  const correcting = (state.original && !locationChanged) || state.mode === "chosen";
+  parts.open.textContent = googleText(currentLanguage, correcting ? "chooseDifferent" : "findOnGoogle");
+  parts.open.hidden = !binding || state.formOpen;
+  parts.remove.hidden = !(state.mode === "chosen" || (state.original && !locationChanged && state.mode === "unchanged"));
+  parts.form.hidden = !binding || !state.formOpen;
+  parts.use.hidden = !state.preview?.readyPlaceId || (state.mode === "chosen" && state.placeId === state.preview.readyPlaceId);
+  parts.status.textContent = state.statusKey ? googleText(currentLanguage, state.statusKey) : "";
+  if (state.statusError) parts.status.dataset.error = "true";
+  else delete parts.status.dataset.error;
+  if (state.statusKey === "searching" || state.statusKey === "previewLoading") parts.panel.setAttribute("aria-busy", "true");
+  else parts.panel.removeAttribute("aria-busy");
+}
+
+function chooseGooglePlace(session, placeId) {
+  const state = session.google;
+  const binding = locationBindingForPlan(pendingLocationPlan(session));
+  if (!binding || state.ended) return;
+  Object.assign(state, { mode: "chosen", placeId, selectionBinding: binding });
+  setGoogleStatus(state, "chosenPending");
+  renderGoogleEditor(session);
+}
+
+function googleEditorAction(action) {
+  const session = editorSession;
+  const state = session?.google;
+  const parts = googleParts();
+  if (!state || state.ended || !parts || !els.dialog.open) return;
+  const binding = locationBindingForPlan(pendingLocationPlan(session));
+  if (action === "open") {
+    if (!binding) return;
+    state.formOpen = true;
+    setGoogleStatus(state, "");
+    renderGoogleEditor(session);
+    parts.query.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "remove" || action === "cancel") {
+    // Remove: the saved link goes on Save. Cancel: stop searching and drop any pending choice.
+    stopGoogleWork(state);
+    if (action === "remove") state.mode = state.original ? "removed" : "unchanged";
+    else if (state.mode === "chosen") state.mode = "unchanged";
+    Object.assign(state, { placeId: "", selectionBinding: "", formOpen: false });
+    setGoogleStatus(state, "");
+    renderGoogleEditor(session);
+    if (!parts.open.hidden) parts.open.focus({ preventScroll: true });
+    return;
+  }
+  if (action === "venue") {
+    if (!parts.venue.checked && state.mode === "chosen") {
+      // Withdrawing the public-venue answer withdraws the pending choice.
+      stopGoogleWork(state);
+      Object.assign(state, { mode: "unchanged", placeId: "", selectionBinding: "" });
+      setGoogleStatus(state, "needPublicVenue", true);
+    }
+    renderGoogleEditor(session);
+    return;
+  }
+  if (!binding || !state.formOpen) return;
+  if (action === "use") {
+    const placeId = state.preview?.readyPlaceId;
+    if (placeId && parts.venue.checked) chooseGooglePlace(session, placeId);
+    return;
+  }
+  if (!parts.venue.checked) {
+    setGoogleStatus(state, "needPublicVenue", true);
+    renderGoogleEditor(session);
+    parts.venue.focus({ preventScroll: true });
+    return;
+  }
+  const runtime = googlePlacesRuntime();
+  if (action === "search") {
+    const checked = checkVenueQuery(parts.query.value);
+    if (!checked.ok) {
+      setGoogleStatus(state, checked.errorKey, true);
+      renderGoogleEditor(session);
+      parts.query.focus({ preventScroll: true });
+      return;
+    }
+    state.preview?.dispose();
+    state.preview = null;
+    parts.preview.replaceChildren();
+    state.search ||= createPlaceSearchSession({
+      doc: document,
+      loader: runtime.loader,
+      mount: parts.results,
+      onStatus: (key) => {
+        if (editorSession !== session || state.ended) return;
+        const failedKey = key === "disabled" || key === "searchFailed";
+        setGoogleStatus(state, failedKey ? "searchFailed" : key, failedKey);
+        renderGoogleEditor(session);
+      },
+      onSelect: (placeId) => {
+        if (editorSession !== session || state.ended || !els.dialog.open || !parts.venue.checked) return;
+        chooseGooglePlace(session, placeId);
+      }
+    });
+    state.search.search(checked.query);
+    return;
+  }
+  if (action === "preview") {
+    const placeId = placeIdFromUserInput(parts.placeId.value);
+    if (!placeId) {
+      setGoogleStatus(state, "placeIdInvalid", true);
+      renderGoogleEditor(session);
+      parts.placeId.focus({ preventScroll: true });
+      return;
+    }
+    state.preview ||= createPlacePreviewSession({
+      doc: document,
+      loader: runtime.loader,
+      mount: parts.preview,
+      onStatus: (key) => {
+        if (editorSession !== session || state.ended) return;
+        const failedKey = key === "disabled" || key === "detailsUnavailable";
+        setGoogleStatus(state, failedKey ? "detailsUnavailable" : key, failedKey);
+        renderGoogleEditor(session);
+      }
+    });
+    state.preview.preview(placeId);
+  }
+}
+
+// Applies the editor's Google choice to the exact plan being saved. Only the Place ID, the binding
+// of this plan's saved location and the public-venue flag are written; an unchanged association is
+// dropped as soon as the location binding changes (the server enforces the same rule).
+// Returns true when a pending choice was made for a location other than the one actually being
+// saved: it is never attached, any earlier link is cleared, and the user is told to choose again.
+function applyGoogleChoice(next, before, choice) {
+  const field = GOOGLE_PLACE_ASSOCIATION_FIELD;
+  if (choice?.mode === "chosen") {
+    const association = associationForPlan(next, choice.placeId);
+    if (association && association.locationBinding === choice.selectionBinding) {
+      next[field] = association;
+      return false;
+    }
+    delete next[field];
+    return true;
+  }
+  if (choice?.mode === "removed") {
+    delete next[field];
+    return false;
+  }
+  if (next[field] && locationBindingForPlan(next) !== locationBindingForPlan(before)) delete next[field];
+  return false;
+}
+
+// Shown after a save in which a pending Google choice could not match the saved location.
+const GOOGLE_RELINK_NOTICE = Object.freeze({
+  en: "Your changes were saved, but the Google place you chose did not match this plan's saved location, so the Google link was cleared. Open the plan and choose the Google place again.",
+  "zh-Hans": "更改已保存，但所选的 Google 地点与此行程保存的位置不一致，因此已清除 Google 链接。请打开此行程，重新选择 Google 地点。",
+  "zh-Hant": "變更已儲存，但所選的 Google 地點與此行程儲存的位置不一致，因此已清除 Google 連結。請開啟此行程，重新選擇 Google 地點。",
+  ja: "変更は保存されましたが、選んだ Google の場所がこの予定の保存済みの場所と一致しないため、Google のリンクは解除されました。予定を開いて、Google の場所をもう一度選んでください。"
+});
+const GOOGLE_RELINK_NOTICE_MS = 10000;
+
+function googleRelinkNoticeText() {
+  return GOOGLE_RELINK_NOTICE[currentLanguage] || GOOGLE_RELINK_NOTICE.en;
+}
+
+function showGoogleRelinkNotice() {
+  clearTimeout(toastTimer);
+  toastKey = null;
+  toastVariables = {};
+  els.toast.textContent = googleRelinkNoticeText();
+  els.toast.dataset.error = "true";
+  els.toast.dataset.notice = "google-relink";
+  els.toast.hidden = false;
+  // Longer than an ordinary toast: the user has to act on it.
+  toastTimer = setTimeout(hideToast, GOOGLE_RELINK_NOTICE_MS);
 }
 
 function focusDialogFieldOnDesktop(field) {
@@ -2924,6 +3422,9 @@ async function handleItemSubmit(event) {
   const clearingLocation = session?.location.mode === "cleared" && !submittedMapsUrl;
   const chosenPhoto = session?.photo.mode === "photo" ? session.photo.photo : null;
   const clearingPhoto = session?.photo.mode === "cleared";
+  const googleChoice = session?.google
+    ? { mode: session.google.mode, placeId: session.google.placeId, selectionBinding: session.google.selectionBinding }
+    : null;
   const googleUrlChanged = parsedMapsPlace.ok && (!existingMapsPlace.ok || existingMapsPlace.url !== parsedMapsPlace.url);
   const removedKeys = new Set();
   if (chosenPlace) {
@@ -2983,25 +3484,34 @@ async function handleItemSubmit(event) {
   }
   if (chosenPhoto) slotPatch.photo = clone(chosenPhoto);
 
+  // Set by the last run of the mutator (a sync transaction may run it more than once).
+  let googleRelinkNeeded = false;
   const saved = await mutateTrip((trip) => {
+    googleRelinkNeeded = false;
     const day = trip.days.find((candidate) => candidate.id === dayId);
     if (!day) return;
     if (!Array.isArray(day.slots)) day.slots = [];
     const existingIndex = day.slots.findIndex((candidate) => candidate.id === slotId);
     let next;
     if (existingIndex >= 0) {
-      next = { ...day.slots[existingIndex], ...slotPatch };
+      const before = day.slots[existingIndex];
+      next = { ...before, ...slotPatch };
       removedKeys.forEach((key) => delete next[key]);
       if (next.i18n) next.i18n = clone(next.i18n);
       invalidateTranslations(next, staleTranslationFields);
+      googleRelinkNeeded = applyGoogleChoice(next, before, googleChoice);
       day.slots[existingIndex] = next;
     } else {
       next = { id: nextSlotId, ...slotPatch };
+      googleRelinkNeeded = applyGoogleChoice(next, null, googleChoice);
       day.slots.push(next);
     }
     if (scheduleChanged) resequenceDaySlots(day, next.id);
   }, slotId ? "planUpdated" : "planAdded");
-  if (saved) els.dialog.close();
+  if (!saved) return;
+  els.dialog.close();
+  // The other edits are saved; the unmatched Google choice was not, and the user is told so.
+  if (googleRelinkNeeded) showGoogleRelinkNotice();
 }
 
 // Removes translations that depended on edited source fields. Languages then
@@ -3400,6 +3910,7 @@ function showToast(key, isError = false, variables = {}) {
   toastVariables = variables;
   els.toast.textContent = ui(currentLanguage, key, variables);
   els.toast.dataset.error = String(isError);
+  delete els.toast.dataset.notice;
   els.toast.hidden = false;
   toastTimer = setTimeout(hideToast, 3200);
 }
@@ -3408,6 +3919,7 @@ function hideToast() {
   clearTimeout(toastTimer);
   toastTimer = null;
   els.toast.hidden = true;
+  delete els.toast.dataset.notice;
   toastKey = null;
   toastVariables = {};
 }
@@ -3449,6 +3961,8 @@ function applyStaticTranslations() {
   if (els.weatherDialog.open) renderWeatherDialog();
   if (!els.toast.hidden && toastKey) {
     els.toast.textContent = ui(currentLanguage, toastKey, toastVariables);
+  } else if (!els.toast.hidden && els.toast.dataset.notice === "google-relink") {
+    els.toast.textContent = googleRelinkNoticeText();
   }
   updateItinerarySheetHandle(undefined, itinerarySheetMode);
   setSyncStatus(currentStatusKey, els.status.dataset.state || "working", currentStatusVariables);

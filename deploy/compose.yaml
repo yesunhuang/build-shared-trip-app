@@ -43,6 +43,10 @@ services:
       SHARED_TRIP_LOOKUPS_ENABLED: "${SHARED_TRIP_LOOKUPS_ENABLED:-0}"
       SHARED_TRIP_LOOKUP_USER_AGENT: "${SHARED_TRIP_LOOKUP_USER_AGENT:-}"
       SHARED_TRIP_NOMINATIM_URL: "${SHARED_TRIP_NOMINATIM_URL:-https://nominatim.openstreetmap.org/search}"
+      # Optional Google Places UI Kit; off by default. Browsers (not this
+      # container) contact Google, so no egress is needed. Empty key = off.
+      SHARED_TRIP_GOOGLE_PLACES_UI_KIT: "${SHARED_TRIP_GOOGLE_PLACES_UI_KIT:-0}"
+      SHARED_TRIP_GOOGLE_MAPS_BROWSER_KEY: "${SHARED_TRIP_GOOGLE_MAPS_BROWSER_KEY:-}"
     volumes:
       # Data directory: shared-trip.sqlite (trips, retry log, viewer accounts,
       # invitations), server-ownership.sqlite, server.lock and the private

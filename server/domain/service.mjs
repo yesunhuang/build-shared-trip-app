@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { normalizeContent, applyParsedPlaces, applySelectedPlaces, assertSafePayload, isValidId } from "./validate.mjs";
+import { normalizeContent, applyGooglePlaceAssociations, applyParsedPlaces, applySelectedPlaces, assertSafePayload, isValidId } from "./validate.mjs";
 import { applyContentRules } from "./content-rules.mjs";
 import { applyOperations, newId, deriveStart, deriveEnd } from "./operations.mjs";
 import { importContent } from "./legacy.mjs";
@@ -26,6 +26,9 @@ function validate(raw, previous) {
   const urls = new Map((previous?.days || []).flatMap((day) => day.slots || []).map((slot) => [slot.id, slot.place ? null : slot.googleMapsUrl]));
   applyParsedPlaces(content, parsedPlaces, urls);
   applySelectedPlaces(content, previous);
+  // A Google place association stays only while it is bound to the plan's final location; a stale
+  // carried-over one is dropped and a mismatched new one refuses the write (see validate.mjs).
+  applyGooglePlaceAssociations(content, previous);
   applyContentRules(previous, content);
   return content;
 }

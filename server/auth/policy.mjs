@@ -42,7 +42,10 @@ export function capabilitiesFor(principal) {
   };
 }
 
-const VIEWER_READ_ROUTES = [/^\/api\/session$/, /^\/api\/trips$/, /^\/api\/trips\/[^/]+$/, /^\/api\/trips\/[^/]+\/export$/];
+// /api/google-places/config is the optional, protected, no-store browser configuration for the
+// Google Places UI Kit. Viewers may display a saved association, so it is a read route; it contains
+// no trip data and never any MCP token or other server credential.
+const VIEWER_READ_ROUTES = [/^\/api\/session$/, /^\/api\/trips$/, /^\/api\/trips\/[^/]+$/, /^\/api\/trips\/[^/]+\/export$/, /^\/api\/google-places\/config$/];
 // The opt-in public place/photo lookups (POST .../places/search and .../photos/search) are editing
 // aids, so they are content-manager routes and never viewer routes.
 export const LOOKUP_ROUTE = /^\/api\/trips\/([^/]+)\/(places|photos)\/search$/;

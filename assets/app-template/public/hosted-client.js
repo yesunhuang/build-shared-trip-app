@@ -250,8 +250,15 @@ export const hostedApi = Object.freeze({
   searchPhotos: (tripId, query, refresh = false) => requestJSON(
     `/api/trips/${encodeURIComponent(tripId)}/photos/search`,
     { method: "POST", body: refresh === true ? { query, refresh: true } : { query }, timeoutMs: WRITE_TIMEOUT_MS }
-  )
+  ),
+  // Optional Google Places UI Kit browser configuration ({enabled:false} or {enabled:true, apiKey,
+  // libraries}). Called only when the session advertises the feature and a plan actually needs a
+  // Google component; the response is kept in page memory only and never stored.
+  googlePlacesConfig: () => requestJSON("/api/google-places/config", { timeoutMs: 8000 })
 });
+
+// The session lists the optional Google Places UI Kit only when the operator enabled it.
+export function sessionHasGooglePlaces(session) { return session?.features?.googlePlacesUiKit === true; }
 
 // Extracts and verifies a trip from a {trip} response. A response for any other
 // trip id is rejected rather than displayed.
