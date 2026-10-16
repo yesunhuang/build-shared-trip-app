@@ -47,6 +47,8 @@ In MCP metadata revision **1.1.0**, discovery describes the association's three 
 
 `get_trip` adds `planLocationBindings` alongside `trip`: an array of `{dayId, planId, locationBinding}` for that read's current version. A locationless plan has `locationBinding: null`. The binding is calculated by the existing shared location helper; clients need no browser session, provider lookup or duplicate hashing implementation. This metadata is never saved inside a trip or included in exports. Existing stored associations remain at `trip.days[].slots[].googlePlaceAssociation`.
 
+**Map coordinates are separate.** The itinerary map needs finite saved `plan.lat` and `plan.lng`, with `mapLocationOmitted` unset or false. An address or Google association does not supply them. A binding can be valid through a full legacy `mapsUrl` even when coordinates are absent: that alias is recognized for association binding, while automatic coordinate derivation on an explicit write uses the canonical `googleMapsUrl` field. Reads and ordinary views never geocode an address. For a missing pin, verify the intended public venue and save its selected OSM snapshot (which mirrors coordinates) or narrowly update independently verified coordinates through `upsert_plan`; re-read and check the association binding and unrelated fields afterward. Never guess coordinates or use raw Google Places content to populate the OSM map.
+
 For an explicitly authorized public-venue association:
 
 1. Read `get_trip`, identify the stable day/plan IDs, and copy that plan's non-null binding from `planLocationBindings`. Use `trip.version` as `expectedVersion`.
