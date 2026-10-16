@@ -54,9 +54,21 @@ MCP clients use exactly these operations through `apply_trip_changes`. The batch
 - Sign-out initiation disposes weather work before waiting for the logout response. The weather date labels use the current validated trip timezone, including while a dialog remains open after a remote edit.
 - Forecasts are kept **in memory only**, in every mode: no `localStorage`, IndexedDB, Cache Storage or service-worker copy. Last-known data is shown (as "Saved forecast") only for the same point and time zone after a failed refresh.
 
+### Request recovery and missing data
+
+- Each request has a **30-second total deadline**, covering headers and JSON body parsing. Caller cancellation remains active through parsing; late replies cannot restore a disposed session or replace a newer trip. HTTP error bodies are cancelled.
+- A refresh makes at most **three attempts per batch**, with 1.5-second and 4-second backoff for transient timeout/network/empty responses, HTTP 408/5xx and rate limits. There is one in-flight refresh. `Retry-After` takes precedence; a wait over 15 seconds ends the automatic cycle rather than waiting indefinitely or retrying early.
+- After a failed cycle, ordinary resume/online refreshes wait at least five minutes. An explicit **Retry weather** is available after a five-second cooldown, or a longer provider-requested wait. Successful manual requests also have a cooldown. Repeated renders, polls, language changes and repeated clicks do not start extra attempts.
+- Failure categories distinguish timeout, offline, network, HTTP, rate limit, invalid data and empty data. A browser's blocked fetch cannot reliably distinguish CORS from other network failures; it is not labelled as confirmed CORS.
+- All dates remain visible during loading/outages. Each date independently shows a past-date notice, the 16-day horizon, missing coordinates, missing measurements, partial data or a request failure. Authorized editors can still change automatic/manual/off choices in the weather dialog. Viewers can retry forecasts but cannot edit those choices.
+- Null, missing, nonnumeric and nonfinite measurements stay missing and display as dashes, never zero or clear weather. Valid zeroes remain zero. Daily and hourly data are independent. Unambiguous valid points in partial batches survive failed points; malformed or duplicate location IDs never overwrite another point.
+- Forecast memory is cleared between trip identities and time zones. Trip-local midnight invalidates the request window even when coordinates remain identical. The provider's date strings remain local dates; no date-range expansion or new provider is introduced.
+
+The [official forecast documentation](https://open-meteo.com/en/docs) specifies up to 16 forecast days, local timestamps for the requested timezone and a list response for coordinate batches. A request failure is separate from a date being beyond that window. Provider availability and a particular visitor's network require their own evidence.
+
 ## Tests
 
-`scripts/test-weather-association.mjs` covers the pure rules and the controller (injected fetch and clock). `scripts/test-weather-server.mjs` covers the domain, real HTTP and the MCP SDK client. `scripts/test-weather-editor-ui.mjs` covers the editor module in four languages and the trip page in jsdom. All three use fictional data and never contact Open-Meteo.
+`scripts/test-weather-association.mjs` covers the pure rules and the controller, including `test-weather-resilience.mjs` for deterministic slow headers/body, cancellation, malformed/empty/partial data, nulls, HTTP/rate-limit/network categories, retry bounds, trip isolation, late responses and local-midnight/horizon states. `scripts/test-weather-server.mjs` covers the domain, real HTTP and the MCP SDK client. `scripts/test-weather-editor-ui.mjs` covers four-language editing, outages, missing measurements, hourly fallback and manual retry in desktop/phone jsdom simulations. These tests use fictional data and never contact Open-Meteo.
 
 The legacy generator also accepts absent/null automatic mappings and explicit `[]` off mappings alongside manually mapped days; malformed types and unknown manual IDs still fail validation.
 

@@ -15,7 +15,12 @@ import {
 
 export const OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
 export const WEATHER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-export const WEATHER_REQUEST_TIMEOUT_MS = 10000;
+// Covers headers AND the response body. Slow public requests can exceed ten seconds.
+export const WEATHER_REQUEST_TIMEOUT_MS = 30000;
+export const WEATHER_MAX_ATTEMPTS = 3;
+export const WEATHER_RETRY_DELAYS_MS = Object.freeze([1500, 4000]);
+export const WEATHER_MANUAL_COOLDOWN_MS = 5000;
+const MAX_RETRY_WAIT_MS = 15000;
 
 export const DAILY_FIELDS = Object.freeze([
   "weather_code",
@@ -54,35 +59,92 @@ export function forecastRequestUrl(points, timezone) {
   return `${OPEN_METEO_FORECAST_URL}?${params}`;
 }
 
-/** Fetch one batch. Resolves to { [pointKey]: { daily, hourly } } or throws. */
-export async function fetchForecastBatch(points, timezone, { fetchImpl = (...args) => globalThis.fetch(...args), signal, timeoutMs = WEATHER_REQUEST_TIMEOUT_MS, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+export class WeatherRequestError extends Error {
+  constructor(code, { status = null, retryAfterMs = 0 } = {}) {
+    super(code === "invalid_response" ? "Invalid weather response or location count" : `Weather request: ${code}`);
+    this.name = "WeatherRequestError"; this.code = code; this.status = status; this.retryAfterMs = retryAfterMs;
+    this.retryable = ["timeout", "network", "empty_response", "rate_limit"].includes(code) || code === "http" && (status === 408 || status >= 500);
+  }
+}
+
+function retryAfter(response, nowMs) {
+  const value = response.headers?.get?.("retry-after");
+  if (!value) return 0;
+  const delay = /^\d+(?:\.\d+)?$/.test(value) ? Number(value) * 1000 : Date.parse(value) - nowMs;
+  // Very long/invalid numeric waits must not overflow browser timers or trigger early retries.
+  if (Number.isNaN(delay)) return 0;
+  return Math.max(0, delay);
+}
+
+/** Partial batches keep only unambiguously identified, usable locations. Missing rows are errors. */
+export function parseForecastPayload(points, payload) {
+  if (!payload || typeof payload !== "object" || payload.error) throw new WeatherRequestError("invalid_response");
+  const results = Array.isArray(payload) ? payload : [payload];
+  if (!results.length) throw new WeatherRequestError("empty_response");
+  const out = {}, failures = new Map(), seen = new Set(), duplicates = new Set();
+  for (let index = 0; index < Math.min(results.length, points.length + 1); index += 1) {
+    const result = results[index];
+    if (!result || typeof result !== "object" || Array.isArray(result)) continue;
+    const hasId = Object.hasOwn(result, "location_id") && result.location_id !== undefined;
+    const position = hasId ? result.location_id : results.length === points.length ? index : -1;
+    if (!Number.isInteger(position) || !points[position]) continue;
+    const key = points[position].key;
+    if (seen.has(key)) { duplicates.add(key); delete out[key]; continue; }
+    seen.add(key);
+    const daily = normalizeDailyForecast(result.daily), hourly = normalizeHourlyForecast(result.hourly);
+    if (Object.values(daily).some(hasDailyMeasurements) || Object.values(hourly).flat().some(hasHourlyMeasurements)) out[key] = { daily, hourly };
+    else failures.set(key, new WeatherRequestError(Array.isArray(result.daily?.time) || Array.isArray(result.hourly?.time) ? "empty_response" : "invalid_response"));
+  }
+  for (const point of points) if (duplicates.has(point.key) || !out[point.key] && !failures.has(point.key)) failures.set(point.key, new WeatherRequestError("invalid_response"));
+  if (!Object.keys(out).length) throw failures.values().next().value || new WeatherRequestError("invalid_response");
+  // Non-enumerable metadata preserves the existing point-map API and compatibility exports.
+  Object.defineProperty(out, "failures", { value: failures });
+  return out;
+}
+
+/** A single bounded request, including JSON parsing; caller cancellation remains active throughout. */
+export async function fetchForecastBatch(points, timezone, { fetchImpl = (...args) => globalThis.fetch(...args), signal, timeoutMs = WEATHER_REQUEST_TIMEOUT_MS, setTimer = setTimeout, clearTimer = clearTimeout, now = () => Date.now(), isOnline = () => globalThis.navigator?.onLine !== false } = {}) {
+  if (signal?.aborted) throw new WeatherRequestError("cancelled");
+  if (!isOnline()) throw new WeatherRequestError("offline");
   const controller = new AbortController();
-  const abort = () => controller.abort();
+  let rejectAbort;
+  const aborted = new Promise((resolve, reject) => { rejectAbort = reject; });
+  const stop = (code) => { const error = new WeatherRequestError(code); controller.abort(error); rejectAbort(error); };
+  const abort = () => stop("cancelled");
   signal?.addEventListener?.("abort", abort, { once: true });
-  const timeout = setTimer(abort, timeoutMs);
-  let response;
+  const timeout = setTimer(() => stop("timeout"), timeoutMs);
   try {
-    response = await fetchImpl(forecastRequestUrl(points, timezone), {
+    const response = await Promise.race([fetchImpl(forecastRequestUrl(points, timezone), {
       cache: "no-store",
       headers: { Accept: "application/json" },
       signal: controller.signal
-    });
+    }), aborted]);
+    if (!response.ok) {
+      const error = new WeatherRequestError(response.status === 429 ? "rate_limit" : "http", { status: response.status, retryAfterMs: retryAfter(response, now()) });
+      controller.abort(error); // do not leave an unused error body downloading after headers
+      throw error;
+    }
+    let payload;
+    try { payload = await Promise.race([response.json(), aborted]); }
+    catch (error) { if (controller.signal.aborted) throw controller.signal.reason; throw new WeatherRequestError("invalid_response"); }
+    return parseForecastPayload(points, payload);
+  } catch (error) {
+    if (controller.signal.aborted) throw controller.signal.reason;
+    if (error instanceof WeatherRequestError) throw error;
+    throw new WeatherRequestError(isOnline() ? "network" : "offline");
   } finally {
     clearTimer(timeout);
     signal?.removeEventListener?.("abort", abort);
   }
-  if (!response.ok) throw new Error(`Weather API returned ${response.status}`);
-  const payload = await response.json();
-  if (payload?.error) throw new Error(payload.reason || "Weather API error");
-  const results = Array.isArray(payload) ? payload : [payload];
-  if (results.length !== points.length) throw new Error("Weather location count did not match");
-  const out = {};
-  results.forEach((result, index) => {
-    const position = Number.isInteger(result?.location_id) && points[result.location_id] ? result.location_id : index;
-    const point = points[position];
-    if (point) out[point.key] = { daily: normalizeDailyForecast(result?.daily), hourly: normalizeHourlyForecast(result?.hourly) };
+}
+
+function waitForRetry(ms, signal, setTimer, clearTimer) {
+  if (signal.aborted) return Promise.reject(new WeatherRequestError("cancelled"));
+  return new Promise((resolve, reject) => {
+    const abort = () => { clearTimer(timer); signal.removeEventListener("abort", abort); reject(new WeatherRequestError("cancelled")); };
+    const timer = setTimer(() => { signal.removeEventListener("abort", abort); resolve(); }, ms);
+    signal.addEventListener("abort", abort, { once: true });
   });
-  return out;
 }
 
 /**
@@ -99,6 +161,8 @@ export function createWeatherForecastController({
   onChange = () => {},
   refreshIntervalMs = WEATHER_REFRESH_INTERVAL_MS,
   timeoutMs = WEATHER_REQUEST_TIMEOUT_MS,
+  maxAttempts = WEATHER_MAX_ATTEMPTS,
+  retryDelaysMs = WEATHER_RETRY_DELAYS_MS,
   setTimer = (...args) => setTimeout(...args),
   clearTimer = (...args) => clearTimeout(...args),
   // False once the page has lost its session/trip: the controller then stops for good.
@@ -115,9 +179,13 @@ export function createWeatherForecastController({
   const data = new Map();
   let status = "idle";
   let lastError = null;
+  const attemptLimit = Math.max(1, Math.min(3, Math.floor(maxAttempts) || 1));
+  let tripIdentity = "";
+  const errors = new Map();
+  let automaticRetryAt = 0, manualRetryAt = 0, providerRetryAt = 0, retryAt = 0, retrying = false, cooldownTimer = null;
 
   const neededKeys = () => plan.keys;
-  const freshFor = (entry) => entry && entry.timezone === plan.timezone && now() - entry.fetchedAt < refreshIntervalMs;
+  const freshFor = (entry) => entry && entry.timezone === plan.timezone && entry.requestDay === plan.today && now() - entry.fetchedAt >= 0 && now() - entry.fetchedAt < refreshIntervalMs;
   const hasAll = () => neededKeys().every((key) => data.get(key)?.timezone === plan.timezone);
 
   function notify() { if (!disposed) onChange(api.snapshot()); }
@@ -133,6 +201,15 @@ export function createWeatherForecastController({
     abortController?.abort();
     abortController = null;
     inflight = null;
+    retrying = false; retryAt = 0;
+    if (cooldownTimer !== null) clearTimer(cooldownTimer);
+    cooldownTimer = null;
+  }
+
+  function notifyWhenRetryReady() {
+    if (cooldownTimer !== null) clearTimer(cooldownTimer);
+    const delay = Math.max(manualRetryAt, providerRetryAt) - now();
+    cooldownTimer = delay > 0 && delay <= 2147483647 ? setTimer(() => { cooldownTimer = null; notify(); }, Math.ceil(delay)) : null;
   }
 
   function prune() {
@@ -145,25 +222,31 @@ export function createWeatherForecastController({
       if (!stillActive()) return false;
       resolved = resolveTripWeather(trip);
       const nextPlan = forecastRequestPlan(resolved, { nowMs: now() });
+      const nextTripIdentity = String(trip?.id || trip?.slug || "");
+      const tripChanged = nextTripIdentity !== tripIdentity;
       const enabledChanged = nextEnabled !== enabled;
       enabled = nextEnabled;
       if (!enabled) {
         if (inflight || data.size || enabledChanged) { invalidateInflight(); data.clear(); status = "idle"; }
+        errors.clear(); lastError = null;
         plan = nextPlan;
         return false;
       }
-      if (nextPlan.identity === plan.identity && !enabledChanged) {
+      if (nextPlan.identity === plan.identity && !enabledChanged && !tripChanged) {
         // Same needed points and time zone: renders, polls, language changes and unrelated edits
         // never start a request (retries after a failure wait for the refresh interval or resume).
         plan = nextPlan;
         return false;
       }
       plan = nextPlan;
+      tripIdentity = nextTripIdentity;
       invalidateInflight();
+      if (tripChanged) data.clear();
+      errors.clear(); lastError = null; automaticRetryAt = 0; manualRetryAt = 0;
       prune();
       if (!plan.keys.length) status = "idle";
       else if (!hasAll()) status = data.size ? "refreshing" : "loading";
-      return !hasAll();
+      return neededKeys().some((key) => !freshFor(data.get(key)));
     },
 
     async refresh({ force = false } = {}) {
@@ -173,11 +256,19 @@ export function createWeatherForecastController({
         status = "idle";
         return null;
       }
+      if (inflight) return inflight.promise;
+      if (now() < providerRetryAt) {
+        lastError = new WeatherRequestError("rate_limit", { retryAfterMs: providerRetryAt - now() });
+        for (const key of keys) errors.set(key, lastError);
+        status = data.size ? "saved" : "error";
+        notifyWhenRetryReady(); notify(); return null;
+      }
+      if (now() < (force ? manualRetryAt : automaticRetryAt)) { notifyWhenRetryReady(); return null; }
       const due = force ? keys : keys.filter((key) => !freshFor(data.get(key)));
       if (!due.length) return null;
-      if (inflight) return inflight.promise;
       const myGeneration = generation;
       const timezone = plan.timezone;
+      const requestDay = plan.today;
       const batches = plan.batches
         .map((batch) => batch.filter((point) => due.includes(point.key)))
         .filter((batch) => batch.length);
@@ -185,29 +276,51 @@ export function createWeatherForecastController({
       const signal = abortController.signal;
       status = data.size ? "refreshing" : "loading";
       lastError = null;
+      retrying = false; retryAt = 0;
       notify();
       const promise = (async () => {
-        let failure = null;
         for (const batch of batches) {
           if (myGeneration !== generation || !stillActive()) return;
-          try {
-            const result = await fetchForecastBatch(batch, timezone, { fetchImpl, signal, timeoutMs, setTimer, clearTimer });
+          let pending = batch;
+          for (let attempt = 0; pending.length && attempt < attemptLimit; attempt += 1) {
+            let failure = null;
+            try {
+              const result = await fetchForecastBatch(pending, timezone, { fetchImpl, signal, timeoutMs, setTimer, clearTimer, now });
+              if (myGeneration !== generation || !stillActive()) return;
+              const fetchedAt = now();
+              for (const [key, value] of Object.entries(result)) { data.set(key, { timezone, ...value, fetchedAt, requestDay }); errors.delete(key); }
+              for (const [key, error] of result.failures) errors.set(key, error);
+              pending = pending.filter((point) => result.failures.has(point.key));
+              failure = pending.length ? result.failures.values().next().value : null;
+              notify();
+            } catch (error) {
+              if (myGeneration !== generation || !stillActive()) return;
+              if (error.code === "cancelled") return;
+              failure = error;
+              for (const point of pending) errors.set(point.key, error);
+            }
+            if (!failure) break;
+            lastError = failure;
+            providerRetryAt = Math.max(providerRetryAt, now() + (failure.retryAfterMs || 0));
+            const delay = Math.ceil(Math.max(retryDelaysMs[attempt] || 4000, failure.retryAfterMs || 0));
+            if (!failure.retryable || attempt + 1 >= attemptLimit || delay > MAX_RETRY_WAIT_MS) break;
+            retrying = true; retryAt = now() + delay; notify();
+            try { await waitForRetry(delay, signal, setTimer, clearTimer); } catch { return; }
+            retrying = false; retryAt = 0;
             if (myGeneration !== generation || !stillActive()) return;
-            const fetchedAt = now();
-            for (const [key, value] of Object.entries(result)) data.set(key, { timezone, ...value, fetchedAt });
-          } catch (error) {
-            if (myGeneration !== generation || !stillActive()) return;
-            failure = error;
           }
+          if (now() < providerRetryAt) break; // never send another batch ahead of Retry-After
         }
         if (myGeneration !== generation || !stillActive()) return;
         inflight = null;
         abortController = null;
-        if (failure) {
-          lastError = failure;
+        if (errors.size) {
+          lastError = errors.values().next().value;
           status = keys.some((key) => data.has(key)) ? "saved" : "error";
-          console.warn("Live weather forecast unavailable", failure);
-        } else status = "live";
+          automaticRetryAt = Math.max(now() + refreshIntervalMs, providerRetryAt);
+          manualRetryAt = Math.max(now() + WEATHER_MANUAL_COOLDOWN_MS, providerRetryAt);
+          notifyWhenRetryReady();
+        } else { status = "live"; lastError = null; automaticRetryAt = 0; manualRetryAt = now() + WEATHER_MANUAL_COOLDOWN_MS; notifyWhenRetryReady(); }
         notify();
       })();
       inflight = { promise, generation: myGeneration };
@@ -226,7 +339,8 @@ export function createWeatherForecastController({
 
     daily(key, date) {
       const entry = data.get(key);
-      return entry && entry.timezone === plan.timezone ? entry.daily?.[date] || null : null;
+      const daily = entry && entry.timezone === plan.timezone ? entry.daily?.[date] || null : null;
+      return hasDailyMeasurements(daily) ? daily : null;
     },
 
     hourly(key, date) {
@@ -241,11 +355,34 @@ export function createWeatherForecastController({
         error: lastError,
         hasData: neededKeys().some((key) => data.has(key)),
         neededPoints: neededKeys().length,
+        retrying,
+        retryAt: retryAt || Math.max(manualRetryAt, providerRetryAt) || null,
+        canRetry: !inflight && now() >= Math.max(manualRetryAt, providerRetryAt),
         fetchedAt: times.length ? new Date(Math.min(...times)).toISOString() : null,
         identity: plan.identity,
         timezone: plan.timezone
       };
     },
+
+    dayStatus(dayId) {
+      const day = resolved.days.get(dayId);
+      if (!day || !day.entries.length) return day?.mode === "off" ? "off" : "no_location";
+      if (!validForecastDate(day.date)) return "missing";
+      if (day.date < plan.today) return "past";
+      if (day.date > plan.lastDate) return "horizon";
+      const available = day.entries.filter((entry) => api.daily(entry.key, day.date));
+      if (available.length) {
+        if (available.length !== day.entries.length || available.some((entry) => {
+          const daily = api.daily(entry.key, day.date);
+          return [daily.weatherCode, daily.temperatureMax, daily.temperatureMin, daily.precipitationProbability].some((value) => !Number.isFinite(value));
+        })) return "partial";
+        return day.entries.some((entry) => errors.has(entry.key)) ? "saved" : "live";
+      }
+      if (inflight || status === "loading" || status === "refreshing") return "loading";
+      return day.entries.some((entry) => errors.has(entry.key)) ? "error" : "missing";
+    },
+
+    dayError(dayId) { return resolved.days.get(dayId)?.entries.map((entry) => errors.get(entry.key)).find(Boolean) || null; },
 
     get resolved() { return resolved; },
     get plan() { return plan; },
@@ -356,18 +493,37 @@ export function weatherCodeKey(code) {
 }
 
 export function weatherCodeIcon(code) {
+  if (!Number.isFinite(code)) return "☁";
   if (code === 0) return "☀️";
   if ([1, 2].includes(code)) return "🌤️";
   if (code === 3) return "☁️";
   if ([45, 48].includes(code)) return "🌫️";
   if ([71, 73, 75, 77, 85, 86].includes(code)) return "🌨️";
   if ([95, 96, 99].includes(code)) return "⛈️";
-  return "🌧️";
+  return [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code) ? "🌧️" : "☁";
+}
+
+function validForecastDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
+}
+
+function validForecastTimestamp(value) {
+  const match = typeof value === "string" && /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::[0-5]\d)?$/.exec(value);
+  return Boolean(match && validForecastDate(match[1]) && Number(match[2]) < 24 && Number(match[3]) < 60);
+}
+
+export function hasDailyMeasurements(daily) {
+  return Boolean(daily && (Object.values(daily).some((value) => typeof value === "number" && Number.isFinite(value)) || daily.sunrise || daily.sunset));
+}
+function hasHourlyMeasurements(point) {
+  return [point.temperature, point.precipitationProbability, point.uvIndex].some(Number.isFinite);
 }
 
 export function normalizeDailyForecast(daily = {}) {
   const dates = Array.isArray(daily?.time) ? daily.time : [];
-  return Object.fromEntries(dates.map((date, index) => [date, {
+  return Object.fromEntries(dates.slice(0, 32).map((date, index) => [date, {
     weatherCode: numericValue(daily.weather_code?.[index]),
     temperatureMax: numericValue(daily.temperature_2m_max?.[index]),
     temperatureMin: numericValue(daily.temperature_2m_min?.[index]),
@@ -378,17 +534,17 @@ export function normalizeDailyForecast(daily = {}) {
     windSpeedMax: numericValue(daily.wind_speed_10m_max?.[index]),
     windGustMax: numericValue(daily.wind_gusts_10m_max?.[index]),
     uvIndexMax: numericValue(daily.uv_index_max?.[index]),
-    sunrise: daily.sunrise?.[index] || null,
-    sunset: daily.sunset?.[index] || null
-  }]));
+    sunrise: validForecastTimestamp(daily.sunrise?.[index]) ? daily.sunrise[index] : null,
+    sunset: validForecastTimestamp(daily.sunset?.[index]) ? daily.sunset[index] : null
+  }]).filter(([date]) => validForecastDate(date)));
 }
 
 export function normalizeHourlyForecast(hourly = {}) {
   const times = Array.isArray(hourly?.time) ? hourly.time : [];
   const days = {};
-  times.forEach((value, index) => {
+  times.slice(0, 800).forEach((value, index) => {
     const match = String(value).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
-    if (!match) return;
+    if (!match || !validForecastTimestamp(value)) return;
     const point = {
       time: match[2],
       temperature: numericValue(hourly.temperature_2m?.[index]),
@@ -401,6 +557,5 @@ export function normalizeHourlyForecast(hourly = {}) {
 }
 
 function numericValue(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }

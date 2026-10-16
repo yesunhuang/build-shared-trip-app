@@ -3,6 +3,7 @@
 // injected clock. Fictional coordinates and trips only; no provider is contacted (any real fetch
 // fails the test) and no browser storage is ever written.
 import assert from "node:assert/strict";
+import "./test-weather-resilience.mjs";
 import {
   AUTO_AREA_DIAMETER_KM, MAX_POINTS_PER_REQUEST, MAX_TRIP_FORECAST_POINTS,
   applyDayWeatherChangesLocally, buildDayWeatherChanges, dateInTimeZone, distanceKm, explicitDayChoice,
@@ -298,7 +299,7 @@ function fakeOpenMeteo({ dates = ["2031-05-01", "2031-05-02"] } = {}) {
   return { log, pending, fetchImpl, set mode(value) { mode = value; } };
 }
 function controllerWith(meteo, clock, extra = {}) {
-  return createWeatherForecastController({ fetchImpl: meteo.fetchImpl, now: () => clock.now, setTimer: () => 0, clearTimer: () => {}, ...extra });
+  return createWeatherForecastController({ fetchImpl: meteo.fetchImpl, now: () => clock.now, maxAttempts: 1, setTimer: () => 0, clearTimer: () => {}, ...extra });
 }
 const baseTrip = () => ({
   timezone: "UTC",

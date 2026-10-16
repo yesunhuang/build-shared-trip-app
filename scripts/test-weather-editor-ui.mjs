@@ -276,13 +276,23 @@ globalThis.clearTimeout = (timer) => { if (!timer || timer.held) return; timers.
 let currentServer = null;
 let heldWeather = null;
 let heldLogout = null;
+let weatherFailure = null;
+let nullMeasurements = false;
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(typeof input === "string" ? input : input.url, ORIGIN);
   const method = options.method || "GET";
   if (url.hostname === "api.open-meteo.com" && url.pathname === "/v1/forecast") {
     meteoLog.push(url);
     if (heldWeather) { const hold = heldWeather; heldWeather = null; await hold; }
-    return new Response(JSON.stringify(meteoResponse(url)), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (weatherFailure) return new Response("{}", { status: weatherFailure, headers: { "Retry-After": "0" } });
+    const payload = meteoResponse(url);
+    if (nullMeasurements) {
+      const first = Array.isArray(payload) ? payload[0] : payload;
+      for (const key of Object.keys(first.daily)) if (key !== "time") first.daily[key] = first.daily.time.map(() => null);
+      if (nullMeasurements === "aggregate") first.daily.precipitation_sum = first.daily.time.map(() => 1);
+      else if (nullMeasurements !== "daily-empty") first.daily.temperature_2m_min = first.daily.time.map(() => 7);
+    }
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
   }
   if (url.pathname === "/api/logout" && heldLogout) {
     const hold = heldLogout; heldLogout = null; await hold;
@@ -563,6 +573,54 @@ try {
   assert.equal(page.editor(), null);
   assert.ok(textOf(page.content()).includes("Area near Fictional Hotel"));
   assert.deepEqual(page.errors, []);
+
+  // Outages retain all dates, independent horizon notices and editor controls. Manual retry is
+  // bounded, works for viewers too, and never writes a trip. Pointer/layout are emulation only.
+  for (const editable of [false, true]) for (const phone of [false, true]) {
+    const source = fixtureTrip();
+    source.days.push({ id: "beyond", date: isoDay(20), slots: [{ id: "later", name: "Fictional later stop", lat: 15, lng: 25 }] });
+    const outageServer = createFakeServer(source, { editable }), before = JSON.stringify(outageServer.trip);
+    weatherFailure = 503;
+    page = await loadPage({ server: outageServer, phone });
+    await until(() => page.doc.querySelector('[data-weather-error="http"]') && meteoLog.length === 3, "bounded outage attempts");
+    assert.equal(page.doc.querySelectorAll(".weather-date-card").length, source.days.length, "outage never replaces the whole date strip");
+    assert.ok(page.peekText("beyond").includes("16-day"), "out-of-horizon explanation is independent of request failure");
+    await page.openDay("day-one");
+    assert.equal(Boolean(page.toggle()), editable, "manual weather choices remain reachable according to role");
+    if (editable) { page.toggle().click(); await until(() => page.editor(), "editor reachable during outage"); }
+    page.dialog().close();
+    const originalNow = Date.now;
+    try {
+      Date.now = () => originalNow() + 6000;
+      for (const language of ["zh-Hans", "zh-Hant", "ja", "en"]) {
+        const select = page.doc.getElementById("language-select"); select.value = language; select.dispatchEvent(new page.window.Event("change"));
+        const message = page.doc.querySelector('[data-weather-error="http"]'); assert.ok(message && message.textContent && !message.textContent.includes("weatherHttpError"));
+      }
+      assert.equal(meteoLog.length, 3, "language changes do not retry an outage");
+      const retry = page.doc.querySelector(".weather-retry"); assert.equal(retry.disabled, false, "manual retry becomes available after cooldown");
+      weatherFailure = null; retry.click(); retry.click();
+      await until(() => page.doc.querySelector(".weather-peek__temperature") && !page.doc.querySelector(".weather-request-message"), "manual retry recovers");
+      assert.equal(meteoLog.length, 4, "double activation shares one recovery request");
+      assert.equal(JSON.stringify(outageServer.trip), before, "weather recovery never mutates stored trip choices/content/version");
+    } finally { Date.now = originalNow; weatherFailure = null; }
+    assert.deepEqual(page.errors, []);
+  }
+  nullMeasurements = true;
+  page = await loadPage({ server: createFakeServer(fixtureTrip()) });
+  await until(() => page.peekText("day-one").includes("—°"), "missing daily measurements");
+  assert.ok(page.peekText("day-one").includes("7°C"));
+  assert.ok(page.peekText("day-one").includes("—%"), "missing rain is not fabricated as zero");
+  assert.ok(page.peekText("day-one").includes("Some forecast data"));
+  assert.ok(!page.peekText("day-one").includes("☀️"), "missing code is not fabricated as clear weather");
+  nullMeasurements = "aggregate";
+  const multiArea = fixtureTrip(); multiArea.days[0].slots.push({ id: "far-area", name: "Fictional far area", lat: 11, lng: 21 });
+  page = await loadPage({ server: createFakeServer(multiArea) });
+  assert.ok(page.peekText("day-one").includes("21° / 5°C"), "aggregation ignores a missing high/low instead of including fabricated zeroes");
+  nullMeasurements = "daily-empty";
+  page = await loadPage({ server: createFakeServer(fixtureTrip()) });
+  await page.openDay("day-one");
+  assert.ok(page.content().querySelector(".weather-hours"), "usable hourly data survives missing daily measurements");
+  nullMeasurements = false;
 
   // The Today label follows a remote timezone edit even while the weather dialog stays open.
   const NativeDate = globalThis.Date;

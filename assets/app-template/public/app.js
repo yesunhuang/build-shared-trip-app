@@ -525,17 +525,26 @@ function renderEssentials() {
   }
   heading.append(headingCopy);
   if (weatherStatus.childNodes.length) heading.append(weatherStatus);
+  if (weatherForecastState.neededPoints) {
+    const retry = textElement("button", "weather-retry", ui(currentLanguage, "retryWeather"));
+    retry.type = "button";
+    retry.disabled = !weatherForecastState.canRetry || ["loading", "refreshing"].includes(weatherForecastState.status);
+    retry.setAttribute("aria-label", ui(currentLanguage, "retryWeather"));
+    if (retry.disabled) retry.title = ui(currentLanguage, "weatherRetryWait");
+    retry.addEventListener("click", () => refreshWeatherForecast({ force: true }));
+    heading.append(retry);
+  }
   els.activeWeather.append(heading);
+  if (weatherForecastState.error || weatherForecastState.retrying) {
+    const message = textElement("p", "weather-request-message", weatherForecastState.retrying
+      ? ui(currentLanguage, "weatherRetrying") : weatherRequestMessage(weatherForecastState.error));
+    message.setAttribute("role", "status");
+    message.dataset.weatherError = weatherForecastState.error?.code || "";
+    els.activeWeather.append(message);
+  }
 
-  // The date strip is shown whenever data exists, nothing needs fetching (every day is off, outside
-  // the forecast window or has no saved coordinates), or the editor needs the per-day controls.
-  const showStrip = weatherForecastState.hasData || !weatherForecastState.neededPoints || !HOSTED_READ_ONLY;
-  if (!showStrip) {
-    els.activeWeather.append(textElement("p", "weather-compact__empty", ui(
-      currentLanguage,
-      ["loading", "refreshing"].includes(weatherForecastState.status) ? "loadingForecast" : "forecastUnavailable"
-    )));
-  } else {
+  // Every date and its manual editor remain reachable during an outage, for every reading role.
+  {
     const strip = element("div", "weather-date-strip");
     strip.setAttribute("role", "list");
     strip.setAttribute("aria-label", ui(currentLanguage, "weatherDatesAria"));
@@ -562,7 +571,7 @@ function renderEssentials() {
       const locations = association.entries.map((entry) => entry.id);
       if (locations.length) peeks.append(renderWeatherPeek(day, locations));
       else if (association.mode === "off") peeks.append(textElement("p", "weather-compact__empty", weatherEditorText(currentLanguage, "offShort")));
-      else peeks.append(textElement("p", "weather-compact__empty", ui(currentLanguage, "forecastNotAvailable")));
+      else peeks.append(textElement("p", "weather-compact__empty", weatherDayMessage(day)));
       card.append(peeks);
       strip.append(card);
     });
@@ -615,22 +624,35 @@ function weatherStatusChip(weatherForecastState) {
   return textElement("span", className, ui(currentLanguage, key));
 }
 
+function weatherRequestMessage(error) {
+  const key = { timeout: "weatherTimeout", offline: "weatherOffline", network: "weatherNetwork", rate_limit: "weatherRateLimit", http: "weatherHttpError", invalid_response: "weatherInvalidResponse", empty_response: "weatherEmptyResponse" }[error?.code];
+  return ui(currentLanguage, key || "forecastUnavailable");
+}
+
+function weatherDayMessage(day) {
+  const state = weatherForecast.dayStatus(day.id);
+  if (state === "error") return weatherRequestMessage(weatherForecast.dayError(day.id));
+  const key = { past: "forecastDatePassed", horizon: "forecastBeyondHorizon", no_location: "weatherNoLocation", loading: "loadingForecast", partial: "weatherPartial" }[state];
+  return ui(currentLanguage, key || "weatherMissingMeasurements");
+}
+
 // locationIds are the day's association entry IDs (explicit locations or automatic areas).
 function renderWeatherPeek(day, locationIds) {
   const available = locationIds
     .map((locationId) => ({ locationId, daily: dailyForecast(day.id, locationId, day.date) }))
     .filter((entry) => entry.daily);
   const representative = available.reduce((wettest, entry) => (
-    !wettest || Number(entry.daily.precipitationProbability) > Number(wettest.daily.precipitationProbability)
+    !wettest || (entry.daily.precipitationProbability ?? -Infinity) > (wettest.daily.precipitationProbability ?? -Infinity)
       ? entry
       : wettest
   ), null);
+  const extreme = (field, operation) => { const values = available.map((entry) => entry.daily[field]).filter(Number.isFinite); return values.length ? operation(...values) : null; };
   const daily = representative
     ? {
         weatherCode: representative.daily.weatherCode,
-        temperatureMax: Math.max(...available.map((entry) => Number(entry.daily.temperatureMax))),
-        temperatureMin: Math.min(...available.map((entry) => Number(entry.daily.temperatureMin))),
-        precipitationProbability: Math.max(...available.map((entry) => Number(entry.daily.precipitationProbability)))
+        temperatureMax: extreme("temperatureMax", Math.max),
+        temperatureMin: extreme("temperatureMin", Math.min),
+        precipitationProbability: extreme("precipitationProbability", Math.max)
       }
     : null;
   const primaryLocationId = available[0]?.locationId || locationIds[0];
@@ -649,7 +671,7 @@ function renderWeatherPeek(day, locationIds) {
   summary.append(identity);
 
   if (!daily) {
-    summary.append(textElement("span", "weather-peek__unavailable", ui(currentLanguage, day.date < todayISO() ? "forecastDatePassed" : "forecastNotAvailable")));
+    summary.append(textElement("span", "weather-peek__unavailable", weatherDayMessage(day)));
     peek.append(summary);
     return peek;
   }
@@ -662,6 +684,7 @@ function renderWeatherPeek(day, locationIds) {
   const rain = textElement("span", "weather-peek__rain", `💧 ${formatNumber(daily.precipitationProbability, 0)}%`);
   summary.append(temperature, rain);
   peek.append(summary);
+  if (weatherForecast.dayStatus(day.id) === "partial") peek.append(textElement("p", "weather-peek__notice", ui(currentLanguage, "weatherPartial")));
   return peek;
 }
 
@@ -726,7 +749,7 @@ function renderWeatherDialog({ preserveScroll = false } = {}) {
   if (!locations.length) {
     els.weatherDialogContent.append(textElement("p", "weather-dialog__empty", association.mode === "off"
       ? weatherEditorText(currentLanguage, "offShort")
-      : ui(currentLanguage, "forecastNotAvailable")));
+      : weatherDayMessage(day)));
     if (preserveScroll) els.weatherDialogContent.scrollTop = previousScrollTop;
     return;
   }
@@ -769,18 +792,19 @@ function renderWeatherLocationDetails(day, locationId) {
   section.append(locationHeading);
 
   if (!daily) {
-    section.append(textElement("p", "weather-dialog__empty", ui(currentLanguage, day.date < todayISO() ? "forecastDatePassed" : "forecastNotAvailable")));
-    return section;
+    section.append(textElement("p", "weather-dialog__empty", weatherDayMessage(day)));
   }
 
-  const overview = element("div", "weather-detail__overview");
-  overview.append(
-    textElement("strong", "", ui(currentLanguage, weatherCodeKey(daily.weatherCode))),
-    textElement("span", "", `${formatNumber(daily.temperatureMax, 0)}° / ${formatNumber(daily.temperatureMin, 0)}°C`),
-    textElement("span", "", `${ui(currentLanguage, "rainChance")} ${formatNumber(daily.precipitationProbability, 0)}% · ${formatNumber(daily.precipitationSum, 1)} mm`),
-    textElement("span", "", `${ui(currentLanguage, "uvIndex")} ${formatNumber(daily.uvIndexMax, 1)}`)
-  );
-  section.append(overview);
+  if (daily) {
+    const overview = element("div", "weather-detail__overview");
+    overview.append(
+      textElement("strong", "", ui(currentLanguage, weatherCodeKey(daily.weatherCode))),
+      textElement("span", "", `${formatNumber(daily.temperatureMax, 0)}° / ${formatNumber(daily.temperatureMin, 0)}°C`),
+      textElement("span", "", `${ui(currentLanguage, "rainChance")} ${formatNumber(daily.precipitationProbability, 0)}% · ${formatNumber(daily.precipitationSum, 1)} mm`),
+      textElement("span", "", `${ui(currentLanguage, "uvIndex")} ${formatNumber(daily.uvIndexMax, 1)}`)
+    );
+    section.append(overview);
+  }
 
   const samples = hourlyForecast(day.id, locationId, day.date).filter((point) => [6, 9, 12, 15, 18, 21].includes(Number(point.time.slice(0, 2))));
   if (samples.length) {
@@ -811,7 +835,7 @@ function renderWeatherLocationDetails(day, locationId) {
     table.append(caption, head, body);
     section.append(table);
   }
-  section.append(textElement("p", "weather-detail__meta", `${ui(currentLanguage, "wind")} ${formatNumber(daily.windSpeedMax, 0)} km/h · ${ui(currentLanguage, "sunriseSunset")} ${formatForecastTime(daily.sunrise)}–${formatForecastTime(daily.sunset)}`));
+  if (daily) section.append(textElement("p", "weather-detail__meta", `${ui(currentLanguage, "wind")} ${formatNumber(daily.windSpeedMax, 0)} km/h · ${ui(currentLanguage, "sunriseSunset")} ${formatForecastTime(daily.sunrise)}–${formatForecastTime(daily.sunset)}`));
   return section;
 }
 

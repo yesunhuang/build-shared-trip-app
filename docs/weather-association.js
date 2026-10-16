@@ -205,8 +205,8 @@ export function addDays(date, days) {
  * Which unique points need a forecast now: only days dated inside the provider's 16-day window
  * (today in the trip time zone through today + 15), never "off" days or days without points.
  * Repeated coordinates across days and explicit/automatic aliases share one point. The result is
- * capped and split into bounded batches; identity changes only when the needed points or the time
- * zone change (never on language, notes or unrelated edits).
+ * capped and split into bounded batches; identity changes when the needed points, time zone or
+ * provider-local day changes (never on language, notes or unrelated edits).
  */
 export function forecastRequestPlan(resolved, { nowMs = Date.now(), horizonDays = FORECAST_HORIZON_DAYS, maxPoints = MAX_TRIP_FORECAST_POINTS, batchSize = MAX_POINTS_PER_REQUEST } = {}) {
   const timezone = resolved?.timezone || "UTC";
@@ -224,7 +224,7 @@ export function forecastRequestPlan(resolved, { nowMs = Date.now(), horizonDays 
   const keys = [...points.keys()].sort();
   const batches = [];
   for (let index = 0; index < keys.length; index += batchSize) batches.push(keys.slice(index, index + batchSize).map((key) => points.get(key)));
-  return { timezone, today, lastDate: last, keys, points, batches, identity: `${timezone}|${keys.join(";")}` };
+  return { timezone, today, lastDate: last, keys, points, batches, identity: `${timezone}|${today}|${keys.join(";")}` };
 }
 
 // ---------------------------------------------------------------------------------------------

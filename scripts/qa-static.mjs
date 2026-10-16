@@ -74,8 +74,8 @@ const generatedLocales = [
 ].map((file) => fs.readFileSync(path.join(root, file), "utf8")).join("\n");
 if (!generatedIndex.includes('id="weather-dialog"')) fail("public/index.html is missing the per-date weather details dialog");
 if (!generatedApp.includes("renderWeatherPeek(day, locationIds)")) fail("public/app.js is missing the aggregate per-date weather summary");
-if (!generatedApp.includes("Math.max(...available.map")) fail("public/app.js does not aggregate the daily maximum high/rain values");
-if (!generatedApp.includes("Math.min(...available.map")) fail("public/app.js does not aggregate the daily minimum low value");
+if (!generatedApp.includes('extreme("temperatureMax", Math.max)') || !generatedApp.includes('extreme("precipitationProbability", Math.max)')) fail("public/app.js is missing the daily maximum high/rain aggregation structure");
+if (!generatedApp.includes('extreme("temperatureMin", Math.min)') || !generatedApp.includes("filter(Number.isFinite)")) fail("public/app.js is missing the null-safe daily minimum aggregation structure");
 if (!generatedApp.includes('element("table", "weather-hours")')) fail("public/app.js weather details are missing a semantic hourly table");
 if (!generatedApp.includes('setAttribute("role", "tablist")')) fail("public/app.js weather details are missing per-location tabs");
 if (!generatedApp.includes("preserveScroll")) fail("public/app.js weather dialog does not preserve scroll during refreshes");

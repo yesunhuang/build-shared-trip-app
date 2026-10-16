@@ -1,6 +1,6 @@
 // Render-only plan text projection. No stored text, URL semantics or trip state is changed.
-import { parseTextLinks } from "./text-links.js?v=v-aebb88e3a26f";
-import { relatedLinksProblems, relatedLinkUrl } from "./related-links.js?v=v-aebb88e3a26f";
+import { parseTextLinks } from "./text-links.js?v=v-2a207490e2b9";
+import { relatedLinksProblems, relatedLinkUrl } from "./related-links.js?v=v-2a207490e2b9";
 
 const SEPARATORS = /^[\s.,;:!?。！？、，；：|·•—–-]*$/u;
 const MEANINGFUL = /[\p{L}\p{N}\p{S}]/u;

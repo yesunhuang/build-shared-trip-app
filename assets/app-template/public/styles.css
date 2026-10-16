@@ -1556,6 +1556,11 @@ html.is-itinerary-view .page-shell::before {
   list-style: none;
 }
 
+.weather-retry { justify-self: start; min-height: 44px; padding: 0.4rem 0.7rem; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--accent-text); font-weight: 650; }
+.weather-retry:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 2px; }
+.weather-retry:disabled { opacity: 0.6; }
+.weather-request-message, .weather-peek__notice { color: var(--ink-2); font-size: 0.78rem; line-height: 1.45; margin: 0.4rem 0; overflow-wrap: anywhere; }
+
 .plan-location { display: grid; gap: 0.3rem; margin-top: 0.75rem; min-width: 0; color: var(--muted); font-size: 0.84rem; }
 .plan-location .location-link { display: flex; align-items: center; gap: 0.55rem; min-height: 44px; padding: 0.35rem 0; line-height: 1.5; }
 .plan-location__label { min-width: 0; overflow-wrap: anywhere; }

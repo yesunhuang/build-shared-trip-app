@@ -6,6 +6,8 @@ Plan cards show a distinct map-icon address row and compact labelled icon links.
 
 Run one Node.js service on your own machine or a small VPS. From the home page you can create or import trips. Each trip opens at a stable `/trips/<trip-id>` link with the desktop map and timeline, the phone swipe-sheet planner, reminders, weather, and four languages. You install the PWA once and switch between trips inside it. No Firebase account and no separate deployment per trip are needed.
 
+Weather dates remain accessible during outages, with bounded retries, a manual Retry weather control and separate forecast-horizon notices. Missing measurements stay missing; usable partial forecasts and weather-place controls remain available. See the [weather contract](references/weather-association.md).
+
 **[Agent entry point → SKILL.md](SKILL.md)** · [Self-hosted guide](references/self-hosted.md) · [MCP](references/mcp.md) · [Agent setup](references/agent-setup.md) · [Interface showcase](showcase/README.md)
 
 Public repository: `https://github.com/yesunhuang/build-shared-trip-app.git`. The source code is public. The trips you store on your server are not: they stay in your own data directory behind sign-in. Publishing the code does not authorize hosting or sharing anyone's trips.
