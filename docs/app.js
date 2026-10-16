@@ -1,4 +1,4 @@
-import { getGooglePlaceLinks } from "./google-place-links.js?v=v-5baa7e555e23";
+import { getGooglePlaceLinks } from "./google-place-links.js?v=v-59b19d8ef18f";
 import {
   GOOGLE_PLACE_PHOTOS_FIELD,
   buildGooglePlacePhotosField,
@@ -20,7 +20,7 @@ import {
   toRenderTrip,
   tripHasGooglePlacePhotos,
   tripIdFromPath
-} from "./hosted-client.js?v=v-5baa7e555e23";
+} from "./hosted-client.js?v=v-59b19d8ef18f";
 import {
   GOOGLE_PLACE_ASSOCIATION_FIELD,
   associationForPlan,
@@ -28,22 +28,23 @@ import {
   locationBindingForPlan,
   normalizeGooglePlaceAssociation,
   placeIdFromUserInput
-} from "./google-place-association.js?v=v-5baa7e555e23";
+} from "./google-place-association.js?v=v-59b19d8ef18f";
 import {
   VENUE_QUERY_MAX,
   checkVenueQuery,
+  createGoogleAllowanceGate,
   createGooglePlaceHost,
   createGooglePlacesLoader,
   createPlaceDetailsManager,
   createPlacePreviewSession,
   createPlaceSearchSession,
   googleText
-} from "./google-places-ui-kit.js?v=v-5baa7e555e23";
-import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-5baa7e555e23";
-import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=v-5baa7e555e23";
-import { optimizedPhotoUrl } from "./photo-assets.js?v=v-5baa7e555e23";
-import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-5baa7e555e23";
-import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-5baa7e555e23";
+} from "./google-places-ui-kit.js?v=v-59b19d8ef18f";
+import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-59b19d8ef18f";
+import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=v-59b19d8ef18f";
+import { optimizedPhotoUrl } from "./photo-assets.js?v=v-59b19d8ef18f";
+import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-59b19d8ef18f";
+import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-59b19d8ef18f";
 import {
   getInitialLanguage,
   languageStorageKey,
@@ -51,7 +52,7 @@ import {
   localizeTrip,
   saveLanguage,
   ui
-} from "./i18n.js?v=v-5baa7e555e23";
+} from "./i18n.js?v=v-59b19d8ef18f";
 import {
   DAY_FORECAST_LOCATIONS,
   fetchTripForecast,
@@ -59,9 +60,9 @@ import {
   localizeForecastLocation,
   weatherCodeIcon,
   weatherCodeKey
-} from "./weather-forecast.js?v=v-5baa7e555e23";
-import { getFlightBookings } from "./flight-bookings.js?v=v-5baa7e555e23";
-import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-5baa7e555e23";
+} from "./weather-forecast.js?v=v-59b19d8ef18f";
+import { getFlightBookings } from "./flight-bookings.js?v=v-59b19d8ef18f";
+import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-59b19d8ef18f";
 import {
   OSM_COPYRIGHT_URL,
   coordinateGoogleMapsUrl,
@@ -75,7 +76,7 @@ import {
   placeForSaving,
   readSavedPhoto,
   readSavedPlace
-} from "./place-picker.js?v=v-5baa7e555e23";
+} from "./place-picker.js?v=v-59b19d8ef18f";
 
 const FIREBASE_SDK_VERSION = "12.15.0";
 // Self-hosted mode is decided before any Firebase code path. It never loads the
@@ -87,7 +88,7 @@ let firebaseConfig = {};
 let tripDocumentPath = "";
 const firebaseConfigPromise = HOSTED
   ? Promise.resolve()
-  : import("./firebase-config.js?v=v-5baa7e555e23")
+  : import("./firebase-config.js?v=v-59b19d8ef18f")
     .then((module) => {
       firebaseConfig = module.firebaseConfig || {};
       tripDocumentPath = module.tripDocumentPath || "";
@@ -229,21 +230,26 @@ const LOOKUP_ENABLED = HOSTED && !HOSTED_READ_ONLY;
 // Optional Google Places UI Kit: hosted pages only, and only when BOTH the signed-in session
 // advertises it (the operator enabled it site-wide with a browser key) AND this trip's editors opted
 // in (trip.googlePlacePhotosEnabled === true; absent or false means off, the default). Otherwise no
-// configuration request, Google script, library import, component or query happens for this trip,
-// no Google controls are shown, and OpenStreetMap/Commons content works unchanged. The loader is
-// created on first need (the first expanded plan with a saved association, or an explicit Google
-// action in the plan editor) and reused for the rest of the page session. If a poll turns the trip
-// off, pending Google work is cancelled and late results are ignored; code the browser already
-// loaded earlier in this page is not (and cannot be) unloaded.
+// reservation, Google script, library import, component or query happens for this trip, no Google
+// controls are shown, and OpenStreetMap/Commons content works unchanged. Even then, each Google
+// action first needs a reservation from the server's monthly allowance (google-places-ui-kit.js);
+// a denial shows a translated status and starts no Google work, and the plan's own photo and
+// details stay exactly as they are. The loader and gate are created on first need (the first
+// expanded plan with a saved association, or an explicit Google action in the plan editor) and
+// reused for the rest of the page session. If a poll turns the trip off, pending reservations and
+// unused permits are voided and late results are ignored; code the browser already loaded earlier
+// in this page is not (and cannot be) unloaded.
 const GOOGLE_PLACES_SITE_ENABLED = HOSTED && sessionHasGooglePlaces(getBootSession());
 let googlePlacesLoader = null;
+let googleAllowanceGate = null;
 let googlePlaceDetails = null;
 // Background refreshes wait while a press on a link is in progress (see link-activation.js), so
 // re-rendering never detaches the anchor a person is activating.
 const linkGuard = createLinkActivationGuard({ root: document });
 // A 401 is never deferred: redirectToLogin() clears the visible page at once, and any refresh
-// deferred during a held link press is dropped so it can never render or reload afterwards.
-function leaveForSignIn() { linkGuard.dispose(); redirectToLogin(); }
+// deferred during a held link press is dropped so it can never render or reload afterwards. No
+// Google reservation or permit can start anything after this.
+function leaveForSignIn() { googleAllowanceGate?.dispose(); googlePlaceDetails?.dispose(); linkGuard.dispose(); redirectToLogin(); }
 const WEATHER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 const FLIGHT_BOOKING_REFS = Object.freeze({});
@@ -305,7 +311,8 @@ function persistLocalTrip() {
 function renderAll() {
   normalizeTrip(currentTrip);
   setGuideTrip(currentTrip);
-  // Retained Google components survive re-renders only while their association is still current.
+  // Components, failure/denial marks and pending reservations of associations that are no longer
+  // current are dropped (components are never carried into rebuilt cards; see renderItinerary).
   googlePlaceDetails?.retain(currentGooglePlaceKeys());
   if (!currentTrip.days.some((day) => day.id === activeDayId)) activeDayId = initialDayId(currentTrip.days);
   displayTrip = localizeTrip(currentTrip, currentLanguage);
@@ -1110,9 +1117,10 @@ function renderItinerary() {
   const diningOpen = preserveDisclosureState && Boolean(els.days.querySelector(".dining-disclosure[open]"));
   const guideOpen = preserveDisclosureState && Boolean(els.days.querySelector(".day-guide[open]"));
 
-  // Keep the active Google component connected (parked) while its card is rebuilt; the restored
-  // card picks up the same element instead of creating a new one.
-  googlePlaceDetails?.suspend();
+  // A Google component is never moved into a rebuilt card (a move may disconnect and re-connect it).
+  // Every component in the cards about to be replaced is released now; the restored cards reserve
+  // and build nothing by themselves and offer an explicit "Show Google place details" instead.
+  googlePlaceDetails?.releaseWithin(els.days);
   els.days.replaceChildren(day ? renderDay(day, Math.max(0, index)) : renderNoDays());
 
   if (!preserveDisclosureState) {
@@ -1363,9 +1371,12 @@ function renderSlot(day, slot, slotIndex) {
     const runtime = googleHost ? googlePlacesRuntime() : null;
     if (runtime) {
       const details = runtime.details;
-      // Expanding loads this plan only. A card re-opened by a re-render reuses the component only if
-      // it was the active one; other open cards get an explicit control instead of a new request.
-      if (card.open && (!restoring || details.isActive(googleDescriptor))) details.show(googleHost, googleDescriptor);
+      // Expanding loads this plan only (after an allowance reservation); re-expanding the same card
+      // unhides the component still connected in this host. A card re-opened by a re-render never
+      // reserves or builds (its old component was released, never moved here); it and other open
+      // cards get an explicit control instead of a new request.
+      if (card.open && !restoring) details.show(googleHost, googleDescriptor);
+      else if (card.open && details.isActive(googleDescriptor)) details.restore(googleHost, googleDescriptor);
       else if (card.open) details.idle(googleHost, googleDescriptor);
       else if (!restoring) details.deactivate(googleDescriptor);
     }
@@ -1394,21 +1405,34 @@ function tripGooglePlacesEnabled(trip = hostedServerTrip) {
 
 function googlePlacesRuntime() {
   if (!tripGooglePlacesEnabled()) return null;
-  // One loader per page session (one configuration request, one script, one library import).
-  googlePlacesLoader ||= createGooglePlacesLoader({
-    win: window,
-    fetchConfig: () => hostedApi.googlePlacesConfig(),
-    language: currentLanguage
+  // One loader per page session (one script, one library import, started only with a granted key).
+  googlePlacesLoader ||= createGooglePlacesLoader({ win: window, language: currentLanguage });
+  // One allowance gate per page session. Every Google action reserves through it first.
+  googleAllowanceGate ||= createGoogleAllowanceGate({
+    tripId: HOSTED_TRIP_ID,
+    reserve: (body) => hostedApi.reserveGooglePlace(HOSTED_TRIP_ID, body)
   });
-  googlePlaceDetails ||= createPlaceDetailsManager({ doc: document, loader: googlePlacesLoader, language: () => currentLanguage });
-  return { loader: googlePlacesLoader, details: googlePlaceDetails };
+  googlePlaceDetails ||= createPlaceDetailsManager({
+    doc: document,
+    loader: googlePlacesLoader,
+    gate: googleAllowanceGate,
+    // Re-checked synchronously right before each dispatch: still opted in, same association.
+    isCurrent: (descriptor) => {
+      const current = googlePlaceDescriptor(descriptor.planId);
+      return Boolean(current) && googlePlaceDetails?.keyOf(current) === googlePlaceDetails?.keyOf(descriptor);
+    },
+    language: () => currentLanguage
+  });
+  return { loader: googlePlacesLoader, gate: googleAllowanceGate, details: googlePlaceDetails };
 }
 
 // The trip was opted out (for example by another editor; seen on a poll). Cancel what is pending,
-// discard built components, close any Google search/preview in an open editor and ignore late
-// results. Saved associations stay in the trip data untouched. The page-session loader is kept so
-// that opting in again later reuses it instead of fetching the configuration and script again.
+// void outstanding reservations and unused permits, discard built components, close any Google
+// search/preview in an open editor and ignore late results. Saved associations stay in the trip data
+// untouched. The page-session loader is kept so that opting in again later reuses it instead of
+// loading the script again; every new component still needs a new reservation.
 function stopTripGooglePlaces() {
+  googleAllowanceGate?.cancelAll();
   // A load still in progress stops before its next step (no script/library after this point).
   googlePlacesLoader?.cancel?.();
   googlePlaceDetails?.dispose();
@@ -3340,6 +3364,10 @@ function googleEditorAction(action) {
   }
   const runtime = googlePlacesRuntime();
   if (!runtime) return;
+  // Re-checked synchronously right before a search or preview is dispatched: the same editor is
+  // still open, the trip is still opted in, the location is unchanged and the box is still ticked.
+  const editorCurrent = () => editorSession === session && !state.ended && els.dialog.open && tripGooglePlacesEnabled() &&
+    parts.venue.checked && locationBindingForPlan(pendingLocationPlan(session)) === binding;
   if (action === "search") {
     const checked = checkVenueQuery(parts.query.value);
     if (!checked.ok) {
@@ -3354,11 +3382,13 @@ function googleEditorAction(action) {
     state.search ||= createPlaceSearchSession({
       doc: document,
       loader: runtime.loader,
+      gate: runtime.gate,
       mount: parts.results,
+      isCurrent: () => editorCurrent(),
       onStatus: (key) => {
         if (editorSession !== session || state.ended) return;
-        const failedKey = key === "disabled" || key === "searchFailed";
-        setGoogleStatus(state, failedKey ? "searchFailed" : key, failedKey);
+        const failedKey = ["disabled", "searchFailed", "limitReached", "paused"].includes(key);
+        setGoogleStatus(state, key === "disabled" ? "searchFailed" : key, failedKey);
         renderGoogleEditor(session);
       },
       onSelect: (placeId) => {
@@ -3380,11 +3410,13 @@ function googleEditorAction(action) {
     state.preview ||= createPlacePreviewSession({
       doc: document,
       loader: runtime.loader,
+      gate: runtime.gate,
       mount: parts.preview,
+      isCurrent: () => editorCurrent(),
       onStatus: (key) => {
         if (editorSession !== session || state.ended) return;
-        const failedKey = key === "disabled" || key === "detailsUnavailable";
-        setGoogleStatus(state, failedKey ? "detailsUnavailable" : key, failedKey);
+        const failedKey = ["disabled", "detailsUnavailable", "limitReached", "paused"].includes(key);
+        setGoogleStatus(state, key === "disabled" ? "detailsUnavailable" : key, failedKey);
         renderGoogleEditor(session);
       }
     });

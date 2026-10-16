@@ -10,7 +10,7 @@
 // enforces every permission independently.
 
 // Re-exported so the home page (which imports only this module) shares the same link guard.
-export { createLinkActivationGuard } from "./link-activation.js?v=v-5baa7e555e23";
+export { createLinkActivationGuard } from "./link-activation.js?v=v-59b19d8ef18f";
 
 export const TRIP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const LANGUAGE_STORAGE_KEY = "shared-trips-language";
@@ -254,10 +254,16 @@ export const hostedApi = Object.freeze({
     `/api/trips/${encodeURIComponent(tripId)}/photos/search`,
     { method: "POST", body: refresh === true ? { query, refresh: true } : { query }, timeoutMs: WRITE_TIMEOUT_MS }
   ),
-  // Optional Google Places UI Kit browser configuration ({enabled:false} or {enabled:true, apiKey,
-  // libraries}). Called only when the session advertises the feature and a plan actually needs a
-  // Google component; the response is kept in page memory only and never stored.
-  googlePlacesConfig: () => requestJSON("/api/google-places/config", { timeoutMs: 8000 })
+  // Optional Google Places UI Kit: one server-side allowance reservation before one Google action
+  // (details, search or preview; see google-places-ui-kit.js). The body carries only an idempotency
+  // key, the kind and, for details/preview, the plan and Place ID (never search text). A granted
+  // response carries the browser key and a short single-use permit; it is kept in page memory only
+  // and never stored. Called only when the session advertises the feature and this trip opted in.
+  reserveGooglePlace: (tripId, body) => requestJSON(`/api/trips/${encodeURIComponent(tripId)}/google-places/reservations`, {
+    method: "POST",
+    body,
+    timeoutMs: 8000
+  })
 });
 
 // The session lists the optional Google Places UI Kit only when the operator enabled it.

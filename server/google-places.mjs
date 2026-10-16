@@ -1,19 +1,23 @@
 // Optional Google Places UI Kit configuration (self-hosted, off by default).
 //
-// The server never contacts Google. When the operator opts in, signed-in browsers receive a
-// browser-restricted Maps JavaScript API key from one protected, no-store endpoint
-// (GET /api/google-places/config) and load the official standard UI Kit components themselves.
-// Nothing here is written to static assets, trip JSON, exports, backups, audit records or logs.
+// The server never contacts Google. When the operator opts in, signed-in browsers may load the
+// official standard UI Kit components themselves, but only after the server has granted a
+// reservation from the monthly allowance (google-allowance.mjs). The owner's browser-restricted Maps
+// JavaScript API key is delivered only inside such a granted, no-store reservation response
+// (POST /api/trips/<id>/google-places/reservations), never by itself. Nothing here is written to
+// static assets, trip JSON, exports, backups, audit records or logs.
 //
 //   SHARED_TRIP_GOOGLE_PLACES_UI_KIT=1           opt in (unset, empty or 0 = off)
 //   SHARED_TRIP_GOOGLE_MAPS_BROWSER_KEY=<key>    owner-created browser key restricted to this site's
 //                                                origin and to the APIs required by Places UI Kit
 //
-// Off, or on without a key: { enabled: false }. The session response then carries no feature flag
-// and the trip page never fetches the config, loads Google code, or builds any Google component.
-// The endpoint is available only to signed-in browser sessions (owner, content managers and
-// viewers, who all may display a saved association) and to the owner bearer. MCP access tokens and
-// OAuth tokens never reach it because app.mjs accepts them only at /mcp.
+// Both are needed, and they are still not enough: the explicit monthly allowance and headroom must
+// also be configured and the allowance ledger initialized by an operator (see google-allowance.mjs),
+// and each trip must opt in. Off, or on without a key: { enabled: false }. The session response then
+// carries no feature flag and the trip page never reserves, loads Google code, or builds any Google
+// component. GET /api/google-places/config is available only to signed-in browser sessions and to
+// the owner bearer and carries no key. MCP access tokens and OAuth tokens never reach either route
+// because app.mjs accepts them only at /mcp.
 
 export const GOOGLE_PLACES_FLAG_ENV = "SHARED_TRIP_GOOGLE_PLACES_UI_KIT";
 export const GOOGLE_MAPS_BROWSER_KEY_ENV = "SHARED_TRIP_GOOGLE_MAPS_BROWSER_KEY";
@@ -44,8 +48,11 @@ export function sessionFeatures(config) {
   return config?.enabled === true ? { features: { googlePlacesUiKit: true } } : {};
 }
 
-/** Body of GET /api/google-places/config. */
+/**
+ * Body of GET /api/google-places/config. It never carries the key: browsers receive the key only
+ * with a granted allowance reservation, so no Google script can be bootstrapped without one.
+ */
 export function configResponse(config) {
   if (config?.enabled !== true) return { enabled: false };
-  return { enabled: true, apiKey: config.browserKey, libraries: ["places"] };
+  return { enabled: true, libraries: ["places"], keyDelivery: "reservation" };
 }

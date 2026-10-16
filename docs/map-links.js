@@ -1,4 +1,4 @@
-import { isGoogleMapsHost } from "./google-maps-place-url.js?v=v-5baa7e555e23";
+import { isGoogleMapsHost } from "./google-maps-place-url.js?v=v-59b19d8ef18f";
 
 export function normalizeGoogleMapsUrl(value) {
   let url;

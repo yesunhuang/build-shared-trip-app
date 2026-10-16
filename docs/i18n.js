@@ -1,6 +1,6 @@
-import { UI_ZH_HANT } from "./translations-zh-hant.js?v=v-5baa7e555e23";
-import { UI_ZH_HANS } from "./translations-zh-hans.js?v=v-5baa7e555e23";
-import { UI_JA } from "./translations-ja.js?v=v-5baa7e555e23";
+import { UI_ZH_HANT } from "./translations-zh-hant.js?v=v-59b19d8ef18f";
+import { UI_ZH_HANS } from "./translations-zh-hans.js?v=v-59b19d8ef18f";
+import { UI_JA } from "./translations-ja.js?v=v-59b19d8ef18f";
 
 const seedTrip = readSeedTrip();
 // Self-hosted pages share one non-sensitive language preference across trips.

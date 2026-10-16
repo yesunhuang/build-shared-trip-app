@@ -2,8 +2,13 @@
 // usable plan/card links. Everything is simulated and fictional:
 //   - The trip API is an in-memory fictional server following the documented contract.
 //   - Google is MOCKED: the standard gmp-* tags are fake custom elements that only count
-//     constructions, place-request assignments and text queries; the Maps script is never fetched
-//     (a MutationObserver sees the <script> element, records it and installs a fake importLibrary).
+//     constructions, connections/re-connections, place-request assignments and text queries; the
+//     Maps script is never fetched (a MutationObserver sees the <script> element, records it and
+//     installs a fake importLibrary). Element.moveBefore is a native-equivalent mock (an element
+//     without connectedMoveCallback is disconnected and re-connected) whose calls are counted; the
+//     app must never call it. Allowance reservations are granted by the fictional server with the
+//     provider month of the page's own wall clock (denials are covered in
+//     test-google-places-ui-kit.mjs and test-google-places-allowance-ui.mjs).
 //   - Pointer, touch, mouse and keyboard input are SIMULATED by dispatching synthetic DOM events.
 //     jsdom has no layout, no real touch, no browser shortcuts and no real navigation: a window-level
 //     listener records each activation event and then cancels jsdom's (unimplemented) navigation.
@@ -16,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { associationForPlan } from "../assets/app-template/public/google-place-association.js";
-import { MAPS_JS_URL, READY_CALLBACK, STANDARD_TAGS, googleText } from "../assets/app-template/public/google-places-ui-kit.js";
+import { MAPS_JS_URL, READY_CALLBACK, STANDARD_TAGS, googleText, providerMonth } from "../assets/app-template/public/google-places-ui-kit.js";
 import { GOOGLE_PLACE_PHOTOS_LANGUAGES, googlePlacePhotosText } from "../assets/app-template/public/hosted-client.js";
 import {
   createLinkActivationGuard, interactiveTargetOf, isPlainPrimaryActivation, linkFromEvent, safeLinkUrl
@@ -163,7 +168,7 @@ function fixtureTrip(extra = {}) {
 }
 
 function createFakeServer(initialTrip, { google = true, editable = true } = {}) {
-  const server = { trip: clone(initialTrip), google, editable, log: [], requestIds: new Map(), configGate: null };
+  const server = { trip: clone(initialTrip), google, editable, log: [], requestIds: new Map(), reservationGate: null, permits: new Map() };
   const json = (status, payload) => ({ status, payload });
   server.remote = (mutate) => {
     const next = clone(server.trip);
@@ -180,13 +185,29 @@ function createFakeServer(initialTrip, { google = true, editable = true } = {}) 
         ...(server.google ? { features: { googlePlacesUiKit: true } } : {}) });
     }
     if (method === "GET" && url.pathname === "/api/google-places/config") {
-      if (server.configGate) await server.configGate.promise;
-      return json(200, server.google ? { enabled: true, apiKey: FAKE_KEY, libraries: ["places"] } : { enabled: false });
+      return json(200, server.google ? { enabled: true, libraries: ["places"], keyDelivery: "reservation" } : { enabled: false });
     }
     const match = /^\/api\/trips\/([^/]+)(\/.*)?$/.exec(url.pathname);
     if (!match || decodeURIComponent(match[1]) !== server.trip.id) return json(404, { error: { code: "not_found", message: "Not found." } });
     const rest = match[2] || "";
     if (method === "GET" && !rest) return json(200, { trip: clone(server.trip) });
+    if (method === "POST" && rest === "/google-places/reservations") {
+      // Same contract as the real route: the trip's own opt-in is checked when the request is
+      // decided; server.reservationGate then holds the decided answer in transit.
+      const decided = !server.google ? json(503, { error: { code: "google_places_disabled", message: "Off." } })
+        : server.trip[FIELD] !== true ? json(409, { error: { code: "google_trip_not_enabled", message: "Off for this trip." } })
+          : (() => {
+            const prior = server.permits.get(body.requestId);
+            if (prior) return json(200, { ...prior, replayed: true });
+            const permit = { granted: true, replayed: false, apiKey: FAKE_KEY, libraries: ["places"],
+              // The page uses the real clocks, so the permit carries the provider month of that wall clock.
+              permit: { id: "gpr_" + String(server.permits.size + 1).padStart(24, "0"), kind: body.kind, tripId: server.trip.id, placeId: body.placeId ?? null, month: providerMonth(Date.now()), validForMs: 45000 } };
+            server.permits.set(body.requestId, permit);
+            return json(200, permit);
+          })();
+      if (server.reservationGate) await server.reservationGate.promise;
+      return decided;
+    }
     if (method === "POST" && rest === "/changes") {
       if (!server.editable) return json(403, { error: { code: "forbidden", message: "Editing access required." } });
       if (server.requestIds.has(body.requestId)) return json(200, { trip: clone(server.requestIds.get(body.requestId)) });
@@ -216,13 +237,19 @@ function createFakeServer(initialTrip, { google = true, editable = true } = {}) 
 // 3. Page harness (same approach as test-google-places-ui-kit.mjs): long timers held, fetch
 //    limited to the fictional API, Leaflet stub, fresh module graph per page load.
 
-function newGoogleRecord() { return { constructed: {}, placeAssignments: [], textQueries: [], shadowReads: 0, created: [], scripts: [], imports: [] }; }
+function newGoogleRecord() { return { constructed: {}, connections: 0, reconnects: [], moveCalls: 0, placeAssignments: [], textQueries: [], shadowReads: 0, created: [], scripts: [], imports: [] }; }
 function defineStandardElements(window, record) {
   for (const tag of STANDARD_TAGS) {
     if (window.customElements.get(tag)) continue;
     window.customElements.define(tag, class extends window.HTMLElement {
       static get observedAttributes() { return ["place", "text-query"]; }
       constructor() { super(); record.constructed[tag] = (record.constructed[tag] || 0) + 1; }
+      // Every connection counts (component and nested children); a second one is a re-connection.
+      connectedCallback() {
+        record.connections += 1;
+        this.fictionalConnections = (this.fictionalConnections || 0) + 1;
+        if (this.fictionalConnections > 1) record.reconnects.push(tag);
+      }
       attributeChangedCallback(name, _old, value) {
         if (name === "place") record.placeAssignments.push(value);
         if (name === "text-query") record.textQueries.push(value);
@@ -234,8 +261,20 @@ function defineStandardElements(window, record) {
   window.document.createElement = (tag, ...rest) => { record.created.push(String(tag).toLowerCase()); return original(tag, ...rest); };
 }
 const fakeLibrary = (record) => ({ maps: { importLibrary: async (name) => { record.imports.push(name); return { fictionalPlacesLibrary: true }; } } });
-const googleActivity = (page) => JSON.stringify([page.configRequests(), page.google.scripts.length, page.google.imports.length, page.google.constructed, page.google.textQueries.length, page.google.placeAssignments.length]);
-const zeroGoogle = (page) => page.configRequests() === 0 && page.google.scripts.length === 0 && page.google.imports.length === 0
+// Native-equivalent Element.moveBefore for elements without connectedMoveCallback: like Chrome and
+// the HTML standard, it still disconnects and re-connects (an ordinary insert in jsdom). Counted.
+function installNativeMove(window, record) {
+  Object.defineProperty(window.Element.prototype, "moveBefore", {
+    configurable: true, writable: true,
+    value(node, child) {
+      record.moveCalls += 1;
+      if (!this.isConnected || !node.isConnected) throw new window.DOMException("Both nodes must be connected.", "HierarchyRequestError");
+      this.insertBefore(node, child);
+    }
+  });
+}
+const googleActivity = (page) => JSON.stringify([page.configRequests(), page.reservations(), page.google.scripts.length, page.google.imports.length, page.google.constructed, page.google.textQueries.length, page.google.placeAssignments.length]);
+const zeroGoogle = (page) => page.configRequests() === 0 && page.reservations() === 0 && page.google.scripts.length === 0 && page.google.imports.length === 0
   && Object.keys(page.google.constructed).length === 0 && page.google.textQueries.length === 0 && !page.google.created.some((tag) => tag.startsWith("gmp-"));
 
 const nativeTimeout = globalThis.setTimeout;
@@ -356,6 +395,7 @@ async function loadPage({ server, phone = false, planView = phone }) {
   Object.defineProperty(mapElement, "clientHeight", { configurable: true, get: () => (phone ? 760 : 640) });
   const google = newGoogleRecord();
   defineStandardElements(window, google);
+  installNativeMove(window, google);
   new window.MutationObserver((mutations) => {
     for (const mutation of mutations) for (const node of mutation.addedNodes) {
       if (node.localName !== "script" || !String(node.src).startsWith(MAPS_JS_URL)) continue;
@@ -405,7 +445,8 @@ async function loadPage({ server, phone = false, planView = phone }) {
   page.dialog = () => doc.getElementById("item-dialog");
   page.form = () => doc.getElementById("item-form");
   page.configRequests = () => (currentServer?.log || []).filter((entry) => entry.path === "/api/google-places/config").length;
-  page.changes = () => (currentServer?.log || []).filter((entry) => entry.method === "POST" && entry.path.endsWith("/changes"));
+  page.reservations = () => (currentServer?.log || []).filter((entry) => entry.path.endsWith("/google-places/reservations")).length;
+  page.changes =() => (currentServer?.log || []).filter((entry) => entry.method === "POST" && entry.path.endsWith("/changes"));
   return page;
 }
 
@@ -518,17 +559,31 @@ try {
     assert.ok(zeroGoogle(page), "opening the trip loads nothing");
     await setCardOpen(page, "plan-garden", true);
     await until(() => page.details("plan-garden"), "garden component");
-    const gardenElement = page.details("plan-garden");
+    let gardenElement = page.details("plan-garden");
     gardenElement.dispatchEvent(new window.Event("gmp-load"));
-    assert.deepEqual([page.configRequests(), google.scripts.length, google.imports, google.constructed[DETAILS]], [1, 1, ["places"], 1]);
+    assert.deepEqual([page.configRequests(), page.reservations(), google.scripts.length, google.imports, google.constructed[DETAILS]], [0, 1, 1, ["places"], 1], "one reservation, then one script, one library and one component");
     for (let round = 0; round < 3; round += 1) { await setCardOpen(page, "plan-garden", false); await setCardOpen(page, "plan-garden", true); }
+    assert.equal(page.details("plan-garden"), gardenElement, "re-expansion unhides the same component in its own host");
+    assert.deepEqual([page.reservations(), google.constructed[DETAILS], google.reconnects], [1, 1, []], "repeated expansion reserves, builds and re-connects nothing");
     remoteNote(server, "Remote fictional note one");
     await poll(page);
     await until(() => textOf(page.item("plan-cafe")).includes("Remote fictional note one"), "unrelated remote edit rendered");
-    await until(() => page.details("plan-garden") === gardenElement, "same component after re-render");
+    await wait(20);
+    // The rebuild never moves a component into the new card: it is released, and the restored card
+    // offers an explicit control without reserving or building anything.
+    assert.equal(gardenElement.isConnected, false, "the unrelated re-render released the component");
+    assert.equal(page.details("plan-garden"), null, "it was not moved into the rebuilt card");
+    assert.equal(textOf(page.host("plan-garden").querySelector(".google-place__action")), googleText("en", "showDetails"), "the restored card offers an explicit control");
+    assert.deepEqual([google.constructed[DETAILS], google.placeAssignments, page.reservations()], [1, [PLACE.garden], 1], "the unrelated re-render reserves, builds and assigns nothing");
+    // Explicit Show: one fresh reservation for one fresh component; the page-session loader is reused.
+    page.host("plan-garden").querySelector(".google-place__action").click();
+    await until(() => page.details("plan-garden"), "garden after an explicit show");
+    assert.notEqual(page.details("plan-garden"), gardenElement);
+    gardenElement = page.details("plan-garden");
+    gardenElement.dispatchEvent(new window.Event("gmp-load"));
     const settled = googleActivity(page);
-    assert.equal(google.constructed[DETAILS], 1, "no duplicate construction");
-    assert.deepEqual(google.placeAssignments, [PLACE.garden], "no duplicate place assignment");
+    assert.deepEqual([page.reservations(), google.constructed[DETAILS], google.placeAssignments, google.scripts.length, google.imports.length], [2, 2, [PLACE.garden, PLACE.garden], 1, 1],
+      "the explicit Show reserved once and built once; no new script or library");
 
     await openEditor(page, "plan-museum");
     assert.equal(page.panel().hidden, false, "opted in: the editor offers Google matching");
@@ -582,7 +637,8 @@ try {
     assert.equal(googleActivity(page), activityBeforeOptOut, "no new config/script/library/component/query after the opt-out");
 
     // Opt in again (remote): hosts return, nothing loads until a plan is expanded, then the
-    // page-session loader is reused (no second configuration request or script).
+    // page-session loader is reused (no second script), but the new component needs a new
+    // reservation.
     server.remote((trip) => { trip[FIELD] = true; });
     await poll(page);
     await until(() => page.host("plan-garden"), "hosts back after opting in again");
@@ -590,27 +646,29 @@ try {
     await setCardOpen(page, "plan-garden", false);
     await setCardOpen(page, "plan-garden", true);
     await until(() => page.details("plan-garden"), "component after re-enabling");
-    assert.deepEqual([page.configRequests(), google.scripts.length, google.imports.length], [1, 1, 1], "the loader is reused for the rest of the page session");
+    assert.deepEqual([page.reservations(), google.scripts.length, google.imports.length], [4, 1, 1], "the loader is reused for the rest of the page session; each component (garden, garden after the explicit Show, search, garden again) had its own reservation");
     assert.equal(google.shadowReads, 0, "no shadow DOM read");
+    assert.deepEqual([google.reconnects, google.moveCalls], [[], 0], "no component or nested child was ever re-connected; moveBefore never called");
     assert.deepEqual(page.errors, []);
   }
 
-  // D. Opt-out while the very first load is still waiting for the configuration: the load is
-  //    cancelled before any script or library work and its late answer is ignored.
+  // D. Opt-out while the very first reservation (already granted by the server) is still in
+  //    transit: the late grant is ignored before any script or library work.
   {
     const server = createFakeServer(fixtureTrip({ [FIELD]: true }));
-    let releaseConfig;
-    server.configGate = { promise: new Promise((resolve) => { releaseConfig = resolve; }) };
+    let releaseReservation;
+    server.reservationGate = { promise: new Promise((resolve) => { releaseReservation = resolve; }) };
     const page = await loadPage({ server });
     await setCardOpen(page, "plan-garden", true);
-    await until(() => page.configRequests() === 1, "configuration requested");
+    await until(() => page.reservations() === 1, "reservation requested");
     assert.equal(textOf(page.host("plan-garden").querySelector(".google-place__status")), googleText("en", "detailsLoading"));
     server.remote((trip) => { trip[FIELD] = false; });
     await poll(page);
-    await until(() => !page.host("plan-garden"), "host removed while loading");
-    releaseConfig();
+    await until(() => !page.host("plan-garden"), "host removed while reserving");
+    releaseReservation();
     await wait(60);
-    assert.deepEqual([page.google.scripts.length, page.google.imports.length, Object.keys(page.google.constructed).length], [0, 0, 0], "no script, library or component after a cancelled load");
+    assert.equal(server.permits.size, 1, "fixture: the server granted before the opt-out");
+    assert.deepEqual([page.google.scripts.length, page.google.imports.length, Object.keys(page.google.constructed).length], [0, 0, 0], "no script, library or component after a cancelled reservation");
     assert.deepEqual(page.errors, []);
   }
 
@@ -775,6 +833,10 @@ try {
       await until(() => textOf(page.item("plan-cafe")).includes(`Remote note during ${label}`), `${label}: deferred rebuild`);
     }
     await ensureGuide();
+    // Many deferred rebuilds ran during link presses: the museum and garden components were
+    // released by them (never moved or re-connected) and nothing was reserved again by itself.
+    assert.equal(page.reservations(), 2, "only the two explicit expansions (museum, garden) reserved");
+    assert.deepEqual([page.google.constructed[DETAILS], page.google.reconnects, page.google.moveCalls], [2, [], 0], "re-renders during link presses build, re-connect and move nothing");
     // Unsafe URLs never become links.
     const allHrefs = [...doc.querySelectorAll("a[href]")].map((link) => link.getAttribute("href"));
     assert.ok(!allHrefs.some((href) => /^\s*(?:javascript|data|vbscript):/i.test(href)), "no javascript:, data: or vbscript: link anywhere");

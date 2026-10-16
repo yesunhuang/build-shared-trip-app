@@ -129,7 +129,8 @@ try {
   assert.equal(box.checked, false);
   box.click();
   submit(form);
-  await until(() => runtime.service.getTrip(created.id).trip[FIELD] === true && !doc.querySelector("dialog"), "opted in");
+  // The dialog closes before load() finishes; wait until run() re-enables the next action.
+  await until(() => runtime.service.getTrip(created.id).trip[FIELD] === true && !doc.querySelector("dialog") && !editButton().disabled, "opted in and ready");
   let changeBody = sent.filter((entry) => entry.method === "POST" && entry.path.endsWith("/changes")).at(-1).body;
   assert.deepEqual(changeBody.changes.map((change) => change.type), ["update_trip"]);
   assert.equal(changeBody.changes[0].fields[FIELD], true, "a real boolean");
@@ -140,7 +141,7 @@ try {
   form.elements.title.value = "Fictional created trip";
   form.elements.country.value = "Fictionland";
   submit(form);
-  await until(() => runtime.service.getTrip(created.id).trip.country === "Fictionland" && !doc.querySelector("dialog"), "country saved");
+  await until(() => runtime.service.getTrip(created.id).trip.country === "Fictionland" && !doc.querySelector("dialog") && !doc.getElementById("create").disabled, "country saved and ready");
   changeBody = sent.filter((entry) => entry.method === "POST" && entry.path.endsWith("/changes")).at(-1).body;
   assert.equal(Object.hasOwn(changeBody.changes[0].fields, FIELD), false, "an unchanged choice is not resent");
   assert.equal(runtime.service.getTrip(created.id).trip[FIELD], true);

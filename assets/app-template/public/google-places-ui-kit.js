@@ -2,8 +2,41 @@
 //
 // Inert by default. Importing this module does nothing: no request, no script, no element. The
 // trip page creates a loader only when the signed-in session advertises the feature
-// (features.googlePlacesUiKit, present only when the operator enabled it with a browser key),
-// and the loader contacts nothing until a plan actually needs a Google component.
+// (features.googlePlacesUiKit, present only when the operator enabled it with a browser key) and the
+// trip itself is opted in, and nothing contacts Google until a plan actually needs a component.
+//
+// Allowance gate. Every app-controlled action that could make Google count usage first needs a
+// one-use permit from the server's monthly allowance (POST /api/trips/<id>/google-places/reservations):
+//   - the first SDK bootstrap (script + importLibrary) together with the first component; the
+//     browser key itself arrives only inside a granted reservation, so no script can load without one;
+//   - every Place Details construction and its place-request assignment;
+//   - every new editor search query and every Place ID preview;
+//   - every explicit "Try again" and every re-instantiation after eviction, failure or discard.
+// A permit is checked synchronously immediately before the SDK bootstrap it may start and again
+// immediately before the dispatch it authorizes (same trip, kind and Place ID; unused; inside its
+// validity window; page visible and not hidden since the request was sent; caller's state still
+// current) and is consumed only by the dispatch. A denial, an expired, replayed, late or
+// unverifiable permit, a hidden tab, an opt-out, a sign-out or a changed location starts no Google
+// work at all. Nothing is refunded.
+//
+// Timing fails closed. The validity window is measured from when this page FIRST sent the
+// reservation request (a transport retry reuses the idempotency key, so a replayed answer may be
+// the permit issued for that first send) on BOTH the monotonic clock (performance.now) and the wall
+// clock, and the two elapsed times must agree within CLOCK_TOLERANCE_MS. No monotonic clock, a
+// clock that runs backwards, or a provider month that cannot be computed refuses (and blocks further
+// reservations until an explicit Try again); a wall clock that ran ahead of the monotonic clock (OS
+// sleep with a paused monotonic clock, or a forward jump) makes the permit expired. permit.month must
+// be a well-formed YYYY-MM equal to the provider month (America/Los_Angeles) when the request was
+// sent, when the answer arrived, at bootstrap and at dispatch, so a late answer, a hidden tab or a
+// sleeping laptop that crosses a provider month never reuses the old month's grant.
+//
+// Google components are NEVER reparented once connected, not even with Element.moveBefore: per the
+// HTML standard a custom element without connectedMoveCallback still gets disconnectedCallback and
+// connectedCallback on such a move, and this app cannot know what the SDK does then. A component is
+// connected exactly once, into the plan's own host. Collapsing the card or choosing another plan only
+// hides it inside that same host; re-expanding unhides it (no reservation, no call, no callback). When
+// a re-render is about to replace the host, the component is released (removed once, never connected
+// again) and the new card offers an explicit "Show Google place details", which reserves afresh.
 //
 // Only STANDARD components are created (Places UI Kit "Query (Essentials)" usage):
 //   <gmp-place-details-compact orientation="vertical">
@@ -21,8 +54,11 @@
 // Never: Advanced* elements, a Google map, the raw Places API, Place.fetchFields, Place Photos or
 // Autocomplete. This code never opens a component's shadow DOM, never reads its images, and from a
 // selection event reads only place.id. The components render Google's own content and attribution
-// inside the page and may make their own network requests to Google; nothing they show is copied
-// into trip data, storage, exports, logs or map markers.
+// inside the page and may make their own network requests to Google (which this app cannot see or
+// count); nothing they show is copied into trip data, storage, exports, logs or map markers. Saved
+// OpenStreetMap places and Commons/manual photos are never hidden or replaced: Google is additive.
+// Once the SDK is loaded in a page it cannot be unloaded and its own background work cannot be
+// stopped by this app.
 
 import { isGooglePlaceId } from "./google-place-association.js?v=__CACHE_VERSION__";
 
@@ -45,6 +81,20 @@ export const MAX_RETAINED_DETAILS = 3;
 export const SEARCH_RESULT_LIMIT = 5;
 export const VENUE_QUERY_MIN = 2;
 export const VENUE_QUERY_MAX = 120;
+// Client-side permit handling. The server issues at most 45 s; the client never trusts more than
+// PERMIT_MAX_MS and keeps DISPATCH_SAFETY_MS in reserve.
+export const PERMIT_MAX_MS = 60000;
+export const DISPATCH_SAFETY_MS = 1000;
+// Wall-clock and monotonic elapsed time since a request was sent must agree within this tolerance.
+export const CLOCK_TOLERANCE_MS = 2000;
+// The provider's monthly boundary (Pacific time, including daylight saving time).
+export const PROVIDER_TIME_ZONE = "America/Los_Angeles";
+export const PERMIT_MONTH_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])$/;
+// One reservation transport retry (same idempotency key) after a network failure or timeout.
+export const RESERVATION_ATTEMPTS = 2;
+export const RESERVATION_RETRY_MS = 500;
+export const PERMIT_ID_PATTERN = /^gpr_[A-Za-z0-9_-]{24}$/;
+const BROWSER_KEY_SHAPE = /^[A-Za-z0-9_-]{30,100}$/;
 
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]+/g;
@@ -89,7 +139,9 @@ const STRINGS = {
     detailsUnavailable: "Google place details aren’t available right now.",
     tryAgain: "Try again",
     showDetails: "Show Google place details",
-    cancelSearch: "Stop searching"
+    cancelSearch: "Stop searching",
+    limitReached: "This site has reached its Google limit for this month, so nothing more is loaded from Google. Saved photos and details stay as they are.",
+    paused: "Google features are paused right now, so nothing is loaded from Google. Saved photos and details stay as they are."
   },
   "zh-Hans": {
     sectionTitle: "Google 地点详情",
@@ -127,7 +179,9 @@ const STRINGS = {
     detailsUnavailable: "暂时无法显示 Google 地点详情。",
     tryAgain: "重试",
     showDetails: "显示 Google 地点详情",
-    cancelSearch: "停止搜索"
+    cancelSearch: "停止搜索",
+    limitReached: "本站本月的 Google 使用已达上限，因此不会再从 Google 加载内容。已保存的照片和详情保持不变。",
+    paused: "Google 功能暂时停用，因此不会从 Google 加载任何内容。已保存的照片和详情保持不变。"
   },
   "zh-Hant": {
     sectionTitle: "Google 地點詳情",
@@ -165,7 +219,9 @@ const STRINGS = {
     detailsUnavailable: "暫時無法顯示 Google 地點詳情。",
     tryAgain: "重試",
     showDetails: "顯示 Google 地點詳情",
-    cancelSearch: "停止搜尋"
+    cancelSearch: "停止搜尋",
+    limitReached: "本站本月的 Google 使用量已達上限，因此不會再從 Google 載入內容。已儲存的照片與詳情維持不變。",
+    paused: "Google 功能暫時停用，因此不會從 Google 載入任何內容。已儲存的照片與詳情維持不變。"
   },
   ja: {
     sectionTitle: "Google の場所の詳細",
@@ -203,7 +259,9 @@ const STRINGS = {
     detailsUnavailable: "現在 Google の場所の詳細を表示できません。",
     tryAgain: "再試行",
     showDetails: "Google の場所の詳細を表示",
-    cancelSearch: "検索をやめる"
+    cancelSearch: "検索をやめる",
+    limitReached: "このサイトは今月の Google の利用上限に達したため、Google からはこれ以上読み込みません。保存済みの写真と詳細はそのまま表示されます。",
+    paused: "Google の機能は現在一時停止中のため、Google からは何も読み込みません。保存済みの写真と詳細はそのまま表示されます。"
   }
 };
 
@@ -248,12 +306,301 @@ export function selectedPlaceId(event) {
 }
 
 const loaderError = (code) => Object.assign(new Error(`Google Places UI Kit ${code}`), { code });
-// In a browser globalThis is the window. Tests inject their own timers.
+// In a browser globalThis is the window. Tests inject their own timers and clocks.
 const defaultSetTimer = (fn, ms) => globalThis.setTimeout(fn, ms);
 const defaultClearTimer = (id) => { if (id !== null && id !== undefined) globalThis.clearTimeout(id); };
+// Monotonic clock: performance.now() only. There is deliberately no Date.now() fallback; without a
+// monotonic clock the gate refuses (fail closed).
+const defaultNow = () => (typeof globalThis.performance?.now === "function" ? globalThis.performance.now() : Number.NaN);
+const defaultWallNow = () => Date.now();
+const defaultVisible = () => globalThis.document?.visibilityState !== "hidden";
+// Any visibility or page-lifecycle change (hidden tab, freeze/resume, back/forward cache) voids
+// every outstanding permit.
+function defaultWatchVisibility(listener) {
+  const doc = globalThis.document;
+  const win = typeof globalThis.addEventListener === "function" ? globalThis : null;
+  if (typeof doc?.addEventListener !== "function") return () => {};
+  const docEvents = ["visibilitychange", "freeze", "resume"];
+  // pageshow also fires on the first load; only a back/forward-cache restore counts.
+  const onPageShow = (event) => { if (event?.persisted) listener(); };
+  docEvents.forEach((name) => doc.addEventListener(name, listener));
+  win?.addEventListener("pagehide", listener);
+  win?.addEventListener("pageshow", onPageShow);
+  return () => {
+    docEvents.forEach((name) => doc.removeEventListener(name, listener));
+    win?.removeEventListener("pagehide", listener);
+    win?.removeEventListener("pageshow", onPageShow);
+  };
+}
+
+let monthFormatter = null;
+/**
+ * The provider month (YYYY-MM in America/Los_Angeles, daylight saving time included) for a wall
+ * clock time in milliseconds, or "" when it cannot be computed (then the gate fails closed).
+ */
+export function providerMonth(ms) {
+  if (!Number.isFinite(ms)) return "";
+  try {
+    monthFormatter ||= new Intl.DateTimeFormat("en-US", { timeZone: PROVIDER_TIME_ZONE, year: "numeric", month: "2-digit" });
+    const parts = monthFormatter.formatToParts(new Date(ms));
+    const year = parts.find((part) => part.type === "year")?.value || "";
+    const month = parts.find((part) => part.type === "month")?.value || "";
+    const value = `${year}-${month}`;
+    return PERMIT_MONTH_PATTERN.test(value) ? value : "";
+  } catch {
+    return "";
+  }
+}
+const defaultSleep = (ms) => new Promise((resolve) => { globalThis.setTimeout(resolve, ms); });
+function defaultRequestKey() {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") return `gres-${cryptoApi.randomUUID()}`;
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    return `gres-${[...cryptoApi.getRandomValues(new Uint8Array(16))].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  }
+  return `gres-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}
 
 // ---------------------------------------------------------------------------------------------
-// Loader: one configuration request, one script, one importLibrary("places") per page.
+// Allowance gate: one server reservation, then at most one synchronous dispatch per permit.
+
+// Server error codes -> denial reasons. "blocking" reasons stop further reservations from this page
+// until an explicit Try again, so a denied site does not keep asking.
+const DENIAL_CODES = Object.freeze({
+  google_allowance_exhausted: "exhausted",
+  google_allowance_unconfigured: "unconfigured",
+  google_allowance_unavailable: "unavailable",
+  google_allowance_clock_uncertain: "unavailable",
+  google_allowance_month_boundary: "boundary",
+  google_places_disabled: "disabled",
+  google_trip_not_enabled: "notCurrent",
+  google_place_not_linked: "notCurrent",
+  trip_archived: "notCurrent",
+  request_id_conflict: "unverifiable"
+});
+// "clock": this page's timing cannot be trusted (no monotonic clock, a clock running backwards, no
+// provider month, or a device month that disagrees with the server's); it does not fix itself.
+const BLOCKING_REASONS = new Set(["exhausted", "unconfigured", "unavailable", "disabled", "clock"]);
+
+/**
+ * The reservation context a kind actually carries: a search names nothing; a preview names only its
+ * Place ID; saved details name the plan and its Place ID. Anything else is refused before reserving.
+ */
+export function reservationContext({ kind, planId = "", placeId = "" } = {}) {
+  if (kind === "search") return { kind, planId: "", placeId: "" };
+  if (kind === "preview") return isGooglePlaceId(placeId) ? { kind, planId: "", placeId } : null;
+  if (kind === "details") return isGooglePlaceId(placeId) && typeof planId === "string" && planId.length > 0 && planId.length <= 200 ? { kind, planId, placeId } : null;
+  return null;
+}
+
+function denialReason(error) {
+  if (error?.status === 401) return "signedOut";
+  if (error?.status === 403) return "forbidden";
+  return DENIAL_CODES[error?.code] || "unavailable";
+}
+
+const isTransportFailure = (error) => error?.status === 0 || ((error?.status === 502 || error?.status === 504) && !error?.code);
+
+/**
+ * createGoogleAllowanceGate({ tripId, reserve }) where reserve(body) POSTs to the reservation route
+ * and resolves to its JSON body or rejects with { status, code }. acquire() asks for one permit;
+ * check(grant, expected) is the synchronous pre-bootstrap check (consumes nothing);
+ * dispatch(grant, expected, work) re-checks synchronously and runs work() at most once. The gate
+ * never refunds: an unused or refused permit is simply dropped.
+ *
+ * now() is the monotonic clock (performance.now), wallNow() the wall clock (Date.now), monthOf(ms)
+ * the provider month; isVisible() and watchVisibility(listener) report the tab's visibility. All
+ * are injectable for tests; production uses the real ones and fails closed when they are missing.
+ */
+export function createGoogleAllowanceGate({
+  tripId, reserve, now = defaultNow, wallNow = defaultWallNow, monthOf = providerMonth,
+  isVisible = defaultVisible, watchVisibility = defaultWatchVisibility, newRequestKey = defaultRequestKey,
+  sleep = defaultSleep, retryDelayMs = RESERVATION_RETRY_MS
+}) {
+  let generation = 0;
+  let visibilityEpoch = 0;
+  let disposed = false;
+  let blocked = "";
+  let lastMono = Number.NEGATIVE_INFINITY;
+  const consumed = new Set();
+  const stats = { acquisitions: 0, requests: 0, granted: 0, denied: 0, dispatched: 0, refused: 0, preflightRefused: 0, replays: 0, clockRefusals: 0, invalid: 0 };
+  const denial = (reason) => ({ granted: false, reason });
+  let stopWatching = null;
+  try { stopWatching = typeof watchVisibility === "function" ? watchVisibility(() => { visibilityEpoch += 1; }) : null; }
+  catch { stopWatching = null; }
+
+  // One reading of both clocks, or null when timing is unavailable or the monotonic clock ran
+  // backwards (both make the gate fail closed).
+  function reading() {
+    let mono;
+    let wall;
+    try { mono = now(); wall = wallNow(); } catch { return null; }
+    if (typeof mono !== "number" || typeof wall !== "number" || !Number.isFinite(mono) || !Number.isFinite(wall)) return null;
+    if (mono < lastMono) return null;
+    lastMono = mono;
+    return { mono, wall };
+  }
+
+  // "clock": the wall clock went backwards relative to the monotonic one (or the monotonic one did);
+  // "expired": the wall clock ran ahead (sleep with a paused monotonic clock, or a forward jump), so
+  // the real elapsed time is unknown and the permit is treated as too old.
+  function elapsedProblem(from, to) {
+    const mono = to.mono - from.mono;
+    const wall = to.wall - from.wall;
+    if (mono < 0 || wall < mono - CLOCK_TOLERANCE_MS) return "clock";
+    if (wall > mono + CLOCK_TOLERANCE_MS) return "expired";
+    return "";
+  }
+
+  function block(reason) {
+    if (reason === "clock") { stats.clockRefusals += 1; if (!disposed) blocked = "clock"; }
+  }
+
+  function verify(response, context) {
+    const permit = response?.permit;
+    if (response?.granted !== true || !permit || typeof permit !== "object") return null;
+    if (typeof permit.id !== "string" || !PERMIT_ID_PATTERN.test(permit.id) || permit.kind !== context.kind || permit.tripId !== tripId) return null;
+    if ((context.placeId || null) !== (permit.placeId ?? null)) return null;
+    if (typeof permit.month !== "string" || !PERMIT_MONTH_PATTERN.test(permit.month)) return null;
+    if (typeof permit.validForMs !== "number" || !Number.isFinite(permit.validForMs) || permit.validForMs <= 0) return null;
+    if (typeof response.apiKey !== "string" || !BROWSER_KEY_SHAPE.test(response.apiKey)) return null;
+    return permit;
+  }
+
+  async function acquire(request = {}) {
+    if (disposed) return denial("cancelled");
+    // Unsupported context is refused before anything is reserved. A search carries no plan or
+    // Place ID, so any it was given is dropped here and never compared later.
+    const context = reservationContext(request);
+    if (!context) { stats.invalid += 1; return denial("invalid"); }
+    if (blocked) { stats.denied += 1; return denial(blocked); }
+    // Background tabs reserve nothing.
+    if (!isVisible()) return denial("hidden");
+    // No trustworthy timing: nothing is reserved at all.
+    const sent = reading();
+    const sentMonth = sent ? monthOf(sent.wall) : "";
+    if (!sent || typeof sentMonth !== "string" || !PERMIT_MONTH_PATTERN.test(sentMonth)) { block("clock"); stats.denied += 1; return denial("clock"); }
+    const ticket = generation;
+    const epoch = visibilityEpoch;
+    const body = { requestId: newRequestKey(), kind: context.kind, ...(context.kind === "details" ? { planId: context.planId, placeId: context.placeId } : context.kind === "preview" ? { placeId: context.placeId } : {}) };
+    stats.acquisitions += 1;
+    let response = null;
+    for (let attempt = 1; ; attempt += 1) {
+      stats.requests += 1;
+      try { response = await reserve(body); break; }
+      catch (error) {
+        if (disposed || ticket !== generation) return denial("cancelled");
+        // Only the transport is retried, with the same idempotency key: the server answers with the
+        // same single permit, never a second one.
+        if (attempt < RESERVATION_ATTEMPTS && isTransportFailure(error)) {
+          await sleep(retryDelayMs);
+          if (disposed || ticket !== generation) return denial("cancelled");
+          continue;
+        }
+        const reason = denialReason(error);
+        if (reason === "signedOut") { disposed = true; generation += 1; }
+        if (BLOCKING_REASONS.has(reason)) blocked = reason;
+        stats.denied += 1;
+        return denial(reason);
+      }
+    }
+    if (disposed || ticket !== generation) return denial("cancelled");
+    const permit = verify(response, context);
+    if (!permit) { stats.denied += 1; return denial("unverifiable"); }
+    const received = reading();
+    if (!received || elapsedProblem(sent, received) === "clock") { block("clock"); stats.denied += 1; return denial("clock"); }
+    const receivedMonth = monthOf(received.wall);
+    if (permit.month !== sentMonth || permit.month !== receivedMonth) {
+      stats.denied += 1;
+      // The month changed while the request was in flight: a late answer is never used. Otherwise
+      // this device's clock disagrees with the server's month: do not keep spending reservations.
+      if (sentMonth !== receivedMonth) return denial("month");
+      block("clock");
+      return denial("clock");
+    }
+    // Hidden (or frozen/resumed) while the request was in flight: the answer is not used.
+    if (epoch !== visibilityEpoch || !isVisible()) { stats.denied += 1; return denial("hidden"); }
+    if (response.replayed === true) stats.replays += 1;
+    stats.granted += 1;
+    // Validity is counted from when this page FIRST sent the request (a retry may be answered with
+    // the permit issued for that first send), so a slow or retried response shortens the window and
+    // never extends it. Both clocks carry their own deadline.
+    const validity = Math.min(permit.validForMs, PERMIT_MAX_MS) - DISPATCH_SAFETY_MS;
+    return {
+      granted: true, apiKey: response.apiKey,
+      permit: Object.freeze({
+        id: permit.id, kind: context.kind, planId: context.planId, placeId: context.placeId, month: permit.month,
+        sentMono: sent.mono, sentWall: sent.wall, deadline: sent.mono + validity, wallDeadline: sent.wall + validity, ticket, epoch
+      })
+    };
+  }
+
+  function problem(grant, expected = {}, full = true) {
+    if (disposed) return "cancelled";
+    const permit = grant?.granted === true ? grant.permit : null;
+    if (!permit || typeof permit !== "object") return "unverifiable";
+    if (permit.ticket !== generation) return "cancelled";
+    if (consumed.has(permit.id)) return "consumed";
+    const wanted = expected.kind === "search" ? "" : (expected.placeId || "");
+    if (permit.kind !== expected.kind || permit.placeId !== wanted) return "mismatch";
+    // A visibility or lifecycle change since the request was sent voids the permit for good.
+    if (permit.epoch !== visibilityEpoch) return "hidden";
+    const at = reading();
+    if (!at) return "clock";
+    const elapsed = elapsedProblem({ mono: permit.sentMono, wall: permit.sentWall }, at);
+    if (elapsed) return elapsed;
+    if (!(at.mono < permit.deadline) || !(at.wall < permit.wallDeadline)) return "expired";
+    const month = monthOf(at.wall);
+    if (typeof month !== "string" || !PERMIT_MONTH_PATTERN.test(month)) return "clock";
+    if (month !== permit.month) return "month";
+    if (!full) return "";
+    if (!isVisible()) return "hidden";
+    if (typeof expected.isCurrent === "function" && expected.isCurrent() !== true) return "notCurrent";
+    return "";
+  }
+
+  return {
+    acquire,
+    /** True while grant could still be dispatched for expected (ignores current visibility and isCurrent). */
+    usable(grant, expected) {
+      const reason = problem(grant, expected, false);
+      block(reason);
+      return reason === "";
+    },
+    /** Synchronous pre-bootstrap check (nothing consumed): "" or the refusal reason. */
+    check(grant, expected) {
+      const reason = problem(grant, expected, true);
+      if (reason) { stats.preflightRefused += 1; block(reason); }
+      return reason;
+    },
+    /** Synchronous check-and-consume. Returns { dispatched, reason }; work() runs only when dispatched. */
+    dispatch(grant, expected, work) {
+      const reason = problem(grant, expected, true);
+      if (reason) { stats.refused += 1; block(reason); return { dispatched: false, reason }; }
+      consumed.add(grant.permit.id);
+      stats.dispatched += 1;
+      work();
+      return { dispatched: true, reason: "" };
+    },
+    /** Explicit Try again: allow one more reservation attempt after a blocking denial. */
+    unblock() { if (!disposed) blocked = ""; },
+    /** Opt-out or trip change: every outstanding reservation and unused permit becomes void. */
+    cancelAll() { generation += 1; },
+    /** Sign-out or page teardown: nothing is reserved or dispatched afterwards. */
+    dispose() {
+      disposed = true;
+      generation += 1;
+      try { stopWatching?.(); } catch { /* already gone */ }
+      stopWatching = null;
+    },
+    get blocked() { return blocked; },
+    get disposed() { return disposed; },
+    get stats() { return { ...stats }; }
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Loader: one script and one importLibrary("places") per page, started only with a granted key.
 
 function defaultInjectScript(src, { win, timeoutMs, setTimer, clearTimer }) {
   return new Promise((resolve, reject) => {
@@ -279,34 +626,29 @@ function defaultInjectScript(src, { win, timeoutMs, setTimer, clearTimer }) {
 }
 
 /**
- * fetchConfig() must resolve to the protected /api/google-places/config body. A failed load stays
- * failed (no automatic retries) until reset() is called from an explicit "Try again". "disabled"
- * is permanent for the page. cancel() abandons a load that is still in progress (the trip was opted
- * out): the next step (script, library import) is skipped and its result is ignored; a request the
- * browser has already sent cannot be withdrawn, and code already loaded stays loaded.
+ * load(apiKey) needs the key from a granted reservation; without one it rejects and touches
+ * nothing. A failed load stays failed (no automatic retries) until reset() from an explicit
+ * "Try again". cancel() abandons a load that is still in progress (the trip was opted out): the next
+ * step (script, library import) is skipped and its result is ignored; a request the browser has
+ * already sent cannot be withdrawn, and code already loaded stays loaded.
  */
 export function createGooglePlacesLoader({
-  win, fetchConfig, language = "en", injectScript = defaultInjectScript, timeoutMs = LIBRARY_TIMEOUT_MS,
+  win, language = "en", injectScript = defaultInjectScript, timeoutMs = LIBRARY_TIMEOUT_MS,
   setTimer = defaultSetTimer, clearTimer = defaultClearTimer
 }) {
   let pending = null;
   let state = "idle";
   let generation = 0;
-  const stats = { configRequests: 0, scriptLoads: 0, libraryImports: 0, cancelled: 0 };
+  const stats = { scriptLoads: 0, libraryImports: 0, cancelled: 0 };
   const failureListeners = new Set();
   const fail = () => { if (state === "ready" || state === "loading") state = "failed"; failureListeners.forEach((listener) => listener()); };
   if (typeof win.gm_authFailure !== "function") win.gm_authFailure = fail;
 
-  async function run(ticket) {
+  async function run(ticket, apiKey) {
     const current = () => { if (ticket !== generation) throw loaderError("cancelled"); };
-    stats.configRequests += 1;
-    let config;
-    try { config = await fetchConfig(); } catch { current(); throw loaderError("unavailable"); }
-    current();
-    if (config?.enabled !== true || typeof config.apiKey !== "string" || !config.apiKey) throw loaderError("disabled");
     if (typeof win.google?.maps?.importLibrary !== "function") {
       stats.scriptLoads += 1;
-      await injectScript(mapsScriptUrl(config.apiKey, language), { win, timeoutMs, setTimer, clearTimer });
+      await injectScript(mapsScriptUrl(apiKey, language), { win, timeoutMs, setTimer, clearTimer });
       current();
     }
     if (typeof win.google?.maps?.importLibrary !== "function") throw loaderError("unavailable");
@@ -318,12 +660,13 @@ export function createGooglePlacesLoader({
   }
 
   return {
-    load() {
+    load(apiKey) {
       if (!pending) {
+        if (typeof apiKey !== "string" || !BROWSER_KEY_SHAPE.test(apiKey)) return Promise.reject(loaderError("unavailable"));
         state = "loading";
         const ticket = generation;
-        pending = run(ticket).then((library) => { if (ticket === generation) state = "ready"; return library; }, (error) => {
-          if (ticket === generation) state = error?.code === "disabled" ? "disabled" : "failed";
+        pending = run(ticket, apiKey).then((library) => { if (ticket === generation) state = "ready"; return library; }, (error) => {
+          if (ticket === generation) state = "failed";
           throw error?.code ? error : loaderError("unavailable");
         });
         pending.catch(() => {});
@@ -373,17 +716,10 @@ export function buildPlaceDetailsElement(doc, placeId) {
   return element;
 }
 
-// Moves a retained component without disconnecting it where the browser supports atomic moves
-// (Element.moveBefore); otherwise an ordinary append. Whether the SDK re-requests after an ordinary
-// re-connection is SDK behaviour that this app does not control.
-function moveNode(parent, node) {
-  if (node.parentNode === parent) return false;
-  if (typeof parent.moveBefore === "function" && node.isConnected && parent.isConnected) {
-    try { parent.moveBefore(node, null); return true; } catch { /* fall back */ }
-  }
-  parent.append(node);
-  return true;
-}
+// There is deliberately no helper that moves a component. Element.moveBefore is never used: a
+// custom element without connectedMoveCallback is disconnected and re-connected by it (HTML
+// standard), and whether the SDK defines that callback, or what it does in it, is not ours to
+// assume. A component is connected once into its own host and only ever hidden, shown or removed.
 
 /** Accessible, responsive host for a plan's Google details (no fixed height). */
 export function createGooglePlaceHost(doc, language) {
@@ -404,28 +740,74 @@ export function createGooglePlaceHost(doc, language) {
   return host;
 }
 
+// Denial reason -> details host state (null: stale, render nothing).
+function denialState(reason) {
+  if (reason === "cancelled" || reason === "notCurrent") return null;
+  if (reason === "exhausted") return "limit";
+  if (reason === "disabled") return "disabled";
+  // A hidden tab, an answer that crossed a provider month or arrived stale: nothing is reused; the
+  // plan offers an explicit control, which reserves afresh.
+  if (reason === "hidden" || reason === "month" || reason === "expired") return "inactive";
+  if (reason === "invalid") return "error";
+  return "paused";
+}
+
+// Pre-bootstrap or dispatch refusal of a granted permit -> details host state.
+function refusalState(reason) {
+  if (reason === "cancelled") return null;
+  if (reason === "expired" || reason === "hidden" || reason === "month" || reason === "notCurrent") return "inactive";
+  if (reason === "clock") return "paused";
+  return "error";
+}
+
+// Denial reason -> editor status key (null: stale, report nothing).
+function denialStatus(reason, fallback) {
+  if (reason === "cancelled" || reason === "notCurrent") return null;
+  if (reason === "exhausted") return "limitReached";
+  if (reason === "disabled") return "disabled";
+  if (reason === "hidden" || reason === "month" || reason === "expired" || reason === "invalid") return fallback;
+  return "paused";
+}
+
+// Pre-bootstrap or dispatch refusal -> editor status key.
+function refusalStatus(reason, fallback) {
+  if (reason === "cancelled") return null;
+  if (reason === "clock") return "paused";
+  return fallback;
+}
+
 // ---------------------------------------------------------------------------------------------
-// Saved-place details: lazy, one active plan, retained and deduplicated.
+// Saved-place details: lazy, one active plan, retained in its own host and deduplicated.
 
 /**
  * show(host, {tripId, planId, placeId, binding}) displays one plan's compact details in host. Only
- * one plan is active at a time; the previously active component is parked (hidden, still connected)
- * and reused if that plan is shown again. Nothing is preloaded. At most maxRetained components are
- * kept; older inactive ones are dropped. Keys include trip, plan, Place ID and location binding,
- * so a changed association or another trip never reuses an old component.
+ * one plan is active at a time. A component is connected exactly once, into the host it was built
+ * for, and is never moved: when another plan becomes active or the card is collapsed it is only
+ * hidden inside that same host, and showing that same host again unhides it (no reservation, no
+ * Google call, no connection callback). Nothing is preloaded. At most maxRetained components are
+ * kept; older inactive ones are removed for good. Keys include trip, plan, Place ID and location
+ * binding, so a changed association or another trip never reuses an old component.
+ * releaseWithin(root) is called before a re-render replaces hosts: their components are removed for
+ * good (never re-attached anywhere). restore(host, descriptor) after a re-render never reserves or
+ * builds anything; unless the same host still holds the component, the card offers an explicit
+ * control, which reserves afresh. isCurrent(descriptor) is the page's own check (trip still opted
+ * in, association still current) made right before the SDK bootstrap and right before a dispatch.
  */
 export function createPlaceDetailsManager({
-  doc, loader, language = () => "en", maxRetained = MAX_RETAINED_DETAILS, timeoutMs = COMPONENT_TIMEOUT_MS,
-  setTimer = defaultSetTimer, clearTimer = defaultClearTimer
+  doc, loader, gate, isCurrent = () => true, language = () => "en", maxRetained = MAX_RETAINED_DETAILS,
+  timeoutMs = COMPONENT_TIMEOUT_MS, setTimer = defaultSetTimer, clearTimer = defaultClearTimer
 }) {
   const entries = new Map();
+  const hostEntries = new WeakMap();
   const failed = new Set();
+  const denied = new Map();
+  const grants = new Map();
   const descriptors = new WeakMap();
-  const stats = { constructed: 0, placeAssignments: 0, shows: 0, moves: 0 };
+  const stats = { constructed: 0, placeAssignments: 0, shows: 0, reused: 0, hidden: 0, released: 0, evicted: 0 };
   let activeKey = "";
+  let activeHost = null;
   let generation = 0;
   let uses = 0;
-  let parking = null;
   let disposed = false;
   const text = (key) => googleText(typeof language === "function" ? language() : language, key);
 
@@ -436,17 +818,6 @@ export function createPlaceDetailsManager({
 
   function keyOf({ tripId, planId, placeId, binding }) {
     return JSON.stringify([String(tripId), String(planId), String(placeId), String(binding)]);
-  }
-
-  function parkingLot() {
-    if (!parking || !parking.isConnected) {
-      parking = doc.createElement("div");
-      parking.className = "google-place-parking";
-      parking.hidden = true;
-      parking.setAttribute("aria-hidden", "true");
-      doc.body.append(parking);
-    }
-    return parking;
   }
 
   function parts(host) {
@@ -462,15 +833,17 @@ export function createPlaceDetailsManager({
     const { status, action, mount } = parts(host);
     host.hidden = state === "disabled";
     host.dataset.googlePlaceState = state;
-    mount.hidden = state === "error" || state === "inactive";
+    mount.hidden = state === "error" || state === "inactive" || state === "limit" || state === "paused";
     action.hidden = true;
     action.onclick = null;
     if (state === "loading") status.textContent = text("detailsLoading");
-    else if (state === "error") {
-      status.textContent = text("detailsUnavailable");
+    else if (state === "error" || state === "paused") {
+      status.textContent = text(state === "error" ? "detailsUnavailable" : "paused");
       action.textContent = text("tryAgain");
       action.hidden = false;
       action.onclick = () => retry(host);
+    } else if (state === "limit") {
+      status.textContent = text("limitReached");
     } else if (state === "inactive") {
       status.textContent = "";
       action.textContent = text("showDetails");
@@ -479,82 +852,170 @@ export function createPlaceDetailsManager({
     } else status.textContent = "";
   }
 
+  // Still connected exactly where it was first connected.
+  function live(entry) {
+    return entry.host.isConnected && entry.mount.parentNode === entry.host && entry.element.parentNode === entry.mount && entry.element.isConnected;
+  }
+
+  const isShown = (entry) => activeKey === entry.key && activeHost === entry.host;
+
   function settle(entry, state) {
     if (entries.get(entry.key) !== entry || entry.state !== "loading") return;
     clearTimer(entry.timer);
     entry.timer = null;
     entry.state = state;
+    const shown = isShown(entry);
     if (state === "error") {
       failed.add(entry.key);
       discard(entry);
     }
-    if (activeKey === entry.key) render(entry.host, state);
+    if (shown) render(entry.host, state);
   }
 
+  // Removes a component for good: it is disconnected at most once and never connected again (no
+  // reference to it is kept).
   function discard(entry) {
     clearTimer(entry.timer);
+    entry.timer = null;
+    if (entries.get(entry.key) === entry) entries.delete(entry.key);
+    if (hostEntries.get(entry.host) === entry) hostEntries.delete(entry.host);
     entry.element.remove();
-    entries.delete(entry.key);
   }
 
-  function park(key) {
-    const entry = entries.get(key);
-    if (!entry) return;
-    const previousHost = entry.host;
-    if (moveNode(parkingLot(), entry.element)) stats.moves += 1;
-    entry.host = null;
-    if (previousHost?.isConnected && previousHost !== null) render(previousHost, "inactive");
+  // Components whose host left the document (a re-render the page did not announce) are released;
+  // they are never re-attached anywhere.
+  function sweep() {
+    for (const entry of [...entries.values()]) {
+      if (!live(entry)) { stats.released += 1; discard(entry); }
+    }
+  }
+
+  // The active plan stops being active. Its component stays connected in its own host, hidden
+  // behind the explicit control; a pending show for it is cancelled.
+  function leaveActive() {
+    const host = activeHost;
+    const key = activeKey;
+    activeKey = "";
+    activeHost = null;
+    generation += 1;
+    if (!host?.isConnected) return;
+    const entry = hostEntries.get(host);
+    const resident = Boolean(entry && entry.key === key);
+    const state = host.dataset.googlePlaceState;
+    if (resident || state === "loading" || state === "ready") {
+      if (resident) stats.hidden += 1;
+      render(host, "inactive");
+    }
   }
 
   function evict() {
-    const inactive = [...entries.values()].filter((entry) => entry.key !== activeKey).sort((a, b) => a.lastUsed - b.lastUsed);
-    while (entries.size > maxRetained && inactive.length) discard(inactive.shift());
+    const inactive = [...entries.values()].filter((entry) => !isShown(entry)).sort((a, b) => a.lastUsed - b.lastUsed);
+    while (entries.size > maxRetained && inactive.length) {
+      const entry = inactive.shift();
+      stats.evicted += 1;
+      discard(entry);
+      if (entry.host.isConnected) render(entry.host, "inactive");
+    }
   }
 
-  function construct(key, placeId) {
+  // Runs only inside gate.dispatch: building, assigning and the one and only connection (of the
+  // component and its children) are one synchronous step under one consumed permit.
+  function construct(key, placeId, host) {
     const element = buildPlaceDetailsElement(doc, placeId);
     stats.constructed += 1;
     stats.placeAssignments += 1;
-    const entry = { key, placeId, element, state: "loading", lastUsed: ++uses, host: null, timer: null };
+    const mount = parts(host).mount;
+    const entry = { key, placeId, element, host, mount, state: "loading", lastUsed: ++uses, timer: null };
     element.addEventListener("gmp-load", () => settle(entry, "ready"));
     element.addEventListener("gmp-error", () => settle(entry, "error"));
     entry.timer = setTimer(() => settle(entry, "error"), timeoutMs);
     entries.set(key, entry);
+    hostEntries.set(host, entry);
+    mount.append(element);
     return entry;
   }
 
-  function attach(host, entry) {
-    if (moveNode(parts(host).mount, entry.element)) stats.moves += 1;
-    entry.host = host;
-    entry.lastUsed = ++uses;
+  // One outstanding reservation per key: rapid re-expansion while it is pending, or a later
+  // expansion while its unused permit is still valid, never reserves twice. A permit that went
+  // stale (expired, other month, hidden tab, clock doubt) is never reused.
+  async function reservationFor(key, descriptor) {
+    const expected = { kind: "details", placeId: descriptor.placeId };
+    const held = grants.get(key);
+    if (held) {
+      const grant = await held;
+      if (grant.granted && gate.usable(grant, expected)) return grant;
+      if (grants.get(key) === held) grants.delete(key);
+      if (!grant.granted && !["cancelled", "hidden", "month", "expired"].includes(grant.reason)) return grant;
+    }
+    const pending = gate.acquire({ kind: "details", planId: descriptor.planId, placeId: descriptor.placeId });
+    grants.set(key, pending);
+    const grant = await pending;
+    if (!grant.granted && grants.get(key) === pending) grants.delete(key);
+    return grant;
   }
 
-  async function show(host, descriptor) {
+  function refused(host, key, reason, wanted) {
+    const state = refusalState(reason);
+    if (state === "paused") denied.set(key, state);
+    if (state && wanted()) render(host, state);
+    return false;
+  }
+
+  async function show(host, descriptor, { explicit = true } = {}) {
     if (disposed || !host || !descriptor || !isGooglePlaceId(descriptor.placeId) || !descriptor.binding) return false;
+    sweep();
     const key = keyOf(descriptor);
     descriptors.set(host, descriptor);
     host.dataset.googlePlaceKey = key;
-    if (activeKey && activeKey !== key) park(activeKey);
+    // One component per host: a host now used for another key drops its old component.
+    const resident = hostEntries.get(host);
+    if (resident && resident.key !== key) discard(resident);
+    if (activeKey !== key || activeHost !== host) leaveActive();
     activeKey = key;
+    activeHost = host;
     const ticket = ++generation;
     stats.shows += 1;
     if (failed.has(key)) { render(host, "error"); return false; }
+    if (denied.has(key)) { render(host, denied.get(key)); return false; }
     const existing = entries.get(key);
-    if (existing) {
-      attach(host, existing);
+    if (existing && existing.host === host && live(existing)) {
+      // The same host still holds it: unhide. No reservation, no call, no connection callback.
+      existing.lastUsed = ++uses;
+      stats.reused += 1;
       render(host, existing.state);
       return true;
     }
+    // Held by some other host: it is never moved here. Remove it; this host starts afresh.
+    if (existing) discard(existing);
+    // A re-render restore never reserves or builds: the user decides.
+    if (!explicit) { render(host, "inactive"); return false; }
     render(host, "loading");
-    try { await loader.load(); }
-    catch (error) {
-      if (ticket === generation && activeKey === key) render(host, error?.code === "disabled" ? "disabled" : "error");
+    const wanted = () => !disposed && ticket === generation && activeKey === key && activeHost === host && host.isConnected;
+    const expected = () => ({ kind: "details", placeId: descriptor.placeId, isCurrent: () => wanted() && isCurrent(descriptor) === true });
+    const grant = await reservationFor(key, descriptor);
+    if (!wanted()) return false;
+    if (!grant.granted) {
+      const state = denialState(grant.reason);
+      if (state === "limit" || state === "paused") denied.set(key, state);
+      if (state) render(host, state);
+      return false;
+    }
+    // Checked synchronously before anything may bootstrap the SDK.
+    const before = gate.check(grant, expected());
+    if (before) return refused(host, key, before, wanted);
+    try { await loader.load(grant.apiKey); }
+    catch {
+      if (wanted()) render(host, "error");
       return false;
     }
     // Collapsed, replaced by another plan, re-rendered or invalidated while loading: build nothing.
-    if (disposed || ticket !== generation || activeKey !== key || !host.isConnected) return false;
-    const entry = entries.get(key) || construct(key, descriptor.placeId);
-    attach(host, entry);
+    if (!wanted()) return false;
+    let entry = null;
+    const outcome = gate.dispatch(grant, expected(), () => { entry = construct(key, descriptor.placeId, host); });
+    if (grants.get(key)) grants.delete(key);
+    // An expired permit (for example after a very slow SDK load), a hidden tab or a new provider
+    // month: offer an explicit control. A permit is never reused for a different attempt.
+    if (!outcome.dispatched) return refused(host, key, outcome.reason, wanted);
     render(host, entry.state);
     evict();
     return true;
@@ -563,51 +1024,65 @@ export function createPlaceDetailsManager({
   function retry(host) {
     const descriptor = descriptors.get(host);
     if (!descriptor) return;
-    failed.delete(keyOf(descriptor));
+    const key = keyOf(descriptor);
+    failed.delete(key);
+    denied.delete(key);
+    gate.unblock?.();
     loader.reset?.();
     show(host, descriptor);
   }
 
   return {
     show,
+    restore: (host, descriptor) => show(host, descriptor, { explicit: false }),
     keyOf,
     isActive: (descriptor) => Boolean(activeKey) && activeKey === keyOf(descriptor),
     /** An open plan that is not the active one: offer an explicit control, build and load nothing. */
     idle(host, descriptor) {
       if (disposed || !host || !descriptor) return;
-      descriptors.set(host, descriptor);
-      host.dataset.googlePlaceKey = keyOf(descriptor);
-      render(host, failed.has(keyOf(descriptor)) ? "error" : "inactive");
-    },
-    /** The plan was collapsed: cancel any pending load and park its component. */
-    deactivate(descriptor) {
+      sweep();
       const key = keyOf(descriptor);
-      if (activeKey !== key) return;
-      generation += 1;
-      park(key);
-      activeKey = "";
+      descriptors.set(host, descriptor);
+      host.dataset.googlePlaceKey = key;
+      const resident = hostEntries.get(host);
+      if (resident && resident.key !== key) discard(resident);
+      render(host, failed.has(key) ? "error" : denied.get(key) || "inactive");
     },
-    /** Before the itinerary is rebuilt: park the active component but remember which plan it was. */
-    suspend() {
-      if (activeKey) {
-        const entry = entries.get(activeKey);
-        if (entry && moveNode(parkingLot(), entry.element)) stats.moves += 1;
-        if (entry) entry.host = null;
+    /** The plan was collapsed: cancel any pending show; its component stays hidden in its host. */
+    deactivate(descriptor) {
+      if (!descriptor || !activeKey || activeKey !== keyOf(descriptor)) return;
+      leaveActive();
+    },
+    /**
+     * A re-render is about to replace every host inside root: their components are removed for good
+     * now (never moved into the new cards). The active plan stays remembered, so its restored card
+     * gets restore() and an explicit control; a pending show for the old host is cancelled, but its
+     * reservation (if still valid) can serve that explicit control.
+     */
+    releaseWithin(root) {
+      if (!root) return;
+      const inside = (host) => host === root || (typeof root.contains === "function" && root.contains(host));
+      for (const entry of [...entries.values()]) {
+        if (inside(entry.host)) { stats.released += 1; discard(entry); }
       }
+      if (activeHost && inside(activeHost)) { activeHost = null; generation += 1; }
     },
-    /** Drop components and failure marks whose association is no longer current. */
+    /** Drop components, failure/denial marks and pending reservations no longer current. */
     retain(validKeys) {
       const keep = validKeys instanceof Set ? validKeys : new Set(validKeys);
       for (const entry of [...entries.values()]) if (!keep.has(entry.key)) discard(entry);
       for (const key of [...failed]) if (!keep.has(key)) failed.delete(key);
-      if (activeKey && !keep.has(activeKey)) { activeKey = ""; generation += 1; }
+      for (const key of [...denied.keys()]) if (!keep.has(key)) denied.delete(key);
+      for (const key of [...grants.keys()]) if (!keep.has(key)) grants.delete(key);
+      if (activeKey && !keep.has(activeKey)) { activeKey = ""; activeHost = null; generation += 1; }
     },
     dispose() {
       disposed = true;
       generation += 1;
       for (const entry of [...entries.values()]) discard(entry);
-      parking?.remove();
+      grants.clear();
       activeKey = "";
+      activeHost = null;
     },
     get activeKey() { return activeKey; },
     get retainedCount() { return entries.size; },
@@ -619,12 +1094,14 @@ export function createPlaceDetailsManager({
 // Editor: official selectable search and Place ID preview. Nothing is selected automatically.
 
 /**
- * One selectable search element per editor session, built only on an explicit search. Re-searching
- * the same text sends nothing new. onSelect(placeId) runs only when the user picks a result in the
- * official list; there is no first-result or best-match selection. onStatus(key) reports progress.
+ * One selectable search element per editor session, built only on an explicit search. Every new
+ * query needs its own permit; re-searching the text already on screen, or repeating a search that
+ * is still being reserved, sends nothing new. onSelect(placeId) runs only when the user picks a
+ * result in the official list; there is no first-result or best-match selection. onStatus(key)
+ * reports progress. isCurrent() is the editor's own check right before a dispatch.
  */
 export function createPlaceSearchSession({
-  doc, loader, mount, onSelect, onStatus, timeoutMs = COMPONENT_TIMEOUT_MS,
+  doc, loader, gate, mount, isCurrent = () => true, onSelect, onStatus, timeoutMs = COMPONENT_TIMEOUT_MS,
   setTimer = defaultSetTimer, clearTimer = defaultClearTimer
 }) {
   let element = null;
@@ -633,8 +1110,9 @@ export function createPlaceSearchSession({
   let disposed = false;
   let timer = null;
   let waiting = false;
+  let inFlight = null;
   const stats = { constructed: 0, queries: 0 };
-  const status = (key) => { if (!disposed) onStatus?.(key); };
+  const status = (key) => { if (!disposed && key) onStatus?.(key); };
   const settle = (key) => {
     if (!waiting) return;
     waiting = false;
@@ -643,46 +1121,67 @@ export function createPlaceSearchSession({
     status(key);
   };
 
-  async function search(query) {
-    if (disposed) return false;
-    const ticket = ++token;
-    status("searching");
-    try { await loader.load(); }
-    catch (error) {
-      if (!disposed && ticket === token) status(error?.code === "disabled" ? "disabled" : "searchFailed");
+  function build() {
+    element = doc.createElement(STANDARD_ELEMENTS.search);
+    element.setAttribute("selectable", "");
+    element.classList.add("google-match__search");
+    request = doc.createElement(STANDARD_ELEMENTS.textSearchRequest);
+    request.setAttribute("max-result-count", String(SEARCH_RESULT_LIMIT));
+    const config = doc.createElement(STANDARD_ELEMENTS.contentConfig);
+    config.append(doc.createElement(STANDARD_ELEMENTS.address), doc.createElement(STANDARD_ELEMENTS.attribution));
+    element.append(request, config);
+    element.addEventListener("gmp-load", () => settle("chooseResult"));
+    element.addEventListener("gmp-error", () => settle("searchFailed"));
+    element.addEventListener("gmp-select", (event) => {
+      if (disposed) return;
+      const placeId = selectedPlaceId(event);
+      if (placeId) onSelect?.(placeId);
+    });
+    stats.constructed += 1;
+  }
+
+  async function run(query, ticket) {
+    const wanted = () => !disposed && ticket === token;
+    const grant = await gate.acquire({ kind: "search" });
+    if (!wanted()) return false;
+    if (!grant.granted) { status(denialStatus(grant.reason, "searchFailed")); return false; }
+    const expected = { kind: "search", placeId: "", isCurrent: () => wanted() && isCurrent() === true };
+    // Checked synchronously before anything may bootstrap the SDK.
+    const before = gate.check(grant, expected);
+    if (before) { if (wanted()) status(refusalStatus(before, "searchFailed")); return false; }
+    try { await loader.load(grant.apiKey); }
+    catch {
+      if (wanted()) status("searchFailed");
       return false;
     }
-    if (disposed || ticket !== token) return false;
-    if (!element) {
-      element = doc.createElement(STANDARD_ELEMENTS.search);
-      element.setAttribute("selectable", "");
-      element.classList.add("google-match__search");
-      request = doc.createElement(STANDARD_ELEMENTS.textSearchRequest);
-      request.setAttribute("max-result-count", String(SEARCH_RESULT_LIMIT));
-      const config = doc.createElement(STANDARD_ELEMENTS.contentConfig);
-      config.append(doc.createElement(STANDARD_ELEMENTS.address), doc.createElement(STANDARD_ELEMENTS.attribution));
-      element.append(request, config);
-      element.addEventListener("gmp-load", () => settle("chooseResult"));
-      element.addEventListener("gmp-error", () => settle("searchFailed"));
-      element.addEventListener("gmp-select", (event) => {
-        if (disposed) return;
-        const placeId = selectedPlaceId(event);
-        if (placeId) onSelect?.(placeId);
-      });
-      stats.constructed += 1;
-      mount.append(element);
-    }
-    if (request.getAttribute("text-query") === query) {
+    if (!wanted()) return false;
+    const outcome = gate.dispatch(grant, expected, () => {
+      // Building, connecting and the new text query happen together under this one permit.
+      if (!element) { build(); mount.append(element); }
+      waiting = true;
+      clearTimer(timer);
+      timer = setTimer(() => settle("searchFailed"), timeoutMs);
+      request.setAttribute("text-query", query);
+      stats.queries += 1;
+    });
+    if (!outcome.dispatched) { if (wanted()) status(refusalStatus(outcome.reason, "searchFailed")); return false; }
+    return true;
+  }
+
+  function search(query) {
+    if (disposed) return Promise.resolve(false);
+    if (element && request.getAttribute("text-query") === query && !inFlight) {
       // The same official results are already on screen; no new request is made.
       status("chooseResult");
-      return true;
+      return Promise.resolve(true);
     }
-    waiting = true;
-    clearTimer(timer);
-    timer = setTimer(() => settle("searchFailed"), timeoutMs);
-    request.setAttribute("text-query", query);
-    stats.queries += 1;
-    return true;
+    if (inFlight?.query === query) return inFlight.promise;
+    const ticket = ++token;
+    status("searching");
+    const promise = run(query, ticket);
+    inFlight = { query, promise };
+    promise.finally(() => { if (inFlight?.promise === promise) inFlight = null; }).catch(() => {});
+    return promise;
   }
 
   return {
@@ -691,6 +1190,7 @@ export function createPlaceSearchSession({
       disposed = true;
       token += 1;
       waiting = false;
+      inFlight = null;
       clearTimer(timer);
       element?.remove();
       element = null;
@@ -703,7 +1203,7 @@ export function createPlaceSearchSession({
 
 /** Shows one compact details element for a user-supplied Place ID so the user can check it. */
 export function createPlacePreviewSession({
-  doc, loader, mount, onStatus, timeoutMs = COMPONENT_TIMEOUT_MS,
+  doc, loader, gate, mount, isCurrent = () => true, onStatus, timeoutMs = COMPONENT_TIMEOUT_MS,
   setTimer = defaultSetTimer, clearTimer = defaultClearTimer
 }) {
   let element = null;
@@ -712,8 +1212,9 @@ export function createPlacePreviewSession({
   let disposed = false;
   let timer = null;
   let ready = false;
+  let inFlight = null;
   const stats = { constructed: 0 };
-  const status = (key) => { if (!disposed) onStatus?.(key); };
+  const status = (key) => { if (!disposed && key) onStatus?.(key); };
 
   function clear() {
     clearTimer(timer);
@@ -724,21 +1225,21 @@ export function createPlacePreviewSession({
     ready = false;
   }
 
-  async function preview(id) {
-    if (disposed || !isGooglePlaceId(id)) return false;
-    if (id === placeId && element) { status(ready ? "previewReady" : "previewLoading"); return true; }
-    const ticket = ++token;
-    clear();
-    status("previewLoading");
-    try { await loader.load(); }
-    catch (error) {
-      if (!disposed && ticket === token) status(error?.code === "disabled" ? "disabled" : "detailsUnavailable");
+  async function run(id, ticket) {
+    const wanted = () => !disposed && ticket === token;
+    const grant = await gate.acquire({ kind: "preview", placeId: id });
+    if (!wanted()) return false;
+    if (!grant.granted) { status(denialStatus(grant.reason, "detailsUnavailable")); return false; }
+    const expected = { kind: "preview", placeId: id, isCurrent: () => wanted() && isCurrent() === true };
+    // Checked synchronously before anything may bootstrap the SDK.
+    const before = gate.check(grant, expected);
+    if (before) { if (wanted()) status(refusalStatus(before, "detailsUnavailable")); return false; }
+    try { await loader.load(grant.apiKey); }
+    catch {
+      if (wanted()) status("detailsUnavailable");
       return false;
     }
-    if (disposed || ticket !== token) return false;
-    placeId = id;
-    element = buildPlaceDetailsElement(doc, id);
-    stats.constructed += 1;
+    if (!wanted()) return false;
     const finish = (ok) => {
       if (ticket !== token || disposed || ready || !timer) return;
       clearTimer(timer);
@@ -746,16 +1247,35 @@ export function createPlacePreviewSession({
       if (ok) { ready = true; status("previewReady"); }
       else { clear(); status("detailsUnavailable"); }
     };
-    element.addEventListener("gmp-load", () => finish(true));
-    element.addEventListener("gmp-error", () => finish(false));
-    timer = setTimer(() => finish(false), timeoutMs);
-    mount.append(element);
+    const outcome = gate.dispatch(grant, expected, () => {
+      placeId = id;
+      element = buildPlaceDetailsElement(doc, id);
+      stats.constructed += 1;
+      element.addEventListener("gmp-load", () => finish(true));
+      element.addEventListener("gmp-error", () => finish(false));
+      timer = setTimer(() => finish(false), timeoutMs);
+      mount.append(element);
+    });
+    if (!outcome.dispatched) { if (wanted()) status(refusalStatus(outcome.reason, "detailsUnavailable")); return false; }
     return true;
+  }
+
+  function preview(id) {
+    if (disposed || !isGooglePlaceId(id)) return Promise.resolve(false);
+    if (id === placeId && element) { status(ready ? "previewReady" : "previewLoading"); return Promise.resolve(true); }
+    if (inFlight?.id === id) return inFlight.promise;
+    const ticket = ++token;
+    clear();
+    status("previewLoading");
+    const promise = run(id, ticket);
+    inFlight = { id, promise };
+    promise.finally(() => { if (inFlight?.promise === promise) inFlight = null; }).catch(() => {});
+    return promise;
   }
 
   return {
     preview,
-    dispose() { disposed = true; token += 1; clear(); },
+    dispose() { disposed = true; token += 1; inFlight = null; clear(); },
     get readyPlaceId() { return ready ? placeId : ""; },
     get stats() { return { ...stats }; }
   };

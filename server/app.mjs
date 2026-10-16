@@ -11,9 +11,11 @@ import { serveStatic } from "./static.mjs";
 import { AccountStore, INVITATION_TOKEN_PATTERN, invitationInvalid } from "./auth/accounts.mjs";
 import { boundedPassword, dummyVerify, hashPassword, normalizeUsername, passwordProblem, verifyPassword } from "./auth/passwords.mjs";
 import { AttemptLimiter, SESSION_COOKIE, SESSION_TTL_MS, SessionStore } from "./auth/sessions.mjs";
-import { CONTENT_MANAGER, LOOKUP_ROUTE, OWNER, capabilitiesFor, isMcpOnlyPrincipal, isProtectedMediaPath, mayAccess } from "./auth/policy.mjs";
+import { CONTENT_MANAGER, GOOGLE_RESERVATION_ROUTE, LOOKUP_ROUTE, OWNER, canEditContent, capabilitiesFor, isMcpOnlyPrincipal, isProtectedMediaPath, mayAccess } from "./auth/policy.mjs";
 import { LookupService, readLookupConfig } from "./lookups.mjs";
 import { GOOGLE_PLACES_CONFIG_ROUTE, configResponse as googlePlacesConfigResponse, readGooglePlacesConfig, sessionFeatures } from "./google-places.mjs";
+import { GoogleAllowance, parseReservationBody, planHasCurrentAssociation, readAllowanceConfig } from "./google-allowance.mjs";
+import { tripGooglePlacePhotosEnabled } from "./domain/validate.mjs";
 import { McpTokenStore } from "./auth/mcp-tokens.mjs";
 import { AuditLog } from "./audit.mjs";
 import { ContentGateway, actorOf } from "./content-access.mjs";
@@ -60,7 +62,10 @@ export function readConfig(env = process.env) {
   // SHARED_TRIP_GOOGLE_PLACES_UI_KIT=1 with an owner-supplied browser key (see google-places.mjs).
   // The server itself never contacts Google.
   const googlePlaces = readGooglePlacesConfig(env, { adminToken: token });
-  return { token, dataDir, host, port, origin, oauthUsername, lookups, googlePlaces };
+  // The explicit monthly allowance and headroom for that feature (see google-allowance.mjs). Never
+  // throws: missing or malformed values only keep Google work disabled; the app itself still runs.
+  const googleAllowance = readAllowanceConfig(env);
+  return { token, dataDir, host, port, origin, oauthUsername, lookups, googlePlaces, googleAllowance };
 }
 function sameSecret(a,b) {
   const hash = (s) => crypto.createHash("sha256").update(String(s || "")).digest();
@@ -92,6 +97,9 @@ const decodeSegment = (value) => { try { return decodeURIComponent(value); } cat
 // config.lookupSleep and config.lookupTimeoutMs are optional, code-only test hooks for the lookup
 // service (injected provider fetch, clock, delay and a shorter abort timeout); none is read from the
 // environment and none changes the production rate limits.
+// config.googleAllowance comes from readConfig (unconfigured by default). config.googleAllowanceClock
+// ({ wall(), monotonic() }) and config.googleAllowanceLog are optional, code-only test hooks; neither
+// is read from the environment, and neither can grant, raise or bypass the allowance.
 export async function startServer(config) {
   const clock = typeof config.clock === "function" ? config.clock : Date.now;
   const oauthUsername = config.oauthUsername ? normalizeUsername(config.oauthUsername) : "";
@@ -123,7 +131,14 @@ export async function startServer(config) {
   // Only an explicit enabled config with a key turns the browser feature on; anything else is off.
   const googlePlaces = config.googlePlaces?.enabled === true && typeof config.googlePlaces.browserKey === "string" && config.googlePlaces.browserKey
     ? { enabled: true, browserKey: config.googlePlaces.browserKey } : { enabled: false };
-  const send = (res,status,payload) => { res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}); res.end(JSON.stringify(payload)); };
+  // Server-authoritative monthly allowance shared by every user, tab and trip. Its own ledger file;
+  // never created here, and any problem only disables new Google work (trips keep working).
+  const googleAllowance = new GoogleAllowance({ dataDir: config.dataDir, config: config.googleAllowance, clock: config.googleAllowanceClock });
+  if (googlePlaces.enabled && googleAllowance.state !== "ready") {
+    const log = typeof config.googleAllowanceLog === "function" ? config.googleAllowanceLog : (message) => console.warn(message);
+    log(`Google Places UI Kit is enabled but its monthly allowance is ${googleAllowance.state}; no Google work will be granted. ${googleAllowance.reason}`.trim());
+  }
+  const send =(res,status,payload) => { res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"}); res.end(JSON.stringify(payload)); };
 
   // Every protected request re-reads the account, so approval state, role changes and revocation
   // apply immediately to sessions that were issued earlier.
@@ -281,7 +296,8 @@ export async function startServer(config) {
       }
       if (pathname === GOOGLE_PLACES_CONFIG_ROUTE && req.method === "GET") {
         // Signed-in browser sessions (any role) and the owner bearer only; MCP/OAuth tokens never get
-        // here. The response is no-store like every /api response, and the key is never logged.
+        // here. The response is no-store like every /api response and never carries the key, which
+        // is delivered only with a granted allowance reservation (below).
         send(res,200,googlePlacesConfigResponse(googlePlaces)); return;
       }
       if (pathname === "/api/logout" && req.method === "POST") {
@@ -310,7 +326,26 @@ export async function startServer(config) {
         const oauthGrant = /^\/api\/users\/([^/]+)\/oauth-grants\/([^/]+)\/revoke$/.exec(pathname);
         const trip = /^\/api\/trips\/([^/]+)(?:\/(changes|export))?$/.exec(pathname);
         const lookup = LOOKUP_ROUTE.exec(pathname);
-        if (lookup && req.method === "POST") {
+        const reservation = GOOGLE_RESERVATION_ROUTE.exec(pathname);
+        if (reservation && req.method === "POST") {
+          // One allowance reservation before one app-controlled Google action in a browser. Browser
+          // sessions only (owner, content manager or approved viewer; never the owner bearer, MCP or
+          // OAuth tokens). The global feature, this trip's own opt-in and, for details, a saved
+          // current association are re-checked on every request, including idempotent replays.
+          // Nothing is written to the trip and its version never changes.
+          if (principal.via !== "cookie") throw forbidden();
+          if (!googlePlaces.enabled) throw new DomainError("google_places_disabled", 503, "Google place features are not enabled on this server.");
+          const input = parseReservationBody(await readJSON(req, SMALL_BODY));
+          if (input.kind !== "details" && !canEditContent(principal)) throw forbidden();
+          const { trip } = gateway.getTrip(context, decodeSegment(reservation[1]));
+          if (!tripGooglePlacePhotosEnabled(trip)) throw conflict("google_trip_not_enabled", "Google place details are turned off for this trip.");
+          if (input.kind !== "details" && trip.archived) throw conflict("trip_archived", "The trip is archived. Unarchive it before searching on Google.");
+          if (input.kind === "details" && !planHasCurrentAssociation(trip, input.planId, input.placeId)) {
+            throw conflict("google_place_not_linked", "This plan has no current link to that Google place.");
+          }
+          const granted = googleAllowance.reserve({ actor: actorOf(principal), requestId: input.requestId, kind: input.kind, tripId: trip.id, planId: input.planId, placeId: input.placeId });
+          result = { ...granted, apiKey: googlePlaces.browserKey, libraries: ["places"] };
+        } else if (lookup && req.method === "POST") {
           // Explicit, editor-only public place/photo search for one existing trip. The provider URL
           // is fixed server configuration; the body carries only { query, refresh? }. Nothing is
           // written to the trip; a chosen result is saved with an ordinary change request.
@@ -373,11 +408,11 @@ export async function startServer(config) {
   });
   server.requestTimeout = 15_000; server.headersTimeout = 10_000;
   try { await new Promise((resolve,reject) => {server.once("error",reject); server.listen(config.port,config.host,resolve);}); }
-  catch (error) { try { db.close(); } finally { lock.release(); } throw error; }
+  catch (error) { try { googleAllowance.close(); db.close(); } finally { lock.release(); } throw error; }
   let closing;
-  return { server, service, accounts, tokens, audit, db, oauth: oauthStore, lookups, url: config.origin || "http://" + config.host + ":" + server.address().port,
+  return { server, service, accounts, tokens, audit, db, oauth: oauthStore, lookups, googleAllowance, url: config.origin || "http://" + config.host + ":" + server.address().port,
     close: () => closing ??= (async () => {
       await new Promise((resolve) => server.close(() => resolve()));
-      try { db.close(); } finally { lock.release(); }
+      try { googleAllowance.close(); db.close(); } finally { lock.release(); }
     })() };
 }

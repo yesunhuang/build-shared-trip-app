@@ -49,10 +49,16 @@ const VIEWER_READ_ROUTES = [/^\/api\/session$/, /^\/api\/trips$/, /^\/api\/trips
 // The opt-in public place/photo lookups (POST .../places/search and .../photos/search) are editing
 // aids, so they are content-manager routes and never viewer routes.
 export const LOOKUP_ROUTE = /^\/api\/trips\/([^/]+)\/(places|photos)\/search$/;
+// Google allowance reservations (google-allowance.mjs). An approved viewer may POST here, but the
+// handler grants viewers only "details" reservations for a saved, current association; "search" and
+// "preview" need an editor. It never writes trip content, never changes a trip version and is not a
+// security or account capability. Browser sessions only: the handler refuses the owner bearer.
+export const GOOGLE_RESERVATION_ROUTE = /^\/api\/trips\/([^/]+)\/google-places\/reservations$/;
 const MANAGER_WRITE_ROUTES = [/^\/api\/trips$/, /^\/api\/import$/, /^\/api\/trips\/[^/]+\/changes$/, LOOKUP_ROUTE];
 
 export function viewerMayAccess(method, pathname) {
   if (method === "POST" && pathname === "/api/logout") return true;
+  if (method === "POST" && GOOGLE_RESERVATION_ROUTE.test(pathname)) return true;
   if (isProtectedMediaPath(pathname)) return method === "GET" || method === "HEAD";
   return method === "GET" && VIEWER_READ_ROUTES.some((route) => route.test(pathname));
 }

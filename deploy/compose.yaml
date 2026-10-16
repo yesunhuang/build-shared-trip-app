@@ -47,10 +47,14 @@ services:
       # container) contact Google, so no egress is needed. Empty key = off.
       SHARED_TRIP_GOOGLE_PLACES_UI_KIT: "${SHARED_TRIP_GOOGLE_PLACES_UI_KIT:-0}"
       SHARED_TRIP_GOOGLE_MAPS_BROWSER_KEY: "${SHARED_TRIP_GOOGLE_MAPS_BROWSER_KEY:-}"
+      # Explicit monthly allowance and headroom; empty = no Google work.
+      SHARED_TRIP_GOOGLE_MONTHLY_ALLOWANCE: "${SHARED_TRIP_GOOGLE_MONTHLY_ALLOWANCE:-}"
+      SHARED_TRIP_GOOGLE_ALLOWANCE_HEADROOM: "${SHARED_TRIP_GOOGLE_ALLOWANCE_HEADROOM:-}"
     volumes:
       # Data directory: shared-trip.sqlite (trips, retry log, viewer accounts,
-      # invitations), server-ownership.sqlite, server.lock and the private
-      # photos/ store. Must be a LOCAL filesystem with locking and hard links
+      # invitations), server-ownership.sqlite, server.lock, the private
+      # photos/ store and, only if an operator created it, the separate Google
+      # allowance ledger google-allowance.sqlite (never restore an old copy). Must be a LOCAL filesystem with locking and hard links
       # (no NFS/SMB/shared VM folders), exist already, be outside the checkout
       # and any public static directory, and be writable by container UID 1000.
       - type: bind

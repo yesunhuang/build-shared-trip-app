@@ -5,8 +5,9 @@
 // non-loopback request fails the test, the browser key is an obviously fake placeholder, and the
 // Place IDs are invented strings that only match the documented ID alphabet.
 //
-// Covers: disabled-by-default configuration and strict env parsing; the protected no-store
-// configuration route (anonymous, viewer, content manager, owner, MCP credential outside /mcp);
+// Covers: disabled-by-default configuration and strict env parsing; the protected no-store,
+// key-free configuration route (anonymous, viewer, content manager, owner, MCP credential outside
+// /mcp) and a refused reservation while no allowance is configured;
 // the session feature flag only when enabled; the key never appearing in trip reads, exports,
 // static pages or the audit log; the shared SHA-256 binding against node:crypto; a binding that
 // covers only location inputs; Place ID parsing from user input; strict association shape with
@@ -281,15 +282,24 @@ try {
   const viewer = await api.makeAccount("fictional.google.viewer");
   const managerToken = expect(await api.owner(`/api/users/${manager.id}/mcp-tokens`, { method: "POST", body: { label: "Fictional association probe" } }), 201, "issue manager MCP credential").secret;
 
-  const expectedConfig = { enabled: true, apiKey: FAKE_BROWSER_KEY, libraries: ["places"] };
+  // The key is no longer served by the configuration route: browsers receive it only inside a granted
+  // allowance reservation (see scripts/test-google-allowance.mjs), so nothing can bootstrap Google
+  // without one.
+  const expectedConfig = { enabled: true, libraries: ["places"], keyDelivery: "reservation" };
   for (const [label, response] of [
     ["owner cookie", await api.as(ownerCookie, "/api/google-places/config")],
     ["owner bearer", await api.owner("/api/google-places/config")],
     ["content manager", await api.as(manager.cookie, "/api/google-places/config")],
     ["viewer", await api.as(viewer.cookie, "/api/google-places/config")]
   ]) {
-    assert.deepEqual(expect(response, 200, label + " config"), expectedConfig, label + " receives the browser config");
+    assert.deepEqual(expect(response, 200, label + " config"), expectedConfig, label + " receives the key-free browser config");
+    assert.ok(!JSON.stringify(response.body).includes(FAKE_BROWSER_KEY), label + ": the config route never carries the key");
   }
+  // Allowance unconfigured (the default): a reservation is refused, so no key is handed out either.
+  const unconfiguredTrip = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "gp-unconfigured-trip", trip: { ...fixtureTrip(), googlePlacePhotosEnabled: true } } }), 201, "opted-in trip").trip;
+  const denied = await api.as(manager.cookie, `/api/trips/${unconfiguredTrip.id}/google-places/reservations`, { method: "POST", body: { requestId: "fictional-unconfigured-0001", kind: "search" } });
+  expect(denied, 503, "no allowance configured", "google_allowance_unconfigured");
+  assert.ok(!denied.text.includes(FAKE_BROWSER_KEY), "a refused reservation never carries the key");
   expect(await api.call("/api/google-places/config"), 401, "anonymous refused", "unauthorized");
   expect(await api.bearer(managerToken, "/api/google-places/config"), 401, "an MCP credential never reaches the HTTP config route");
   expect(await api.as(viewer.cookie, "/api/google-places/config", { method: "POST", body: {} }), 403, "viewers cannot POST to it");
