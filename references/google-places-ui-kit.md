@@ -167,6 +167,33 @@ SHARED_TRIP_DATA_DIR=<data dir> node server/cli/google-allowance.mjs reconcile-c
 
 `reconcile-clock` is the only way to clear a recorded clock fault or to confirm a month after a start without continuity. Before running it, check the host's time synchronization (for example `timedatectl`) and compare with an independent clock. It refuses unless `--month` is the current Pacific month on this clock, the clock is not behind the ledger's newest recorded time, and the ledger's latest month record is not later than this month; it also refuses a ledger with missing month records. For a month already recorded, the ledger keeps the **higher** of its own count and `--baseline`; for a newer month it creates that month's record with `--baseline` (the console's Query (Essentials) count for this month so far, rounded up, plus anything not yet visible there; never assume 0 after unknown downtime). It then clears the fault. Restart the app afterwards; a running process stays paused. `status` shows any recorded fault, the latest month record and the newest recorded time.
 
+## Offline operator trip setting
+
+An authorized host operator can change only the per-trip boolean without handling an owner
+credential or replacing a trip. Stop the application first, then use the existing private data
+directory and a new backup filename outside the checkout:
+
+```sh
+SHARED_TRIP_DATA_DIR=<existing-private-data-directory> npm run set-trip-google-photos -- \
+  <trip-id> <expected-version> <true-or-false> <stable-request-id> <new-private-backup-file>
+```
+
+Pass literal `true` or `false`. The command takes the normal data-directory ownership lock and
+refuses a running service or another maintenance task. It requires the current schema and writes
+a validated backup before reading the trip again and invoking the same `ContentGateway` and
+`TripService.applyTripChanges` as HTTP/MCP. The operation contains exactly one `update_trip` field.
+Version conflicts, durable identical retries and payload-free actor/channel `operator` audit use
+the existing transaction. A preservation check inside that transaction rolls back if validation
+would alter unrelated trip content. Refusals can append the ordinary audit metadata; a replay
+never rewrites the trip. Read the current state after a replay rather than assuming a historical
+result is still current. Resume the application afterward and verify the result.
+
+Only `SHARED_TRIP_DATA_DIR` is read; no credential is needed. It never contacts Google, changes the
+site configuration, initializes/opens the allowance ledger, links a venue or changes another trip.
+It adds no public endpoint. Do not restore the backup over later edits, revocations or usage.
+
+Fictional CLI/SQLite coverage is in `scripts/test-trip-google-operator.mjs`, included in `npm test`.
+
 ## What the allowance cannot guarantee
 
 The ledger counts what **this app's code** asks for. It cannot guarantee zero charges:
