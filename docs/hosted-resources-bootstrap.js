@@ -12,8 +12,8 @@ import {
   toRenderTrip,
   tripIdFromQuery,
   tripPath
-} from "./hosted-client.js?v=v-7d714f2937ad";
-import { createLinkActivationGuard } from "./link-activation.js?v=v-7d714f2937ad";
+} from "./hosted-client.js?v=v-aebb88e3a26f";
+import { createLinkActivationGuard } from "./link-activation.js?v=v-aebb88e3a26f";
 
 const MAX_AUTOMATIC_ATTEMPTS = 4;
 // A newer trip version reloads the page; never while a press on a resource or booking link is in
@@ -94,7 +94,7 @@ async function start(trip) {
   const backHref = tripPath(tripId);
   document.querySelectorAll(".back-link").forEach((node) => { node.href = backHref; });
   try {
-    await import("./resources.js?v=v-7d714f2937ad");
+    await import("./resources.js?v=v-aebb88e3a26f");
     overlay.remove();
     document.documentElement.classList.remove("hosted-booting");
     const poller = createTripPoller({

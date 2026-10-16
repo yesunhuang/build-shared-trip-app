@@ -4,6 +4,7 @@ import { relatedLinksProblems, relatedLinkUrl } from "./related-links.js?v=__CAC
 
 const SEPARATORS = /^[\s.,;:!?。！？、，；：|·•—–-]*$/u;
 const MEANINGFUL = /[\p{L}\p{N}\p{S}]/u;
+const meaningful = (text) => !SEPARATORS.test(text) && MEANINGFUL.test(text);
 const hostname = (href) => new URL(href).hostname; // validated by the bounded parser
 const plainLabel = (part) => part.type === "link" && part.kind === "raw" ? hostname(part.href) : part.text;
 
@@ -19,12 +20,12 @@ export function projectCardText(value) {
     if (parts[i].type === "text") { if (!SEPARATORS.test(parts[i].text)) break; continue; }
     const before = parts.slice(0, i).map(plainLabel).join("");
     const boundary = parts[i - 1]?.type === "text" ? parts[i - 1].text : "";
-    if (!MEANINGFUL.test(before)) { cut = i; prefix = ""; }
+    if (!meaningful(before)) { cut = i; prefix = ""; }
     else if (/[.!?。！？][\s|·•—–-]*$/u.test(boundary)) { cut = i; prefix = before.replace(/[\s|·•—–-]+$/u, ""); }
     else if (/\n[\s|·•—–-]*$/u.test(boundary)) { cut = i; prefix = before.trimEnd(); }
   }
   const text = cut < parts.length ? prefix : parts.map(plainLabel).join("");
-  return { text: MEANINGFUL.test(text) ? text : "", links };
+  return { text: meaningful(text) ? text : "", links };
 }
 
 export function projectCardLinks(slot) {

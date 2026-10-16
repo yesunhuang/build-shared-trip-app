@@ -1,5 +1,5 @@
 // User-authored links only. Shared by browser, HTTP/MCP validation and generator.
-import { contentLinkUrl } from "./text-links.js?v=v-7d714f2937ad";
+import { contentLinkUrl } from "./text-links.js?v=v-aebb88e3a26f";
 export const RELATED_LINK_LIMIT = 6;
 export const RELATED_LINK_LABEL_MAX = 80;
 const ID = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
