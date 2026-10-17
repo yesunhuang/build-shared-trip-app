@@ -4563,17 +4563,35 @@ details[open] > summary .summary-chevron,
 
   html.is-itinerary-view .plan-language-control {
     right: max(0.75rem, calc(env(safe-area-inset-right) + 0.5rem));
-    width: 7.6rem;
-    overflow: hidden;
+    width: 9rem;
+    max-width: calc(100% - 4.5rem);
     background: rgba(255, 253, 248, 0.94);
     border-radius: 999px;
+  }
+
+  /* Reserve one arrow gutter. Native select chrome otherwise adds a second gutter
+     inside the padded text area and clips CJK labels before the visible arrow. */
+  html.is-itinerary-view .plan-language-control::after {
+    position: absolute;
+    top: 50%;
+    right: 14px;
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid var(--ink);
+    border-bottom: 2px solid var(--ink);
+    content: "";
+    pointer-events: none;
+    transform: translateY(-70%) rotate(45deg);
   }
 
   html.is-itinerary-view .plan-language-control select {
     width: 100%;
     min-width: 0;
     height: 100%;
-    padding: 0 2rem 0 0.75rem;
+    min-height: 44px;
+    padding: 0 32px 0 8px;
+    -webkit-appearance: none;
+    appearance: none;
     color: var(--ink);
     background: transparent;
     border: 0;

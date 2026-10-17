@@ -10,8 +10,8 @@
 // enforces every permission independently.
 
 // Re-exported so the home page (which imports only this module) shares the same link guard.
-export { createLinkActivationGuard } from "./link-activation.js?v=v-bae112ca3ed2";
-export {createTripParticipantsDialog,createJoinTripControl,membershipText} from "./trip-members-editor.js?v=v-bae112ca3ed2";
+export { createLinkActivationGuard } from "./link-activation.js?v=v-e9767c7cc0cf";
+export {createTripParticipantsDialog,createJoinTripControl,membershipText} from "./trip-members-editor.js?v=v-e9767c7cc0cf";
 
 export const TRIP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const LANGUAGE_STORAGE_KEY = "shared-trips-language";
@@ -615,4 +615,4 @@ export function exportFilename(trip = {}, tripId = "") {
     .slice(0, 60);
   return `${base || "trip"}-${tripId || trip.id || "export"}.json`;
 }
-export {coverImage} from "./trip-presentation.js?v=v-bae112ca3ed2";
+export {coverImage} from "./trip-presentation.js?v=v-e9767c7cc0cf";

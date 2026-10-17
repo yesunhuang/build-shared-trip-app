@@ -1,4 +1,4 @@
-import { PHOTO_MANIFEST } from "./photos/manifest.js?v=v-bae112ca3ed2";
+import { PHOTO_MANIFEST } from "./photos/manifest.js?v=v-e9767c7cc0cf";
 
 function photoKey(value) {
   try { return decodeURIComponent(new URL(value, import.meta.url).href); }
