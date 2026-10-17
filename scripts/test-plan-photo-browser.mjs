@@ -5,6 +5,9 @@ import {readConfig,startServer} from "../server/app.mjs";import {fictionalLogo,l
 const option=k=>process.argv[process.argv.indexOf(k)+1];assert(process.argv.includes("--playwright-module"));const {chromium}=await import(pathToFileURL(path.resolve(option("--playwright-module"))).href);
 const output=path.resolve(option("--output")),repo=fs.realpathSync(path.resolve(import.meta.dirname,".."));assert(output!==repo&&!output.startsWith(repo+path.sep));fs.mkdirSync(output,{recursive:true});
 const served=process.argv.includes("--served-assets-file")?JSON.parse(fs.readFileSync(option("--served-assets-file"),"utf8")):null;
+// Keep the boot session and app on one served module graph. Mixing a local bootstrap
+// with a different release's hosted-client creates two independent module instances.
+if(served)for(const entry of ["/hosted-bootstrap.js","/hosted-client.js","/app.js"])assert(served[entry],"served acceptance needs the coherent entrypoint graph: "+entry);
 const data=fs.mkdtempSync(path.join(os.tmpdir(),"fictional-photo-browser-")),owner="fictional-photo-browser-owner-0000000000000",png=fictionalLogo({width:480,height:270});
 let runtime,browser,checks=0;const requests=[];
 try{
