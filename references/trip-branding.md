@@ -2,7 +2,7 @@
 
 The self-hosted trip page and its resources page can have an independent logo and light color theme. **Branding** in the trip's editing controls opens a native, scrollable dialog with a preview, image description, Default/Sage/Ocean/Plum presets, custom colors, Remove logo and Reset to defaults. Reset stages a change; Save commits it. Cancel leaves the trip unchanged. The home page, installation name, manifest, favicon, provider attribution and provider components retain the shared application's identity.
 
-Owner and content managers can edit branding, including through MCP. Viewers can read and export it. Archived trips must be restored before editing. A save uses the ordinary atomic `update_trip` operation, the version captured when the dialog opened and a durable request ID. An unknown network result can be retried identically; a conflict retains the draft and offers an explicit reload instead of overwriting newer edits.
+Owner, content managers and current trip creators can edit branding through the web. Existing owner/content-manager MCP credentials can edit the same fields; ordinary creators gain no MCP authority. Joined read-only members can read and export it. Archived trips must be restored before editing. A save uses the ordinary atomic `update_trip` operation, the version captured when the dialog opened and a durable request ID. An unknown network result can be retried identically; a conflict retains the draft and offers an explicit reload instead of overwriting newer edits.
 
 ## Data and MCP
 

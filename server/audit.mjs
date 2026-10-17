@@ -14,6 +14,7 @@ export const AUDIT_ACTIONS = Object.freeze([
   "trip.create", "trip.import", "trip.change", "trip.archive", "trip.unarchive", "trip.replace_content",
   // Schema v6: owner-only permanent trip deletion (trip ID, requestId and deleted version only).
   "trip.delete",
+  "membership.assign", "trip.invitation.create", "trip.invitation.revoke", "trip.invitation.redeem",
   "account.approve", "account.revoke", "account.role", "invitation.create",
   "token.issue", "token.revoke", "access.denied", "auth.refused",
   // Schema v5 OAuth lifecycle (metadata only: client/grant IDs and fixed reason codes).
@@ -30,7 +31,7 @@ export const MAX_AUDIT_LIMIT = 500;
 const ACTOR = /^(?:owner|operator|anonymous|usr_[A-Za-z0-9_-]{8,40})$/;
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const REASON = /^[a-z][a-z_]{0,47}$/;
-const TARGET = /^(?:usr|inv|mct|ocl|oag)_[A-Za-z0-9_-]{8,40}$/;
+const TARGET = /^(?:usr|inv|tiv|mct|ocl|oag)_[A-Za-z0-9_-]{8,40}$/;
 const ROLES = ["viewer", "content-manager"];
 // Refusals that a misbehaving client could repeat in a loop are throttled per actor/action/reason
 // so they cannot flush earlier events out of the bounded log.

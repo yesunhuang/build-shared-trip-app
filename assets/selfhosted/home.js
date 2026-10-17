@@ -1,4 +1,5 @@
-import { hostedApi, requestJSON, WRITE_TIMEOUT_MS, newRequestId, downloadJSON, exportFilename, safeNextPath, LANGUAGE_STORAGE_KEY, logoutAndLeave, finishPendingLogout, signoutPending, sessionCanEdit, sessionCanImport, sessionCanManageAccounts, ACCOUNT_ROLES, GOOGLE_PLACE_PHOTOS_FIELD, buildGooglePlacePhotosField, tripHasGooglePlacePhotos, createLinkActivationGuard, coverImage } from "/hosted-client.js?v=__CACHE_VERSION__";
+import { hostedApi, requestJSON, WRITE_TIMEOUT_MS, newRequestId, downloadJSON, exportFilename, safeNextPath, LANGUAGE_STORAGE_KEY, logoutAndLeave, finishPendingLogout, signoutPending, sessionCanEdit, sessionCanCreate, sessionCanImport, sessionCanManageAccounts, ACCOUNT_ROLES, GOOGLE_PLACE_PHOTOS_FIELD, buildGooglePlacePhotosField, tripHasGooglePlacePhotos, createLinkActivationGuard, coverImage, createTripParticipantsDialog, createJoinTripControl, membershipText } from "/hosted-client.js?v=__CACHE_VERSION__";
+
 // The trip list is rebuilt on every poll, on window focus and after actions. A rebuild while a
 // press on a trip link is in progress would detach the link before the browser opens it (window
 // focus fires on the very press that focuses an unfocused window), so it waits for that press.
@@ -213,6 +214,14 @@ const more = {
     deleteOwnerOnly: "旅行を削除できるのはオーナーだけです。"
   }
 };
+// The persisted ordinary role remains "viewer" for compatibility; its trip rights are scoped.
+const membershipLabels={
+ en:{readOnly:"Read-only in joined trips. You can create and manage your own trips.",role:"Member (joined trips)",note:"Approve an account, then assign trips in Participants or share a trip join code. Content managers can edit all current and future trips; account and security settings remain owner-only."},
+ "zh-Hans":{readOnly:"只读访问：你可以查看和导出加入的旅行，也可以创建和管理自己的旅行。",role:"成员（已加入的旅行）",note:"批准账户后，可在参与者中分配旅行，或分享旅行加入码。内容管理者可编辑当前和未来的所有旅行；账户和安全设置仍仅限所有者。"},
+ "zh-Hant":{readOnly:"唯讀存取：你可以檢視和匯出加入的旅行，也可以建立和管理自己的旅行。",role:"成員（已加入的旅行）",note:"批准帳戶後，可在參與者中分配旅行，或分享旅行加入碼。內容管理者可編輯目前及未來的所有旅行；帳戶和安全設定仍僅限擁有者。"},
+ ja:{readOnly:"閲覧のみ：参加した旅行の閲覧・書き出しができます。自分の旅行は作成・編集できます。",role:"メンバー（参加した旅行）",note:"アカウント承認後、参加者から旅行を割り当てるか、旅行の参加コードを共有してください。コンテンツ管理者は現在と将来の全旅行を編集できます。アカウントとセキュリティの設定はオーナー専用です。"}
+};
+for(const [locale,labels] of Object.entries(membershipLabels))Object.assign(more[locale],{readOnly:labels.readOnly,"role-viewer":labels.role,accountsNote:labels.note});
 const LABEL_MAX = 60;
 const CLIENT_NAME_MAX = 80; const GRANT_LIST_MAX = 100; const GRANT_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 // Latest browser-connection load per open panel; older responses are discarded.
@@ -400,6 +409,7 @@ async function checkDelete() {
 // end. Same-authority content refreshes are still deferred. Deferred work always renders from the
 // state current when it runs, never from a snapshot, so it cannot bring cleared content back.
 let renderedAuthority = null;
+let joinControl=null,joinLanguage="";
 // /api/session reports role, capabilities and (for account sessions) username.
 function authorityKey() {
   return JSON.stringify([loggedIn, loggedIn ? session?.role ?? null : null, loggedIn ? session?.username ?? null : null,
@@ -407,7 +417,7 @@ function authorityKey() {
 }
 function render() {
   if (leaving) { linkGuard.cancel("render"); return; }
-  if (authorityKey() !== renderedAuthority) { linkGuard.cancel("render"); renderNow(); return; }
+  if (authorityKey() !== renderedAuthority) { document.querySelectorAll(".trip-access-dialog").forEach(dialog=>{dialog.replaceChildren();dialog.close?.();dialog.remove();});joinControl?.clear();linkGuard.cancel("render"); renderNow(); return; }
   linkGuard.whenIdle("render", renderNow);
 }
 function renderNow() {
@@ -419,11 +429,14 @@ function renderNow() {
   const canDelete = isOwnerSession(); if (!canDelete) clearDeleteState(); else renderDeleteDialog();
   byId("logout").textContent=text("logout"); byId("logout").hidden=!loggedIn;
   byId("login").hidden=loggedIn; byId("trips").hidden=!loggedIn;
-  byId("create").hidden=!canEdit; byId("import-control").hidden=!canImport; byId("import").disabled=!canImport;
+  byId("create").hidden=!loggedIn||!sessionCanCreate(session); byId("import-control").hidden=!canImport; byId("import").disabled=!canImport;
+  if(!loggedIn||session?.role==="owner"){joinControl?.clear();joinControl?.element.remove();joinControl=null;}
+  else if(!joinControl||joinLanguage!==language){joinControl?.clear();joinControl?.element.remove();joinControl=createJoinTripControl({document,language,onJoined:load,onAccessLost:signedOut});joinLanguage=language;byId("list").before(joinControl.element);}
   byId("read-only-note").hidden=!loggedIn||canEdit;
   byId("manager-note").hidden=!canEdit||canManage;
   byId("list").replaceChildren();
   renderAccounts(canManage);
+  document.querySelectorAll(".trip-access-dialog").forEach(dialog=>{if(!loggedIn||!summaries.some(t=>t.id===dialog.dataset.tripId)){dialog.replaceChildren();dialog.close?.();dialog.remove();}});
   if (!loggedIn) return;
   const visible = summaries.filter((trip) => byId("archived").checked || !trip.archived);
   if (!visible.length) byId("list").textContent=text("empty");
@@ -433,9 +446,10 @@ function renderNow() {
     link.href="/trips/"+encodeURIComponent(trip.id);link.textContent=trip.title;heading.append(link);
     const dates=document.createElement("p"); dates.textContent=[trip.dateRange?.start,trip.dateRange?.end,trip.archived?text("archive"):""].filter(Boolean).join(" · ");
     const actions=document.createElement("div");actions.className="card-actions";
-    if (canEdit) actions.append(button(text("edit"),async()=>{const {trip:full}=await hostedApi.getTrip(trip.id);edit(full);}),
+    if (canEdit||trip.access?.canEdit) actions.append(button(text("edit"),async()=>{const {trip:full}=await hostedApi.getTrip(trip.id);edit(full);}),
       button(text(trip.archived?"restore":"archive"),async()=>{await hostedApi.applyChanges(trip.id,trip.version,[{type:"archive_trip",archived:!trip.archived}]);await load();}));
     actions.append(button(text("export"),async()=>downloadJSON(await hostedApi.exportTrip(trip.id),exportFilename(trip))));
+    actions.append(button(membershipText(language,"open"),()=>{const panel=createTripParticipantsDialog({document,tripId:trip.id,language,onAccessLost:load});document.body.append(panel.dialog);panel.dialog.showModal();panel.load();}));
     if (canDelete && deletableVersion(trip.version)) actions.append(deleteButton(trip));
     const cover=coverImage(document,trip.cover,"trip-card-cover");if(cover)card.append(cover);
     card.append(heading,dates,actions);byId("list").append(card);
@@ -741,7 +755,7 @@ async function run(action) {
   finally {busy=false;document.querySelectorAll("button").forEach((b)=>b.disabled=false);}
 }
 function edit(trip) {
-  if (!sessionCanEdit(session)) return;
+  if (trip ? !sessionCanEdit(session)&&!summaries.find(t=>t.id===trip.id)?.access?.canEdit : !sessionCanCreate(session)) return;
   const dialog=document.createElement("dialog");const form=document.createElement("form");
   const heading=document.createElement("h2");heading.textContent=text(trip?"edit":"create");form.append(heading);
   for(const [key,value] of Object.entries({title:trip?.title||"",timezone:trip?.timezone||"UTC",country:trip?.country||"",route:trip?.route||""})){
@@ -799,8 +813,8 @@ async function load() {
     if(error.status!==401&&++failures<5)pollTimer=setTimeout(load,Math.min(30000,2000*2**failures));
   }
 }
-async function afterSignIn() {
-  const next=safeNextPath(new URLSearchParams(location.search).get("next"));if(next)location.replace(next);else await load();
+async function afterSignIn(result) {
+  const next=safeNextPath(result?.landingPath);if(next)location.replace(next);else await load();
 }
 function selectSecret() {
   try { const selection=window.getSelection(); selection?.removeAllRanges(); selection?.selectAllChildren(byId("token-secret")); } catch {}
@@ -827,14 +841,14 @@ byId("token-dismiss").addEventListener("click",()=>{
   if(accountId)focusByKey("tokens:"+accountId);
 });
 byId("login-form").addEventListener("submit",(event)=>{event.preventDefault();run(async()=>{
-  const field=event.target.elements.token;try {await hostedApi.login(field.value);} finally {field.value="";}
-  await afterSignIn();
+  const field=event.target.elements.token;let result;try {result=await hostedApi.login(field.value);} finally {field.value="";}
+  await afterSignIn(result);
 });});
 byId("viewer-login-form").addEventListener("submit",(event)=>{event.preventDefault();run(async()=>{
   const form=event.target;const name=form.elements.username.value;const secret=form.elements.password.value;
   form.elements.password.value="";
-  try {await hostedApi.loginAccount(name,secret);} finally {form.reset();}
-  await afterSignIn();
+  let result;try {result=await hostedApi.loginAccount(name,secret);} finally {form.reset();}
+  await afterSignIn(result);
 });});
 byId("invite-form").addEventListener("submit",(event)=>{event.preventDefault();run(async()=>{
   const form=event.target;const code=form.elements.invitation.value.trim();const name=form.elements.username.value;const secret=form.elements.password.value;

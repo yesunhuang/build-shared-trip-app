@@ -41,6 +41,9 @@ export class AccountStore {
   record(event) { this.audit?.record({ actor: "owner", channel: "http", ...event }); }
 
   revokeCredentials(id, at) {
+    // v7: account revocation/role changes also permanently end its outstanding trip codes.
+    // Later approval must never revive a previously issued invitation.
+    this.db.prepare("UPDATE trip_invitations SET revoked_at=? WHERE issuer=? AND revoked_at IS NULL").run(at,id);
     this.db.prepare("UPDATE mcp_tokens SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL").run(at, id);
     // Schema v5: OAuth grants and every token in them end with the account change as well (the
     // per-request epoch check already refuses them; this makes the state durable and visible).

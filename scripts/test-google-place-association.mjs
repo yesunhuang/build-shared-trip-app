@@ -15,6 +15,7 @@
 // unrelated edits keeping the association; location change/clear and replace_content dropping a
 // stale carried-over one; durable retries and version conflicts; MCP writes; export/import.
 import assert from "node:assert/strict";
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -412,6 +413,7 @@ try {
   }
 
   // Viewers can read a saved association but never write one.
+  grantFixtureMembership(runtime,trip.id,viewer.id);
   trip = expect(await change(api, trip, "gp-final-link", [{ type: "upsert_plan", dayId: "day-two", plan: { id: "plan-hall", googlePlaceAssociation: associationForPlan(planOf(trip, "plan-hall"), PLACE_A) } }]), 200, "final link").trip;
   assert.equal(planOf(expect(await api.as(viewer.cookie, `/api/trips/${trip.id}`), 200, "viewer read").trip, "plan-hall").googlePlaceAssociation.placeId, PLACE_A);
   expect(await api.as(viewer.cookie, `/api/trips/${trip.id}/changes`, { method: "POST", body: { requestId: "gp-viewer", expectedVersion: trip.version, changes: [{ type: "upsert_plan", dayId: "day-two", plan: { id: "plan-hall", googlePlaceAssociation: null } }] } }), 403, "viewer write refused");

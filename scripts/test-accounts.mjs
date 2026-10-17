@@ -15,6 +15,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { readConfig, startServer } from "../server/app.mjs";
 import { SCHEMA_VERSION, snapshotDatabase, validateSnapshot } from "../server/db.mjs";
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 
 // Current-version assertions follow the exported schema constant; the v2 fixture keeps its old version.
 assert.ok(Number.isInteger(SCHEMA_VERSION) && SCHEMA_VERSION >= 4, "exported SCHEMA_VERSION is a current schema number");
@@ -97,7 +98,7 @@ try {
   // Fictional content: one active trip with a day, plan and reminder, and one archived trip.
   let harbor = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "acct-harbor", trip: { title: "Fictional Harbor Loop" } } }), 201, "create").trip;
   harbor = expect(await api.owner("/api/trips/" + harbor.id + "/changes", { method: "POST", body: { requestId: "acct-harbor-day", expectedVersion: 1, changes: [
-    { type: "upsert_day", day: { id: "acct-day", date: "2031-04-02", slots: [{ id: "acct-plan", name: "Invented lighthouse walk", time: "10:00" }] } },
+    { type: "upsert_day", day: { id: "acct-day", date: "2031-04-02", slots: [{ id: "acct-plan", name: "Invented lighthouse walk", time: "10:00",photo:{url:"/photos/a1b2c3d4e5f60718.webp"} }] } },
     { type: "upsert_reminder", reminder: { id: "acct-todo", item: "Invented ferry pass", done: false } }] } }), 200, "seed").trip;
   let meadow = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "acct-meadow", trip: { title: "Fictional Meadow Rest" } } }), 201, "create b").trip;
   meadow = expect(await api.owner("/api/trips/" + meadow.id + "/changes", { method: "POST", body: { requestId: "acct-meadow-archive", expectedVersion: 1, changes: [{ type: "archive_trip", archived: true }] } }), 200, "archive").trip;
@@ -123,7 +124,7 @@ try {
   expect(ownerLogin, 200, "owner token login"); const ownerCookie = cookieOf(ownerLogin);
   assert.equal(ownerLogin.body.role, "owner");
   const ownerSession = expect(await api.as(ownerCookie, "/api/session"), 200, "owner session");
-  assert.deepEqual(ownerSession.capabilities, { readTrips: true, exportTrips: true, editTrips: true, importTrips: true, manageAccounts: true, mcp: false });
+  assert.deepEqual(ownerSession.capabilities, { createTrips: true, readTrips: true, exportTrips: true, editTrips: true, importTrips: true, manageAccounts: true, mcp: false });
   assert.equal((await api.as(ownerCookie, "/api/invitations", { method: "POST", body: {}, headers: { Origin: undefined } })).status, 403, "cookie writes require same-origin");
   const cookieInvite = expect(await api.as(ownerCookie, "/api/invitations", { method: "POST", body: { expiresInHours: 2 } }), 201, "owner cookie invitation").invitation;
   for (const hours of [0, 1000, "2", 1.5]) assert.equal((await api.owner("/api/invitations", { method: "POST", body: { expiresInHours: hours } })).status, 422, "invalid expiry " + hours);
@@ -183,13 +184,14 @@ try {
   assert.equal((await api.owner("/api/users/usr_doesnotexist0/approve", { method: "POST" })).status, 404);
   assert.equal((await api.owner("/api/users/" + encodeURIComponent("../x") + "/approve", { method: "POST" })).status, 404);
   assert.equal(expect(await api.owner("/api/users/" + viewerId + "/approve", { method: "POST" }), 200, "approve").account.status, "approved");
+  grantFixtureMembership(runtime,harbor.id,viewerId);grantFixtureMembership(runtime,meadow.id,viewerId);
   const viewerLogin = await api.signIn("FICTIONAL.viewer", viewerSecret);
   expect(viewerLogin, 200, "approved login"); assert.equal(viewerLogin.body.role, "viewer");
   assert.match(viewerLogin.headers.get("set-cookie"), /^shared_trip_session=[A-Za-z0-9_-]{43}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=43200$/);
   const viewer = cookieOf(viewerLogin);
   const session = expect(await api.as(viewer, "/api/session"), 200, "viewer session");
-  assert.deepEqual(session, { authenticated: true, role: "viewer", username: "fictional.viewer", capabilities: { readTrips: true, exportTrips: true, editTrips: false, importTrips: false, manageAccounts: false, mcp: false } });
-  assert.deepEqual(expect(await api.as(viewer, "/api/trips"), 200, "viewer list").trips.map((t) => t.id).sort(), [harbor.id, meadow.id].sort(), "viewers read all trips, including archived");
+  assert.deepEqual(session, { authenticated: true, role: "viewer", username: "fictional.viewer", capabilities: { createTrips: true, readTrips: true, exportTrips: true, editTrips: false, importTrips: false, manageAccounts: false, mcp: false } });
+  assert.deepEqual(expect(await api.as(viewer, "/api/trips"), 200, "viewer list").trips.map((t) => t.id).sort(), [harbor.id, meadow.id].sort(), "viewers read explicitly assigned trips, including archived");
   assert.deepEqual(expect(await api.as(viewer, "/api/trips/" + harbor.id), 200, "viewer read").trip, expect(await api.owner("/api/trips/" + harbor.id), 200, "owner read").trip);
   const exported = expect(await api.as(viewer, "/api/trips/" + meadow.id + "/export"), 200, "viewer export");
   assert.equal(exported.format, "shared-trip-export"); assert.equal(exported.trip.archived, true);
@@ -204,7 +206,6 @@ try {
 
   const before = expect(await api.owner("/api/trips/" + harbor.id), 200, "owner read").trip.version;
   const refusals = [
-    ["POST", "/api/trips", { requestId: "viewer-create", trip: { title: "Must not exist" } }],
     ["POST", "/api/import", { requestId: "viewer-import", data: { trip: { title: "Must not exist" } } }],
     ["POST", "/api/trips/" + harbor.id + "/changes", { requestId: "viewer-edit", expectedVersion: before, changes: [{ type: "update_trip", fields: { title: "Viewer edit" } }] }],
     ["POST", "/api/trips/" + harbor.id + "/changes", { requestId: "viewer-archive", expectedVersion: before, changes: [{ type: "archive_trip", archived: true }] }],
@@ -225,7 +226,7 @@ try {
   assert.equal(expect(await api.owner("/api/trips/" + harbor.id), 200, "owner read").trip.version, before, "no viewer write landed");
   assert.equal(expect(await api.owner("/api/trips"), 200, "owner list").trips.length, 2, "no viewer create or import landed");
   assert.equal((await list()).find((a) => a.username === "second.viewer").status, "pending", "viewer cannot approve accounts");
-  console.log("Approved viewers read, export and fetch protected media, but every mutation, import, account action and method/path variant is refused at the server.");
+  console.log("Assigned members read, export and fetch bound media; edits to joined trips, import and account administration remain refused. Own-trip creation is tested separately.");
 
   // --- MCP and bearer misuse ---
   const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "fictional", version: "1.0.0" } } };
@@ -341,6 +342,8 @@ try {
   assert.equal(mediaPending.status, 403, "pending account gets no session"); assert.equal(mediaPending.headers.get("set-cookie"), null);
   const mediaId = expect(await store.owner("/api/users"), 200, "media list").accounts.find((account) => account.username === "media.viewer").id;
   expect(await store.owner("/api/users/" + mediaId + "/approve", { method: "POST" }), 200, "approve media viewer");
+  const mediaTrip=defaults.service.createTrip({requestId:"media-membership-trip",trip:{title:"Fictional assigned media",days:[{id:"media-day",date:"2031-04-02",slots:[{id:"media-plan",name:"Fictional photo",photo:{url:photoRoute}}]}]}}).trip;
+  grantFixtureMembership(defaults,mediaTrip.id,mediaId);
   const mediaCookie = expectCookie(await store.signIn("media.viewer", mediaSecret), 200, "approved media viewer login");
   const viewerPhoto = await store.as(mediaCookie, photoRoute);
   assert.equal(viewerPhoto.status, 200); assert.equal(viewerPhoto.headers.get("content-type"), "image/webp"); assert.equal(viewerPhoto.text, privateBytes.toString());

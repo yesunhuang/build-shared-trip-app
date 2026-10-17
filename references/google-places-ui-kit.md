@@ -76,7 +76,7 @@ The allowance ledger is **not** trip content; see [Monthly allowance gate](#mont
 `trip.googlePlacePhotosEnabled` is one strictly validated trip-level boolean ([input-schema.md § Per-trip Google setting](input-schema.md#per-trip-google-setting-self-hosted-optional)):
 
 - **Default off.** New trips start with `false`. Trips stored before the field existed have no such key; they read as `false` (API, MCP `get_trip`, export) and the stored row is not rewritten by reading. The next ordinary write stores the explicit value. There is no bulk rewrite and no SQL migration.
-- **Who can change it.** The owner and content managers, in **Edit trip** on the home page or the trip page (and **Create trip**), or through MCP `update_trip`, `create_trip`, `import_trip` and `replace_content`. All paths use the same validation: only `true` or `false`; strings, numbers, `null` and objects are refused and the batch is not applied. Viewers can read the value but the server refuses any change from them, from anonymous visitors and from pending or revoked accounts. It is trip content, not an account or security permission, and MCP still has exactly six tools and no Google search tool.
+- **Who can change it.** The owner, content managers and current trip creators, in **Edit trip** on the home page or the trip page (and **Create trip**), or through existing owner/content-manager MCP `update_trip`, `create_trip`, `import_trip` and `replace_content`. Ordinary creators use web editing; they gain no MCP or import authority. All paths use the same validation: only `true` or `false`; strings, numbers, `null` and objects are refused and the batch is not applied. Joined read-only members can read the value but the server refuses any change from them, from anonymous visitors and from pending or revoked accounts. It is trip content, not an account or security permission, and MCP still has exactly six tools and no Google search tool.
 - **Independent of the site switch and the allowance.** It can be saved while the site feature is off, no key is configured or no allowance exists; it then does nothing. It never turns the site feature on and never grants any allowance.
 - **Rolling back the app.** A build from before this setting does not know the field, so its validation would refuse a snapshot restore or import that contains it. Before going back to such a build, remove `googlePlacePhotosEnabled` from exports, or stay on this build. See also [Rollback and recovery](#rollback-and-recovery).
 - **Opting out keeps data.** Turning it off keeps every `googlePlaceAssociation`, OSM `place`, Commons/manual `photo`, attribution and ID unchanged. Turning it on again shows the same saved links.
@@ -100,9 +100,9 @@ A server-authoritative, durable, atomic count of reservations per Google billing
 
 | `kind` | Who | Body | Server checks |
 | --- | --- | --- | --- |
-| `details` | Approved viewer, content manager or owner, in a browser session | `planId`, `placeId` | The plan exists and its saved association is current and names that Place ID |
-| `search` | Content manager or owner, in a browser session | nothing else (the search text never goes to this server) | Trip not archived |
-| `preview` | Content manager or owner, in a browser session | `placeId` | Trip not archived |
+| `details` | Approved joined member, content manager or owner, in a browser session | `planId`, `placeId` | The trip is accessible; the plan exists and its saved association is current and names that Place ID |
+| `search` | Current trip creator, content manager or owner, in a browser session | nothing else (the search text never goes to this server) | Trip not archived |
+| `preview` | Current trip creator, content manager or owner, in a browser session | `placeId` | Trip not archived |
 
 For every kind: the site feature is on, the trip exists and is opted in, and the allowance grants a unit. Anonymous visitors (401), pending accounts (cannot sign in), revoked sessions (401), the owner bearer (403), MCP access tokens and OAuth tokens (401, they work only at `/mcp`) and cross-origin requests (403) are refused. A reservation never writes trip content and never changes a trip version. It is not an account or security capability, and there is no route, MCP tool or browser control that grants, raises, resets or refunds allowance.
 
@@ -210,7 +210,7 @@ The ledger counts what **this app's code** asks for. It cannot guarantee zero ch
 
 The official components expose only a place's ID and a temporary location or viewport to this app. Without raw Places data, which is not used, or reading the component's rendered content, which is not allowed, the app cannot check whether a result's name matches the plan or whether it is truly a public venue. So the app **never links a plan automatically** and never picks the first or "best" search result. It links a place only after an editor's explicit choice. Some plans will deliberately stay unlinked; that is the intended trade-off, not a missing feature.
 
-In **Add/Edit plan** of an opted-in trip, owners and content managers (never viewers) see an optional **Google place details** section:
+In **Add/Edit plan** of an opted-in trip, owners, content managers and current trip creators (never joined read-only members) see an optional **Google place details** section:
 
 1. It is usable only when the plan has a location. Opening the editor sends nothing.
 2. Google work happens only when the location is being created or changed in the editor, or when the editor presses **Find on Google** / **Choose a different Google place** to correct a link. A new or changed location opens the form, but still sends nothing by itself.

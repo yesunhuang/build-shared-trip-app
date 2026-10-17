@@ -1,0 +1,18 @@
+.trip-access-dialog { box-sizing:border-box; width:min(640px,calc(100vw - 32px)); max-width:calc(100vw - 32px); max-height:85dvh; padding:24px; border:2px solid #527366; border-radius:16px; color:#17362f; background:#fffaf3; }
+.trip-access-dialog::backdrop {background:#17362f99;}
+.trip-access-dialog h2,.trip-access-dialog h3,.trip-access-dialog li {overflow-wrap:anywhere;}
+.trip-access-dialog form,.trip-join form {display:grid;gap:12px;margin-block:16px;min-width:0;}
+.trip-access-dialog label,.trip-join label {display:grid;gap:6px;min-width:0;}
+.trip-access-dialog button,.trip-access-dialog input,.trip-access-dialog select,.trip-join button,.trip-join input,.trip-join summary {box-sizing:border-box;min-height:44px;font:inherit;}
+.trip-access-dialog button,.trip-join button {padding:10px 14px;background:#17362f;color:#fffaf3;border:1px solid #17362f;border-radius:8px;cursor:pointer;}
+.trip-access-dialog select,.trip-join input {width:100%;min-width:0;max-width:100%;padding:10px;border:1px solid #527366;border-radius:8px;color:#17362f;background:#fff;}
+.trip-access-dialog .actions {display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;}
+.trip-access-dialog li {margin-block:10px;}
+.trip-access-dialog li button {margin:8px;}
+.trip-join-secret {display:block;white-space:normal;overflow-wrap:anywhere;padding:12px;background:#e3eddf;color:#17362f;user-select:all;}
+.trip-join {margin-block:16px;padding:12px 16px;border:1px solid #527366;border-radius:12px;}
+.trip-join summary {display:list-item;cursor:pointer;align-content:center;}
+.trip-join input {max-width:34rem;}
+.trip-access-dialog :focus-visible,.trip-join :focus-visible {outline:3px solid #17362f;outline-offset:3px;}
+.trip-access-dialog :disabled,.trip-join :disabled {cursor:wait;opacity:.65;}
+@media(max-width:400px){.trip-access-dialog {padding:16px;}.trip-access-dialog .actions>button {flex:1 1 auto;}}

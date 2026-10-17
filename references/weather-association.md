@@ -32,9 +32,9 @@ Automatic areas come only from valid numeric `lat`/`lng` already saved on that d
 
 The 20 km threshold bounds the span of an inferred group. It does not identify a city, administrative boundary or uniform weather conditions.
 
-## Editing (owner and content managers)
+## Editing (owner, content managers and current trip creators)
 
-The weather dialog has a **Change forecast places** control for editors. It is never rendered for viewers, and the server refuses viewer writes anyway. The editor offers three native radio choices: automatic, chosen places, and no forecast. It lists the current automatic areas, and in chosen-places mode it allows removing a place, adding a saved point, or entering typed coordinates (decimal latitude/longitude, validated locally and by the server).
+The weather dialog has a **Change forecast places** control for editors. It is never rendered for joined read-only members, and the server refuses their writes. The editor offers three native radio choices: automatic, chosen places, and no forecast. It lists the current automatic areas, and in chosen-places mode it allows removing a place, adding a saved point, or entering typed coordinates (decimal latitude/longitude, validated locally and by the server).
 
 A save sends one atomic `apply_trip_changes` batch:
 

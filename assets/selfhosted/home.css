@@ -1,3 +1,4 @@
+@import url("./trip-members.css?v=__CACHE_VERSION__");
 :root { color-scheme:light; font-family:system-ui,sans-serif; color:#17362f; background:#f3ede3; }
 * { box-sizing:border-box; } body { margin:0; } header { display:flex; align-items:center; gap:12px; padding:18px max(20px,calc((100vw - 1080px)/2)); border-bottom:1px solid #17362f20; }
 .brand { display:flex; align-items:center; gap:12px; font-size:23px; font-weight:750; text-decoration:none; color:inherit; margin-right:auto; }

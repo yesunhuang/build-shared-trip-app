@@ -10,9 +10,10 @@ import {
   scriptSafeJSON,
   setBootSession,
   setBootTrip,
+  sessionForTrip,
   toRenderTrip,
   tripIdFromPath
-} from "./hosted-client.js?v=v-a8561e8c5fe7";
+} from "./hosted-client.js?v=v-bae112ca3ed2";
 
 const MAX_AUTOMATIC_ATTEMPTS = 4;
 const STRINGS = {
@@ -114,7 +115,7 @@ async function load() {
     const [payload, session] = await Promise.all([hostedApi.getTrip(tripId), hostedApi.session()]);
     const trip = expectTrip(payload, tripId);
     loading = false;
-    setBootSession(session);
+    setBootSession(sessionForTrip(session,payload));
     await start(trip);
   } catch (error) {
     loading = false;
@@ -146,7 +147,7 @@ async function start(trip) {
   setBootTrip(trip);
   seed.textContent = scriptSafeJSON(toRenderTrip(trip));
   try {
-    await import("./app.js?v=v-a8561e8c5fe7");
+    await import("./app.js?v=v-bae112ca3ed2");
     overlay.remove();
     document.documentElement.classList.remove("hosted-booting");
   } catch (error) {

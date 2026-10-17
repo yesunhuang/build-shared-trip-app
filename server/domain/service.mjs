@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { localPhotoPaths } from "./media.mjs";
 import {
   GOOGLE_PLACE_PHOTOS_FIELD, normalizeContent, applyGooglePlaceAssociations, applyParsedPlaces, applySelectedPlaces, assertSafePayload,
   isValidId, tripGooglePlacePhotosEnabled
@@ -102,13 +103,15 @@ export class TripService {
     const version = restored.version || 1;
     const trip = { ...validate(content), id, version, archived: restored.archived === true, createdAt: restored.createdAt || at, updatedAt: restored.updatedAt || at };
     this.db.prepare("INSERT INTO trips VALUES(?,?,?,?)").run(id, version, Number(trip.archived), JSON.stringify(trip));
+    this.db.prepare("INSERT INTO trip_access VALUES(?,NULL,1)").run(id);
+    for(const pathname of localPhotoPaths(trip))this.db.prepare("INSERT INTO trip_media VALUES(?,?)").run(id,pathname);
     return { trip: withAliases(trip) };
   }
-  createTrip({ requestId, trip }, record) {
-    return this.transact("create", requestId, { trip }, () => this.insert(trip), record);
+  createTrip({ requestId, trip }, record, scope="create") {
+    return this.transact(scope, requestId, { trip }, () => this.insert(trip), record);
   }
-  applyTripChanges({ tripId, requestId, expectedVersion, changes }, record) {
-    return this.transact("trip:" + tripId, requestId, { tripId, expectedVersion, changes }, () => {
+  applyTripChanges({ tripId, requestId, expectedVersion, changes }, record, scope) {
+    return this.transact(scope||"trip:" + tripId, requestId, { tripId, expectedVersion, changes }, () => {
       const { trip: current } = this.getTrip(tripId);
       if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1) throw validationError("expectedVersion must be a positive safe integer.");
       if (current.version !== expectedVersion) throw conflict("version_conflict", "The trip changed. Read the latest version before retrying.", { currentVersion: current.version });
@@ -152,7 +155,7 @@ export class TripService {
       const marker = deletionMarker(tripId, expectedVersion);
       this.db.prepare("UPDATE request_log SET result=? WHERE scope=?").run(marker, "trip:" + tripId);
       const redact = this.db.prepare("UPDATE request_log SET result=? WHERE scope=? AND request_id=?");
-      for (const prior of this.db.prepare("SELECT scope,request_id,result FROM request_log WHERE scope IN ('create','import')").all()) {
+      for (const prior of this.db.prepare("SELECT scope,request_id,result FROM request_log").all()) {
         let stored = null;
         try { stored = JSON.parse(prior.result); } catch { stored = null; }
         if (stored?.trip?.id === tripId) redact.run(marker, prior.scope, prior.request_id);

@@ -20,6 +20,7 @@
 // replace_content, export/import and snapshot/restore; removal of a place dropping carried-over
 // mirrored fields; and the cache file UTF-8 byte cap enforced on write with reload hits.
 import assert from "node:assert/strict";
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -328,6 +329,7 @@ try {
   delta = expect(await change(api, delta, "lk-delta-archive", [{ type: "archive_trip", archived: true }]), 200, "archive delta").trip;
   const manager = await api.makeAccount("fictional.lookup.manager", "content-manager");
   const viewer = await api.makeAccount("fictional.lookup.viewer");
+  grantFixtureMembership(runtime,alpha.id,viewer.id);
   const managerToken = expect(await api.owner(`/api/users/${manager.id}/mcp-tokens`, { method: "POST", body: { label: "Fictional lookup probe" } }), 201, "issue manager MCP credential").secret;
   const ownerCookie = (await api.call("/api/login", { method: "POST", headers: { Origin: api.base }, body: { token: ownerToken } })).headers.get("set-cookie").split(";")[0];
 

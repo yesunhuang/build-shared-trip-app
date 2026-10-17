@@ -76,9 +76,9 @@ const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex"
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NINETY_DAYS = 90 * DAY_MS;
 const MANAGER_SECRET = /^stm_[A-Za-z0-9_-]{43}$/;
-const CAPS_MANAGER = { readTrips: true, exportTrips: true, editTrips: true, importTrips: true, manageAccounts: false, mcp: false };
-const CAPS_VIEWER = { readTrips: true, exportTrips: true, editTrips: false, importTrips: false, manageAccounts: false, mcp: false };
-const CAPS_OWNER_COOKIE = { readTrips: true, exportTrips: true, editTrips: true, importTrips: true, manageAccounts: true, mcp: false };
+const CAPS_MANAGER = { createTrips: true, readTrips: true, exportTrips: true, editTrips: true, importTrips: true, manageAccounts: false, mcp: false };
+const CAPS_VIEWER = { createTrips: true, readTrips: true, exportTrips: true, editTrips: false, importTrips: false, manageAccounts: false, mcp: false };
+const CAPS_OWNER_COOKIE = { createTrips: true, readTrips: true, exportTrips: true, editTrips: true, importTrips: true, manageAccounts: true, mcp: false };
 const ACCOUNT_KEYS = ["createdAt", "id", "role", "status", "updatedAt", "username"];
 const TOKEN_KEYS = ["createdAt", "expiresAt", "id", "label", "lastUsedAt", "revokedAt"];
 const EVENT_KEYS = ["action", "actor", "at", "channel", "id", "outcome", "reason", "requestId", "role", "target", "tripId", "version"];
@@ -278,7 +278,7 @@ try {
   delta = check(await api.as(managerCookie, "/api/trips/" + delta.id + "/changes", { method: "POST", body: { requestId: "cm-web-future", expectedVersion: 1, changes: [{ type: "update_trip", fields: { shortName: "Delta" } }] } }), 200, "manager edits a trip created after the role assignment").trip;
   const managerList = check(await api.as(managerCookie, "/api/trips"), 200, "manager list").trips.map((trip) => trip.id);
   for (const id of [alpha.id, beta.id, gamma.id, delta.id, importedWeb.trip.id]) assert.ok(managerList.includes(id), "manager lists every trip, including archived");
-  for (const [route, body] of [["/api/trips", { requestId: "viewer-create", trip: { title: "x" } }], ["/api/import", { requestId: "viewer-import", data: exported }], ["/api/trips/" + delta.id + "/changes", { requestId: "viewer-edit", expectedVersion: delta.version, changes: [{ type: "archive_trip", archived: true }] }]]) {
+  for (const [route, body] of [["/api/import", { requestId: "viewer-import", data: exported }], ["/api/trips/" + delta.id + "/changes", { requestId: "viewer-edit", expectedVersion: delta.version, changes: [{ type: "archive_trip", archived: true }] }]]) {
     assert.equal((await api.as(viewerCookie, route, { method: "POST", body })).status, 403, "viewer stays read-only");
   }
   console.log("Manager HTTP: edit/delete/replace/archive/unarchive/create/import/export/media on current and future trips, conflicts, atomic rollback and durable retries passed; viewers stay read-only.");
@@ -464,7 +464,7 @@ try {
   assert.ok((await api.tokens(manager.id)).every((token) => token.revokedAt !== null), "role change durably revokes every credential");
   const demotedCookie = await api.login(manager, "viewer");
   assert.deepEqual(check(await api.as(demotedCookie, "/api/session"), 200, "demoted session").capabilities, CAPS_VIEWER);
-  assert.equal((await api.as(demotedCookie, "/api/trips", { method: "POST", body: { requestId: "cm-demoted", trip: { title: "x" } } })).status, 403, "demoted account cannot write");
+  assert.equal((await api.as(demotedCookie, "/api/trips/"+alpha.id+"/changes", { method: "POST", body: { requestId: "cm-demoted",expectedVersion:alpha.version,changes:[{type:"update_trip",fields:{title:"Forbidden"}}] } })).status, 403, "demoted account loses global editing rights");
   assert.equal((await api.owner("/api/users/" + manager.id + "/mcp-tokens", { method: "POST", body: { label: "Fictional refused" } })).status, 409, "viewers cannot receive credentials");
   check(await api.owner("/api/users/" + manager.id + "/role", { method: "POST", body: { role: "content-manager" } }), 200, "promote again");
   assert.equal(await api.mcpStatus({ Authorization: "Bearer " + renewed.secret }), 401, "promotion does not revive old credentials");

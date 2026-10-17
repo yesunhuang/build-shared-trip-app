@@ -10,10 +10,12 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { readConfig, startServer } from "../server/app.mjs";
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "shared-trip-content-manager-ui-"));
 const ownerToken = crypto.randomBytes(32).toString("base64url");
-const runtime = await startServer(readConfig({ SHARED_TRIP_ADMIN_TOKEN: ownerToken, SHARED_TRIP_DATA_DIR: directory, SHARED_TRIP_PORT: "0" }));
+// This suite exercises the list UI. Fictional imported dates are past at the injected landing clock.
+const runtime = await startServer({...readConfig({ SHARED_TRIP_ADMIN_TOKEN: ownerToken, SHARED_TRIP_DATA_DIR: directory, SHARED_TRIP_PORT: "0" }),clock:()=>Date.parse("2099-01-01T00:00:00Z")});
 runtime.service.createTrip({ requestId: "cm-ui-a", trip: { title: "Fictional Lantern Market" } });
 runtime.service.createTrip({ requestId: "cm-ui-b", trip: { title: "Fictional Ridge Walk" } });
 const EDITOR = "sample-editor"; const READER = "sample-reader";
@@ -247,7 +249,7 @@ try {
   assert.ok(byId("read-only-note").hidden && !byId("manager-note").hidden, "manager note instead of read-only note");
   assert.ok(byId("accounts").hidden && !byId("account-list").children.length && byId("token-output").hidden, "no account or token administration");
   assert.equal(doc.querySelectorAll(".role-control, .token-toggle, .token-panel").length, 0);
-  for (const card of doc.querySelectorAll(".trip-card")) assert.deepEqual([...card.querySelectorAll("button")].map((node) => node.textContent), ["Edit", "Archive", "Export"]);
+  for (const card of doc.querySelectorAll(".trip-card")) assert.deepEqual([...card.querySelectorAll("button")].map((node) => node.textContent), ["Edit", "Archive", "Export", "Participants"]);
   byId("create").click();
   const create = doc.querySelector("dialog form"); create.elements.title.value = "Fictional Manager Draft"; submit(create);
   await until(() => runtime.service.listTrips().trips.some((trip) => trip.title === "Fictional Manager Draft") && !doc.querySelector("dialog") && idle(), "manager creates a trip");
@@ -278,11 +280,11 @@ try {
   }
 
   // D. Viewer stays read-only.
+  for(const trip of runtime.service.listTrips().trips)grantFixtureMembership(runtime,trip.id,readerId);
   await signIn(READER, readerPassword);
-  assert.ok(byId("create").hidden && byId("import-control").hidden && byId("import").disabled && !byId("read-only-note").hidden && byId("manager-note").hidden);
+  assert.ok(!byId("create").hidden && byId("import-control").hidden && byId("import").disabled && !byId("read-only-note").hidden && byId("manager-note").hidden);
   assert.ok(byId("accounts").hidden && !byId("account-list").children.length);
-  for (const card of doc.querySelectorAll(".trip-card")) assert.deepEqual([...card.querySelectorAll("button")].map((node) => node.textContent), ["Export"]);
-  await assert.rejects(api.createTrip({ title: "Viewer draft" }), (error) => error.status === 403);
+  for (const card of doc.querySelectorAll(".trip-card")) assert.deepEqual([...card.querySelectorAll("button")].map((node) => node.textContent), ["Export", "Participants"]);
   await assert.rejects(api.issueMcpToken(readerId, "sample viewer"), (error) => error.status === 403);
 
   // E. Role change and account revocation clear a displayed token; role change signs the account out.

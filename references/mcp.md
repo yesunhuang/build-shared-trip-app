@@ -14,6 +14,8 @@ Browser session cookies are refused at /mcp with 401, including owner, content-m
 
 ## Tools
 
+Schema-v7 [trip membership](trip-membership.md) is enforced by the same content gateway for HTTP and MCP. Existing owner/content-manager credentials retain their all-trip authority and the same six tools/scopes; ordinary membership does not create MCP access. `get_trip` adds read-only `members` (approved account labels/IDs and creator flag) and `access` (current permissions/ACL revision), separate from itinerary groups and content exports. Membership assignment and code administration remain HTTP owner/creator operations, not MCP tools. Deployment and the existing-account matrix require confirmation; source/SDK tests do not establish live or target-client acceptance.
+
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | list_trips | none | Summaries |
@@ -47,7 +49,7 @@ In MCP metadata revision **1.1.0**, discovery describes the association's three 
 
 Revision **1.2.0** additionally describes optional per-trip `branding` (bounded embedded PNG logo, alternative text, presets/custom light colors and root `null` clear) in `create_trip` and `update_trip.fields`. Read it in `get_trip`; exports/imports include it. Owner and content-manager permissions, versions and durable request retries are unchanged. See [trip-branding.md](trip-branding.md) for object replacement/reset semantics, image preparation, contrast and rollback constraints. No provider call or browser login is required for this content operation. Target-client schema refresh is a separate acceptance gate.
 
-`get_trip` adds `planLocationBindings` alongside `trip`: an array of `{dayId, planId, locationBinding}` for that read's current version. A locationless plan has `locationBinding: null`. The binding is calculated by the existing shared location helper; clients need no browser session, provider lookup or duplicate hashing implementation. This metadata is never saved inside a trip or included in exports. Existing stored associations remain at `trip.days[].slots[].googlePlaceAssociation`.
+`get_trip` adds `planLocationBindings` alongside `trip`: an array of `{dayId, planId, locationBinding}` for that read's current version. A locationless plan has `locationBinding: null`. The binding is calculated by the existing shared location helper; clients need no browser session, provider lookup or duplicate hashing implementation. Schema v7 also returns approved-account `members` and current `access` permissions/revision. None of this metadata is a writable trip field or included in content exports. Existing saved associations remain at `trip.days[].slots[].googlePlaceAssociation`.
 
 **Map coordinates are separate.** The itinerary map needs finite saved `plan.lat` and `plan.lng`, with `mapLocationOmitted` unset or false. An address or Google association does not supply them. A binding can be valid through a full legacy `mapsUrl` even when coordinates are absent: that alias is recognized for association binding, while automatic coordinate derivation on an explicit write uses the canonical `googleMapsUrl` field. Reads and ordinary views never geocode an address. For a missing pin, verify the intended public venue and save its selected OSM snapshot (which mirrors coordinates) or narrowly update independently verified coordinates through `upsert_plan`; re-read and check the association binding and unrelated fields afterward. Never guess coordinates or use raw Google Places content to populate the OSM map.
 

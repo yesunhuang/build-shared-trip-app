@@ -10,7 +10,8 @@
 // enforces every permission independently.
 
 // Re-exported so the home page (which imports only this module) shares the same link guard.
-export { createLinkActivationGuard } from "./link-activation.js?v=v-a8561e8c5fe7";
+export { createLinkActivationGuard } from "./link-activation.js?v=v-bae112ca3ed2";
+export {createTripParticipantsDialog,createJoinTripControl,membershipText} from "./trip-members-editor.js?v=v-bae112ca3ed2";
 
 export const TRIP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const LANGUAGE_STORAGE_KEY = "shared-trips-language";
@@ -180,6 +181,11 @@ async function accountLogin(username, password) {
 export const ACCOUNT_ROLES = Object.freeze(["viewer", "content-manager"]);
 
 export const hostedApi = Object.freeze({
+  joinTrip: input=>requestJSON("/api/join-trip",{method:"POST",body:input,timeoutMs:WRITE_TIMEOUT_MS}),
+  assignTripMember:(id,input)=>requestJSON(`/api/trips/${encodeURIComponent(id)}/members`,{method:"POST",body:input,timeoutMs:WRITE_TIMEOUT_MS}),
+  tripInvitations:id=>requestJSON(`/api/trips/${encodeURIComponent(id)}/invitations`),
+  createTripInvitation:(id,input)=>requestJSON(`/api/trips/${encodeURIComponent(id)}/invitations`,{method:"POST",body:input,timeoutMs:WRITE_TIMEOUT_MS}),
+  revokeTripInvitation:(id,invitation,input)=>requestJSON(`/api/trips/${encodeURIComponent(id)}/invitations/${encodeURIComponent(invitation)}/revoke`,{method:"POST",body:input,timeoutMs:WRITE_TIMEOUT_MS}),
   session: () => requestJSON("/api/session", { timeoutMs: 8000 }),
   login: async (token) => {
     const result = await requestJSON("/api/login", { method: "POST", body: { token }, timeoutMs: WRITE_TIMEOUT_MS });
@@ -415,12 +421,15 @@ export function setBootSession(session) { bootSession = session && typeof sessio
 export function getBootSession() { return bootSession; }
 // Fail closed: anything other than an explicit server capability is read-only.
 export function sessionCanEdit(session) { return session?.capabilities?.editTrips === true; }
+export function sessionCanCreate(session) { return session?.capabilities?.createTrips === true||sessionCanEdit(session); }
+export function sessionForTrip(session,payload){return payload?.access?{...session,capabilities:{...session?.capabilities,editTrips:payload.access.canEdit===true}}:session;}
 export function sessionCanManageAccounts(session) { return session?.capabilities?.manageAccounts === true; }
 export function sessionCanImport(session) { return session?.capabilities?.importTrips === true; }
 
 const PROTECTED_STORAGE_PREFIXES = ["trip-", "shared-trip-"];
 
 export async function clearProtectedBrowserState() {
+  document.querySelectorAll(".trip-access-dialog").forEach(dialog=>{dialog.replaceChildren();dialog.close?.();dialog.remove();});
   bootTrip = null;
   bootSession = null;
   const seed = document.getElementById("trip-data");
@@ -606,4 +615,4 @@ export function exportFilename(trip = {}, tripId = "") {
     .slice(0, 60);
   return `${base || "trip"}-${tripId || trip.id || "export"}.json`;
 }
-export {coverImage} from "./trip-presentation.js?v=v-a8561e8c5fe7";
+export {coverImage} from "./trip-presentation.js?v=v-bae112ca3ed2";

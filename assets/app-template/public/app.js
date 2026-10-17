@@ -1,8 +1,10 @@
 import { getGooglePlaceLinks } from "./google-place-links.js?v=__CACHE_VERSION__";
+import {createTripParticipantsDialog,membershipText} from "./trip-members-editor.js?v=__CACHE_VERSION__";
 import {
   GOOGLE_PLACE_PHOTOS_FIELD,
   buildGooglePlacePhotosField,
   createTripPoller,
+  clearProtectedBrowserState,
   downloadJSON,
   expectTrip,
   exportFilename,
@@ -4179,6 +4181,7 @@ function connectHostedSync() {
   hostedPoller = createTripPoller({
     load: () => hostedApi.getTrip(HOSTED_TRIP_ID),
     onData: (payload) => {
+      if(payload.access&&payload.access.canEdit===HOSTED_READ_ONLY){hostedReady=false;stopTripGooglePlaces();location.reload();return;}
       hostedReady = true; syncReady = true;
       if (!hostedWriteInFlight) acceptHostedTrip(expectTrip(payload, HOSTED_TRIP_ID));
       setSyncStatus("synced", "synced");
@@ -4186,7 +4189,14 @@ function connectHostedSync() {
     onError: (error, { final }) => {
       hostedReady = false; syncReady = false;
       if (error.status === 401) { hostedPoller.stop(); leaveForSignIn(); return; }
+      if([403,404,410].includes(error.status)){
+        hostedPoller.stop();endWeatherSession();stopTripGooglePlaces();linkGuard.dispose();hostedServerTrip=null;currentTrip={days:[],reminders:[]};
+        void clearProtectedBrowserState();
+        const home=textElement("a","button button--light",ui(currentLanguage,"allTrips"));home.href="/";
+        const main=element("main","page-shell");main.append(textElement("p","empty-state",ui(currentLanguage,"tripUnavailable")),home);document.body.replaceChildren(main);return;
+      }
       if (final) {
+        document.querySelectorAll(".trip-access-dialog").forEach(dialog=>{dialog.replaceChildren();dialog.close?.();dialog.remove();});
         hostedPoller.stop(); hostedServerTrip = null; currentTrip = {days:[],reminders:[]};
         document.querySelector("main").replaceChildren(textElement("p","empty-state",ui(currentLanguage,"tripUnavailable")));
       }
@@ -4256,15 +4266,18 @@ function renderHostedControls() {
     try {downloadJSON(await hostedApi.exportTrip(HOSTED_TRIP_ID),exportFilename(hostedServerTrip));}
     catch(error){if(error.status===401)leaveForSignIn();else showToast("saveError",true);}
   });
+  const participants=textElement("button","button button--quiet",membershipText(currentLanguage,"open"));participants.type="button";participants.dataset.action="trip-participants";
+  participants.addEventListener("click",()=>{const panel=createTripParticipantsDialog({document,tripId:HOSTED_TRIP_ID,language:currentLanguage,onAccessLost:()=>{hostedReady=false;hostedPoller?.retryNow();}});document.body.append(panel.dialog);panel.dialog.showModal();panel.load();});
   if (HOSTED_READ_ONLY) {
     const badge=textElement("span","hosted-read-only-badge",READ_ONLY_LABELS[currentLanguage]||READ_ONLY_LABELS.en);
-    controls.replaceChildren(home,badge,exportButton,button("retrySync",()=>hostedPoller?.retryNow()),button("signOut",signOutAndLeave));
+    controls.replaceChildren(home,badge,exportButton,participants,button("retrySync",()=>hostedPoller?.retryNow()),button("signOut",signOutAndLeave));
     els.addReminder.hidden=true;els.addReminder.disabled=true;
     return;
   }
   controls.replaceChildren(home,
     button("editTrip",()=>openMetadataDialog()),
     exportButton,
+    participants,
     button("retrySync",()=>hostedPoller?.retryNow()),
     button("signOut",signOutAndLeave));
   const brandingButton=textElement("button","button button--quiet",brandingText(currentLanguage,"open"));brandingButton.type="button";brandingButton.dataset.action="edit-branding";brandingButton.disabled=Boolean(hostedServerTrip.archived);brandingButton.addEventListener("click",openBrandingDialog);controls.insertBefore(brandingButton,exportButton);

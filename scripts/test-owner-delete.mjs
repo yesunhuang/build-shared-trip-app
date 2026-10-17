@@ -15,6 +15,7 @@
 //
 // Output: generic PASS labels only. Generated secrets, cookies and passwords are never printed.
 import assert from "node:assert/strict";
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -112,8 +113,8 @@ async function siteCookie(base, account) { return remember(expect(await siteLogi
 async function ownerCookie(base) {
   return remember(expect(await call(base, "/api/login", { method: "POST", headers: { Origin: base }, json: { token: ownerToken } }), 200, "owner sign-in").cookies[0].split(";")[0]);
 }
-async function createTrip(base, requestId, title) {
-  return expect(await owner(base, "/api/trips", { method: "POST", json: { requestId, trip: { title } } }), 201, "create " + requestId).data.trip;
+async function createTrip(base, requestId, title, fields={}) {
+  return expect(await owner(base, "/api/trips", { method: "POST", json: { requestId, trip: { title,...fields } } }), 201, "create " + requestId).data.trip;
 }
 async function change(base, tripId, body, headers) {
   return call(base, "/api/trips/" + tripId + "/changes", { method: "POST", json: body, headers: headers ?? { Authorization: "Bearer " + ownerToken } });
@@ -222,9 +223,10 @@ try {
   const betaArchive = { requestId: "fx-archive-beta", expectedVersion: 1, changes: [{ type: "archive_trip", archived: true }] };
   beta = expect(await change(base, beta.id, betaArchive), 200, "beta archive").data.trip;
   assert.ok(beta.archived === true && beta.version === 2, "beta is archived");
-  let gamma = await createTrip(base, "fx-create-gamma", TITLES.gamma);
+  let gamma = await createTrip(base, "fx-create-gamma", TITLES.gamma,{days:[{id:"shared-photo-day",date:"2031-05-02",slots:[{id:"shared-photo-plan",name:"Fictional shared photo",photo:{url:"/photos/"+photoName}}]}]});
   const manager = await makeAccount(base, MANAGER_USER, { role: "content-manager" });
   const viewer = await makeAccount(base, "fictional.reader");
+  grantFixtureMembership(runtime,gamma.id,viewer.id);
   const waiting = await makeAccount(base, "fictional.waiting", { approve: false });
   const former = await makeAccount(base, "fictional.former");
   const managerSite = await siteCookie(base, manager);
@@ -319,7 +321,7 @@ try {
   assert.deepEqual(deleted, { deleted: true, tripId: alpha.id, version: 2 }, "minimal success body");
   expect(await owner(base, "/api/trips/" + alpha.id), 410, "deleted trip read", "trip_deleted");
   expect(await owner(base, "/api/trips/" + alpha.id + "/export"), 410, "deleted trip export", "trip_deleted");
-  expect(await call(base, "/api/trips/" + alpha.id, { headers: { Cookie: viewerSite } }), 410, "viewer read of the deleted trip", "trip_deleted");
+  expect(await call(base, "/api/trips/" + alpha.id, { headers: { Cookie: viewerSite } }), 404, "viewer cannot distinguish deleted or inaccessible trip", "trip_not_found");
   assert.ok(!expect(await owner(base, "/api/trips"), 200, "list").data.trips.some((trip) => trip.id === alpha.id), "deleted trip is not listed");
   const tombstone = runtime.db.prepare("SELECT * FROM trip_tombstones WHERE id=?").get(alpha.id);
   assert.deepEqual(Object.keys(tombstone).sort(), ["deleted_at", "deleted_version", "id"], "tombstone holds no content columns");

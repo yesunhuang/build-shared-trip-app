@@ -16,7 +16,7 @@ This page states the contract and the provider review. It is not evidence that a
 
 ## What it does and does not do
 
-- **Explicit only.** A lookup runs only when an owner or content manager presses **Search** or **Refresh** in the plan editor. There is no autocomplete, search-as-you-type, background refresh, bulk geocoding or periodic job.
+- **Explicit only.** A lookup runs only when an owner, content manager or current trip creator presses **Search** or **Refresh** in the plan editor. There is no autocomplete, search-as-you-type, background refresh, bulk geocoding or periodic job.
 - **Stored snapshots afterwards.** Opening the editor, opening or reloading a trip page, sync polls, and edits that do not touch the place or photo all render the stored selection. None of them calls the place or photo search API.
 - **Remote content is still remote.** The zero-lookup rule covers the search APIs only. Displaying a saved Commons image and loading map tiles are still ordinary browser requests to those hosts. Each provider sees the visitor's IP address and the requested image or tile. A missing or broken image falls back to the no-photo state and does not trigger a new lookup.
 - **No Google lookups.** The new search does not call Google APIs and does not scrape Google content. The existing full Google Maps place URL field keeps working as before. The separate, optional [Google Places UI Kit](google-places-ui-kit.md) feature does not change this. It adds only a browser-side Google component and a stored Place ID link, never Google data in `place` or `photo`.
@@ -46,8 +46,8 @@ With lookups off, the editor shows no search controls, or reports them as unavai
 
 | Method | Path | Who | Input / result |
 | --- | --- | --- | --- |
-| POST | `/api/trips/<id>/places/search` | owner, content manager (same origin for cookie sessions) | `{query, refresh?}` → `{results, cached}` |
-| POST | `/api/trips/<id>/photos/search` | owner, content manager (same origin for cookie sessions) | `{query, refresh?}` → `{results, cached}` |
+| POST | `/api/trips/<id>/places/search` | owner, content manager, current trip creator (same origin for cookie sessions) | `{query, refresh?}` → `{results, cached}` |
+| POST | `/api/trips/<id>/photos/search` | owner, content manager, current trip creator (same origin for cookie sessions) | `{query, refresh?}` → `{results, cached}` |
 
 - `query` is the user's explicit text. `refresh: true` bypasses the cache for that query. `cached` reports whether the results came from the cache.
 - Viewers, pending or revoked accounts, MCP tokens and OAuth tokens are refused, so they cannot trigger or spend upstream requests. Cookie requests need the configured Origin, like other cookie writes.

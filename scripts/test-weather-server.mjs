@@ -9,6 +9,7 @@
 // conflicts and identical-requestId retries; legacy dayLocations precedence; export/import; trip
 // independence.
 import assert from "node:assert/strict";
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -201,6 +202,7 @@ try {
   const post = (who, trip, requestId, changes) => api.as(who.cookie, `/api/trips/${trip.id}/changes`, { method: "POST", body: changeBody(trip, requestId, changes) });
 
   let alpha = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "wx-alpha", trip: fixtureTrip() } }), 201, "create alpha").trip;
+  grantFixtureMembership(runtime,alpha.id,viewer.id);
   let beta = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "wx-beta", trip: { ...fixtureTrip(), title: "Fictional Other Weekend" } } }), 201, "create beta").trip;
   assert.equal(hasField(alpha, "day-auto"), false, "create: absence preserved");
   assert.deepEqual(dayOf(alpha, "day-off").weatherLocationIds, [], "create: [] preserved");

@@ -1,5 +1,7 @@
 # Input schema
 
+Schema-v7 [account membership](trip-membership.md) is separate access metadata. Read-only `members`/`access` returned beside a trip are not writable content fields and never belong in `participantGroups`, content imports or exports. All content fields below require the target trip's current editing authority (owner, global content manager or its creator).
+
 Optional trip `cover` and plan `cardCategory` are documented in the [cover and category contract](trip-cover-and-categories.md). Cover is an independent bounded PNG object or null; category is an explicit enum with neutral default. They share canonical HTTP/MCP and authoring-envelope validation, backup/export support and version-aware edits.
 
 Plans also support the optional ordered [related-links collection](plan-related-links.md): at most six stable `{id,label,url}` entries, shared HTTP/MCP validation, native card anchors and authorized-editor controls. Missing means unchanged on a plan patch; `[]` clears it.
@@ -412,7 +414,7 @@ A trip-level choice whether this trip's opened plans may show Google place detai
 
 - Exactly `true` or `false`. Strings such as `"true"`, numbers, `null`, arrays and objects are refused on `update_trip`, `replace_content`, create and import, over HTTP and MCP alike, and the whole batch is not applied. In `update_trip`, `null` does not remove it; send `false`.
 - Absent means `false`. New trips start with `false`. Trips stored before the field existed are read as `false` (reads, `get_trip`, export) without rewriting the stored row; the next ordinary write stores the explicit value. Exports carry it and imports keep it; an import without it is `false`. No schema migration is involved.
-- The owner and content managers may change it (it is trip content, like `title`); viewers, anonymous, pending and revoked users cannot.
+- The owner, content managers and current trip creators may change it (it is trip content, like `title`). Ordinary creators use the web; existing MCP/import authority stays owner/content-manager only; joined read-only members, anonymous, pending and revoked users cannot.
 - It has an effect only when the operator has also enabled the site-wide feature with a browser key. It can be saved while that is off, and it never enables it.
 - Changing it never changes plans, `place`, `photo`, `googlePlaceAssociation`, IDs or any other field.
 

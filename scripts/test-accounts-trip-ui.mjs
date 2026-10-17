@@ -7,6 +7,7 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { readConfig, startServer } from "../server/app.mjs";
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "shared-trip-accounts-trip-"));
 const token = crypto.randomBytes(32).toString("base64url");
@@ -25,6 +26,7 @@ const username = "coast.viewer"; const password = "Fictional-" + crypto.randomBy
 assert.equal((await fetch(runtime.url + "/api/accept-invite", { method: "POST", headers: json, body: JSON.stringify({ invitation, username, password }) })).status, 201);
 const accountId = runtime.accounts.listAccounts().accounts[0].id;
 assert.equal((await fetch(runtime.url + "/api/users/" + accountId + "/approve", { method: "POST", headers: owner })).status, 200);
+grantFixtureMembership(runtime,trip.id,accountId);
 const signIn = await fetch(runtime.url + "/api/login", { method: "POST", headers: json, body: JSON.stringify({ username, password }) });
 assert.equal(signIn.status, 200);
 const cookie = signIn.headers.get("set-cookie").split(";")[0];
@@ -97,7 +99,6 @@ try {
   // The server is authoritative even if a modified client tries to write.
   const client = await import("../assets/app-template/public/hosted-client.js?v=__CACHE_VERSION__");
   await assert.rejects(client.hostedApi.applyChanges(trip.id, trip.version, [{ type: "update_trip", fields: { title: "Viewer rename" } }]), (error) => error.status === 403);
-  await assert.rejects(client.hostedApi.createTrip({ title: "Viewer draft" }), (error) => error.status === 403);
   await assert.rejects(client.hostedApi.listAccounts(), (error) => error.status === 403);
   assert.equal(current().title, "Fictional Viewer Coast"); assert.equal(runtime.service.listTrips().trips.length, 1);
   assert.equal((await client.hostedApi.exportTrip(trip.id)).trip.id, trip.id, "export remains available");

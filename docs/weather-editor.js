@@ -7,7 +7,7 @@
 //   "saved" | "conflict" | "forbidden" | "invalid" | "offline" | "error".
 // Typed coordinates are validated locally (parseCoordinateEntry) and again by the server. Nothing
 // here geocodes or searches: a place is either a saved point or explicitly typed coordinates.
-import { parseCoordinateEntry, pointKey } from "./weather-association.js?v=v-a8561e8c5fe7";
+import { parseCoordinateEntry, pointKey } from "./weather-association.js?v=v-bae112ca3ed2";
 
 export const WEATHER_EDITOR_LANGUAGES = Object.freeze(["en", "zh-Hans", "zh-Hant", "ja"]);
 

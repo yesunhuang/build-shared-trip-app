@@ -109,16 +109,17 @@ export async function startServer(config) {
   // fails closed and leaves the data untouched.
   const lock = acquireDataLock(config.dataDir);
   let db;
-  try { db = openDatabase(path.join(config.dataDir,"shared-trip.sqlite")); }
+  try { db = openDatabase(path.join(config.dataDir,"shared-trip.sqlite"),{origin:config.origin}); }
   catch (error) { lock.release(); throw error; }
   const service = new TripService(db);
   const audit = new AuditLog(db, { clock });
   const accounts = new AccountStore(db, { audit });
   const tokens = new McpTokenStore(db, { audit });
-  const gateway = new ContentGateway(service, audit);
+  const gateway = new ContentGateway(service, audit, {clock,origin:config.origin});
   const sessions = new SessionStore();
   const loginLimiter = new AttemptLimiter({ limit: 10, windowMs: 60_000, message: "Try signing in again later." });
   const inviteLimiter = new AttemptLimiter({ limit: 10, windowMs: 15 * 60_000, message: "Try again later." });
+  const tripJoinLimiter = new AttemptLimiter({limit:20,windowMs:15*60_000,message:"Try joining again later."});
   const oauthStore = new OAuthStore(db, { audit, username: oauthUsername });
   let oauth; let lookups;
   try {
@@ -251,7 +252,7 @@ export async function startServer(config) {
         if (ownerForm) {
           if (typeof body.token !== "string" || body.token.length > 512 || !sameSecret(body.token,config.token)) throw failed();
           issueSession({ role: OWNER });
-          send(res,200,{authenticated:true,role:OWNER}); return;
+          send(res,200,{authenticated:true,role:OWNER,landingPath:gateway.membership.landing({role:OWNER},clock())}); return;
         }
         if (!viewerForm) throw failed();
         const username = normalizeUsername(body.username);
@@ -263,7 +264,7 @@ export async function startServer(config) {
         const current = accounts.sessionRecord(record.id);
         if (!current || current.status !== "approved") throw new DomainError("access_denied",403,"Access is not available for this account.");
         issueSession({ role: current.role, userId: current.id, epoch: current.session_epoch });
-        send(res,200,{authenticated:true,role:current.role,username:current.username}); return;
+        send(res,200,{authenticated:true,role:current.role,username:current.username,landingPath:gateway.membership.landing({role:current.role,userId:current.id},clock())}); return;
       }
 
       if (pathname === "/api/accept-invite" && req.method === "POST") {
@@ -289,7 +290,7 @@ export async function startServer(config) {
         if (unsafe && principal.via === "cookie" && origin !== allowedOrigin) throw new DomainError("forbidden_origin",403,"Same-origin browser request required.");
         if (principal.role !== OWNER && !mayAccess(principal, req.method, pathname)) throw forbidden();
       }
-      if (media) { serveProtectedMedia(req,res,pathname); return; }
+      if (media) { if(!gateway.membership.canReadMedia(principal,pathname))throw new DomainError("not_found",404,"Not found.");serveProtectedMedia(req,res,pathname); return; }
       const requireOwner = () => { if (principal?.role !== OWNER) throw forbidden(); };
       if (pathname === "/api/session" && req.method === "GET") {
         send(res,200,{authenticated:true,role:principal.role,...(principal.username?{username:principal.username}:{}),capabilities:capabilitiesFor(principal),...sessionFeatures(googlePlaces)}); return;
@@ -315,6 +316,7 @@ export async function startServer(config) {
       if (pathname === "/api/trips" && req.method === "GET") result = gateway.listTrips(context);
       else if (pathname === "/api/trips" && req.method === "POST") { result = gateway.createTrip(context, await readJSON(req)); status = 201; }
       else if (pathname === "/api/import" && req.method === "POST") { result = gateway.importTrip(context, await readJSON(req)); status = 201; }
+      else if(pathname==="/api/join-trip"&&req.method==="POST") {tripJoinLimiter.check(client,clock());tripJoinLimiter.fail(client,clock());result=gateway.membership.redeem(principal,await readJSON(req,SMALL_BODY));}
       else if (pathname === "/api/invitations" && req.method === "POST") { requireOwner(); result = await administer("invitation.create", null, async () => accounts.createInvitation(await readJSON(req, SMALL_BODY))); status = 201; }
       else if (pathname === "/api/users" && req.method === "GET") { requireOwner(); result = accounts.listAccounts(); }
       else if (pathname === "/api/audit" && req.method === "GET") { requireOwner(); result = audit.list(url.searchParams.get("limit")); }
@@ -327,7 +329,11 @@ export async function startServer(config) {
         const trip = /^\/api\/trips\/([^/]+)(?:\/(changes|export))?$/.exec(pathname);
         const lookup = LOOKUP_ROUTE.exec(pathname);
         const reservation = GOOGLE_RESERVATION_ROUTE.exec(pathname);
-        if (reservation && req.method === "POST") {
+        const members=/^\/api\/trips\/([^/]+)\/members$/.exec(pathname);
+        const tripInvites=/^\/api\/trips\/([^/]+)\/invitations(?:\/([^/]+)\/revoke)?$/.exec(pathname);
+        if(members&&req.method==="POST")result=gateway.membership.assign(principal,decodeSegment(members[1]),await readJSON(req,SMALL_BODY));
+        else if(tripInvites){const id=decodeSegment(tripInvites[1]);if(tripInvites[2]&&req.method==="POST")result=gateway.membership.revoke(principal,id,decodeSegment(tripInvites[2]),await readJSON(req,SMALL_BODY));else if(!tripInvites[2]&&req.method==="POST"){result=gateway.membership.issue(principal,id,await readJSON(req,SMALL_BODY));status=201;}else if(!tripInvites[2]&&req.method==="GET")result=gateway.membership.invitations(principal,id);}
+        else if (reservation && req.method === "POST") {
           // One allowance reservation before one app-controlled Google action in a browser. Browser
           // sessions only (owner, content manager or approved viewer; never the owner bearer, MCP or
           // OAuth tokens). The global feature, this trip's own opt-in and, for details, a saved
@@ -336,8 +342,8 @@ export async function startServer(config) {
           if (principal.via !== "cookie") throw forbidden();
           if (!googlePlaces.enabled) throw new DomainError("google_places_disabled", 503, "Google place features are not enabled on this server.");
           const input = parseReservationBody(await readJSON(req, SMALL_BODY));
-          if (input.kind !== "details" && !canEditContent(principal)) throw forbidden();
           const { trip } = gateway.getTrip(context, decodeSegment(reservation[1]));
+          if (input.kind !== "details" && !gateway.membership.canEdit(principal,trip.id)) throw forbidden();
           if (!tripGooglePlacePhotosEnabled(trip)) throw conflict("google_trip_not_enabled", "Google place details are turned off for this trip.");
           if (input.kind !== "details" && trip.archived) throw conflict("trip_archived", "The trip is archived. Unarchive it before searching on Google.");
           if (input.kind === "details" && !planHasCurrentAssociation(trip, input.planId, input.placeId)) {

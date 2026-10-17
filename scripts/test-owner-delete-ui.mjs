@@ -134,7 +134,7 @@ try {
   // A. Owner: a Delete control on every card, active and archived; nothing opens or is sent by itself.
   await until(() => ownerHome() && cards().length === 4, "owner home");
   for (const title of [HARBOR, FERRY, PIER, CEDAR]) {
-    assert.deepEqual(labels(cardFor(title)), ["Edit", "Archive", "Export", "Delete"], "owner card actions for " + title);
+    assert.deepEqual(labels(cardFor(title)), ["Edit", "Archive", "Export", "Participants", "Delete"], "owner card actions for " + title);
     const control = deleteControl(title);
     assert.equal(control.type, "button");
     assert.equal(control.getAttribute("aria-label"), "Delete trip " + title, "accessible name names the trip");
@@ -142,7 +142,7 @@ try {
   }
   assert.equal(cardFor(ORCHARD), undefined, "archived trips hidden until shown");
   showArchived(true);
-  for (const title of [ORCHARD, SALT]) assert.deepEqual(labels(cardFor(title)), ["Edit", "Restore", "Export", "Delete"], "owner archived card actions for " + title);
+  for (const title of [ORCHARD, SALT]) assert.deepEqual(labels(cardFor(title)), ["Edit", "Restore", "Export", "Participants", "Delete"], "owner archived card actions for " + title);
   assert.equal(doc.querySelectorAll("dialog").length, 0, "no confirmation until asked");
   await sleep(30);
   assert.equal(deletes().length, 0, "nothing is deleted without a confirmation");
@@ -323,7 +323,7 @@ try {
   assert.equal(byId("status").dataset.error, "true");
   // Content managers edit, archive and restore every trip, but never see a whole-trip delete, archived included.
   assert.ok(cardFor(CEDAR) && cardFor(SALT), "manager sees active and archived trips");
-  for (const card of cards()) assert.deepEqual(labels(card), ["Edit", card === cardFor(SALT) ? "Restore" : "Archive", "Export"], "no delete control for a content manager");
+  for (const card of cards()) assert.deepEqual(labels(card), ["Edit", card === cardFor(SALT) ? "Restore" : "Archive", "Export", "Participants"], "no delete control for a content manager");
   assert.equal(doc.querySelectorAll("[data-delete-trip], dialog").length, 0);
 
   // I. Role demotion while the confirmation is open clears it.
@@ -337,7 +337,7 @@ try {
   // J. Viewer: export only, active and archived.
   role = "viewer"; refresh();
   await until(() => !byId("read-only-note").hidden && byId("create").hidden && idle(), "viewer view");
-  for (const card of cards()) assert.deepEqual(labels(card), ["Export"], "viewer card actions");
+  for (const card of cards()) assert.deepEqual(labels(card), ["Export","Participants"], "member card actions");
   assert.equal(doc.querySelectorAll("[data-delete-trip], dialog").length, 0);
 
   // K. Session ends while the confirmation is open.

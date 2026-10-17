@@ -10,6 +10,7 @@ import {
   scriptSafeJSON,
   setBootSession,
   setBootTrip,
+  sessionForTrip,
   toRenderTrip,
   tripIdFromPath
 } from "./hosted-client.js?v=__CACHE_VERSION__";
@@ -114,7 +115,7 @@ async function load() {
     const [payload, session] = await Promise.all([hostedApi.getTrip(tripId), hostedApi.session()]);
     const trip = expectTrip(payload, tripId);
     loading = false;
-    setBootSession(session);
+    setBootSession(sessionForTrip(session,payload));
     await start(trip);
   } catch (error) {
     loading = false;

@@ -14,6 +14,7 @@
 // preference saved while the site-wide feature is off without enabling anything; OSM place,
 // Commons photo, plan IDs and Google associations preserved byte-for-byte when opting in and out.
 import assert from "node:assert/strict";
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -207,6 +208,7 @@ try {
   const managerSecret = expect(await api.owner(`/api/users/${manager.id}/mcp-tokens`, { method: "POST", body: { label: "Fictional photos probe" } }), 201, "manager MCP credential").secret;
 
   let alpha = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "gp-alpha", trip: fixtureTrip() } }), 201, "create alpha").trip;
+  grantFixtureMembership(runtime,alpha.id,viewer.id);
   let beta = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "gp-beta", trip: { ...fixtureTrip(), title: "Fictional Ferry Weekend" } } }), 201, "create beta").trip;
   assert.equal(alpha[FIELD], false, "default off for a new trip");
   assert.equal(beta[FIELD], false);
@@ -230,7 +232,6 @@ try {
   // Viewer, anonymous, pending and revoked are refused, including a forced replace_content.
   expect(await api.as(viewer.cookie, `/api/trips/${alpha.id}/changes`, { method: "POST", body: changeBody(alpha, "gp-viewer", setPhotos(true)) }), 403, "viewer update_trip", "forbidden");
   expect(await api.as(viewer.cookie, `/api/trips/${alpha.id}/changes`, { method: "POST", body: changeBody(alpha, "gp-viewer-forced", [{ type: "replace_content", trip: { ...structuredClone(alpha), [FIELD]: true } }]) }), 403, "viewer forced replace_content", "forbidden");
-  expect(await api.as(viewer.cookie, "/api/trips", { method: "POST", body: { requestId: "gp-viewer-create", trip: fixtureTrip({ [FIELD]: true }) } }), 403, "viewer create", "forbidden");
   expect(await api.call(`/api/trips/${alpha.id}/changes`, { method: "POST", headers: { Origin: api.base }, body: changeBody(alpha, "gp-anon", setPhotos(true)) }), 401, "anonymous", "unauthorized");
   const pendingLogin = await (({ password }) => api.call("/api/login", { method: "POST", headers: { Origin: api.base }, body: { username: "fictional.photos.pending", password } }))(pending);
   assert.equal(pendingLogin.status, 403, "a pending account gets no session");

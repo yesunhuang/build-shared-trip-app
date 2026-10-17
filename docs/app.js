@@ -1,8 +1,10 @@
-import { getGooglePlaceLinks } from "./google-place-links.js?v=v-a8561e8c5fe7";
+import { getGooglePlaceLinks } from "./google-place-links.js?v=v-bae112ca3ed2";
+import {createTripParticipantsDialog,membershipText} from "./trip-members-editor.js?v=v-bae112ca3ed2";
 import {
   GOOGLE_PLACE_PHOTOS_FIELD,
   buildGooglePlacePhotosField,
   createTripPoller,
+  clearProtectedBrowserState,
   downloadJSON,
   expectTrip,
   exportFilename,
@@ -21,7 +23,7 @@ import {
   toRenderTrip,
   tripHasGooglePlacePhotos,
   tripIdFromPath
-} from "./hosted-client.js?v=v-a8561e8c5fe7";
+} from "./hosted-client.js?v=v-bae112ca3ed2";
 import {
   GOOGLE_PLACE_ASSOCIATION_FIELD,
   associationForPlan,
@@ -29,7 +31,7 @@ import {
   locationBindingForPlan,
   normalizeGooglePlaceAssociation,
   placeIdFromUserInput
-} from "./google-place-association.js?v=v-a8561e8c5fe7";
+} from "./google-place-association.js?v=v-bae112ca3ed2";
 import {
   VENUE_QUERY_MAX,
   checkVenueQuery,
@@ -40,19 +42,19 @@ import {
   createPlacePreviewSession,
   createPlaceSearchSession,
   googleText
-} from "./google-places-ui-kit.js?v=v-a8561e8c5fe7";
-import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-a8561e8c5fe7";
-import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=v-a8561e8c5fe7";
-import { linkedTextElement, locationTextNode } from "./text-links.js?v=v-a8561e8c5fe7";
-import { projectCardLinks, renderCardLinkGroup, cardLinkIcon } from "./card-link-presentation.js?v=v-a8561e8c5fe7";
-import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=v-a8561e8c5fe7";
-import { applyTripBranding } from "./trip-branding.js?v=v-a8561e8c5fe7";
-import { createBrandingEditor, brandingText } from "./branding-editor.js?v=v-a8561e8c5fe7";
-import { applyTripCover, cardCategory, categoryBadge, presentationText } from "./trip-presentation.js?v=v-a8561e8c5fe7";
-import { createCoverEditor } from "./cover-editor.js?v=v-a8561e8c5fe7";
-import { optimizedPhotoUrl } from "./photo-assets.js?v=v-a8561e8c5fe7";
-import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-a8561e8c5fe7";
-import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-a8561e8c5fe7";
+} from "./google-places-ui-kit.js?v=v-bae112ca3ed2";
+import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-bae112ca3ed2";
+import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=v-bae112ca3ed2";
+import { linkedTextElement, locationTextNode } from "./text-links.js?v=v-bae112ca3ed2";
+import { projectCardLinks, renderCardLinkGroup, cardLinkIcon } from "./card-link-presentation.js?v=v-bae112ca3ed2";
+import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=v-bae112ca3ed2";
+import { applyTripBranding } from "./trip-branding.js?v=v-bae112ca3ed2";
+import { createBrandingEditor, brandingText } from "./branding-editor.js?v=v-bae112ca3ed2";
+import { applyTripCover, cardCategory, categoryBadge, presentationText } from "./trip-presentation.js?v=v-bae112ca3ed2";
+import { createCoverEditor } from "./cover-editor.js?v=v-bae112ca3ed2";
+import { optimizedPhotoUrl } from "./photo-assets.js?v=v-bae112ca3ed2";
+import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-bae112ca3ed2";
+import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-bae112ca3ed2";
 import {
   getInitialLanguage,
   languageStorageKey,
@@ -60,23 +62,23 @@ import {
   localizeTrip,
   saveLanguage,
   ui
-} from "./i18n.js?v=v-a8561e8c5fe7";
+} from "./i18n.js?v=v-bae112ca3ed2";
 import {
   createWeatherForecastController,
   localizeForecastLocation,
   weatherCodeIcon,
   weatherCodeKey
-} from "./weather-forecast.js?v=v-a8561e8c5fe7";
+} from "./weather-forecast.js?v=v-bae112ca3ed2";
 import {
   applyDayWeatherChangesLocally,
   buildDayWeatherChanges,
   isValidCoordinate as isValidWeatherCoordinate,
   pointKey as weatherPointKey,
   resolveDayWeather
-} from "./weather-association.js?v=v-a8561e8c5fe7";
-import { createDayWeatherEditor, weatherEditorText } from "./weather-editor.js?v=v-a8561e8c5fe7";
-import { getFlightBookings } from "./flight-bookings.js?v=v-a8561e8c5fe7";
-import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-a8561e8c5fe7";
+} from "./weather-association.js?v=v-bae112ca3ed2";
+import { createDayWeatherEditor, weatherEditorText } from "./weather-editor.js?v=v-bae112ca3ed2";
+import { getFlightBookings } from "./flight-bookings.js?v=v-bae112ca3ed2";
+import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-bae112ca3ed2";
 import {
   OSM_COPYRIGHT_URL,
   coordinateGoogleMapsUrl,
@@ -90,7 +92,7 @@ import {
   placeForSaving,
   readSavedPhoto,
   readSavedPlace
-} from "./place-picker.js?v=v-a8561e8c5fe7";
+} from "./place-picker.js?v=v-bae112ca3ed2";
 
 const FIREBASE_SDK_VERSION = "12.15.0";
 // Self-hosted mode is decided before any Firebase code path. It never loads the
@@ -102,7 +104,7 @@ let firebaseConfig = {};
 let tripDocumentPath = "";
 const firebaseConfigPromise = HOSTED
   ? Promise.resolve()
-  : import("./firebase-config.js?v=v-a8561e8c5fe7")
+  : import("./firebase-config.js?v=v-bae112ca3ed2")
     .then((module) => {
       firebaseConfig = module.firebaseConfig || {};
       tripDocumentPath = module.tripDocumentPath || "";
@@ -4179,6 +4181,7 @@ function connectHostedSync() {
   hostedPoller = createTripPoller({
     load: () => hostedApi.getTrip(HOSTED_TRIP_ID),
     onData: (payload) => {
+      if(payload.access&&payload.access.canEdit===HOSTED_READ_ONLY){hostedReady=false;stopTripGooglePlaces();location.reload();return;}
       hostedReady = true; syncReady = true;
       if (!hostedWriteInFlight) acceptHostedTrip(expectTrip(payload, HOSTED_TRIP_ID));
       setSyncStatus("synced", "synced");
@@ -4186,7 +4189,14 @@ function connectHostedSync() {
     onError: (error, { final }) => {
       hostedReady = false; syncReady = false;
       if (error.status === 401) { hostedPoller.stop(); leaveForSignIn(); return; }
+      if([403,404,410].includes(error.status)){
+        hostedPoller.stop();endWeatherSession();stopTripGooglePlaces();linkGuard.dispose();hostedServerTrip=null;currentTrip={days:[],reminders:[]};
+        void clearProtectedBrowserState();
+        const home=textElement("a","button button--light",ui(currentLanguage,"allTrips"));home.href="/";
+        const main=element("main","page-shell");main.append(textElement("p","empty-state",ui(currentLanguage,"tripUnavailable")),home);document.body.replaceChildren(main);return;
+      }
       if (final) {
+        document.querySelectorAll(".trip-access-dialog").forEach(dialog=>{dialog.replaceChildren();dialog.close?.();dialog.remove();});
         hostedPoller.stop(); hostedServerTrip = null; currentTrip = {days:[],reminders:[]};
         document.querySelector("main").replaceChildren(textElement("p","empty-state",ui(currentLanguage,"tripUnavailable")));
       }
@@ -4256,15 +4266,18 @@ function renderHostedControls() {
     try {downloadJSON(await hostedApi.exportTrip(HOSTED_TRIP_ID),exportFilename(hostedServerTrip));}
     catch(error){if(error.status===401)leaveForSignIn();else showToast("saveError",true);}
   });
+  const participants=textElement("button","button button--quiet",membershipText(currentLanguage,"open"));participants.type="button";participants.dataset.action="trip-participants";
+  participants.addEventListener("click",()=>{const panel=createTripParticipantsDialog({document,tripId:HOSTED_TRIP_ID,language:currentLanguage,onAccessLost:()=>{hostedReady=false;hostedPoller?.retryNow();}});document.body.append(panel.dialog);panel.dialog.showModal();panel.load();});
   if (HOSTED_READ_ONLY) {
     const badge=textElement("span","hosted-read-only-badge",READ_ONLY_LABELS[currentLanguage]||READ_ONLY_LABELS.en);
-    controls.replaceChildren(home,badge,exportButton,button("retrySync",()=>hostedPoller?.retryNow()),button("signOut",signOutAndLeave));
+    controls.replaceChildren(home,badge,exportButton,participants,button("retrySync",()=>hostedPoller?.retryNow()),button("signOut",signOutAndLeave));
     els.addReminder.hidden=true;els.addReminder.disabled=true;
     return;
   }
   controls.replaceChildren(home,
     button("editTrip",()=>openMetadataDialog()),
     exportButton,
+    participants,
     button("retrySync",()=>hostedPoller?.retryNow()),
     button("signOut",signOutAndLeave));
   const brandingButton=textElement("button","button button--quiet",brandingText(currentLanguage,"open"));brandingButton.type="button";brandingButton.dataset.action="edit-branding";brandingButton.disabled=Boolean(hostedServerTrip.archived);brandingButton.addEventListener("click",openBrandingDialog);controls.insertBefore(brandingButton,exportButton);

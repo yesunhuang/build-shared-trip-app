@@ -9,6 +9,8 @@ import { ACCOUNT_ID_PATTERN, ACCOUNT_ROLES, ACCOUNT_STATUSES } from "./auth/acco
 import { MCP_TOKEN_ID_PATTERN } from "./auth/mcp-tokens.mjs";
 import { OAUTH_CLIENT_ID_PATTERN, OAUTH_GRANT_ID_PATTERN, OAUTH_REVOKE_REASONS, OAUTH_SCOPE, OAUTH_TOKEN_KINDS, PKCE_CHALLENGE_PATTERN } from "./auth/oauth.mjs";
 import { AUDIT_ACTIONS, AUDIT_CHANNELS, AUDIT_OUTCOMES } from "./audit.mjs";
+import { MEMBERSHIP_TABLES, TRIP_INVITE_ID } from "./trip-membership.mjs";
+import { localPhotoPaths, PRIVATE_PHOTO } from "./domain/media.mjs";
 
 // Schema history:
 //   v1 trips + request_log (days used "plans")
@@ -22,7 +24,10 @@ import { AUDIT_ACTIONS, AUDIT_CHANNELS, AUDIT_OUTCOMES } from "./audit.mjs";
 //      deletion time, never trip content. A tombstoned ID is never reused. Migration adds the empty
 //      table; every existing row (trips, retry records, accounts, credentials, grants, audit) is
 //      untouched.
-export const SCHEMA_VERSION = 6;
+//   v7 trip access, account memberships, digest-only join invitations, media bindings and bounded
+//      join attempts. Existing trips get unknown creator metadata, no inferred members. Auth,
+//      roles, credentials, OAuth, content versions and the separate Google ledger are unchanged.
+export const SCHEMA_VERSION = 7;
 const BASE_TABLES = "CREATE TABLE IF NOT EXISTS trips (id TEXT PRIMARY KEY, version INTEGER NOT NULL, archived INTEGER NOT NULL, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS request_log (scope TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(scope,request_id));";
 const ACCOUNT_TABLES = "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('pending','approved','revoked')), session_epoch INTEGER NOT NULL DEFAULT 0, invitation_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); " +
   "CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at TEXT, used_by TEXT);";
@@ -39,7 +44,7 @@ const V5_TABLES = "CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY
 const V6_TABLES = "CREATE TABLE IF NOT EXISTS trip_tombstones (id TEXT PRIMARY KEY, deleted_version INTEGER NOT NULL CHECK (deleted_version > 0), deleted_at TEXT NOT NULL);";
 const hasColumn = (db, table, column) => db.prepare("SELECT name FROM pragma_table_info(?)").all(table).some((row) => row.name === column);
 
-export function openDatabase(filename) {
+export function openDatabase(filename, { origin } = {}) {
   fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(filename);
   fs.chmodSync(filename, 0o600);
@@ -90,6 +95,15 @@ export function openDatabase(filename) {
     // v6 adds the deletion tombstone table only (CREATE ... IF NOT EXISTS, so re-running is a no-op).
     db.exec(V6_TABLES);
     if (old < 6) db.exec("PRAGMA user_version=6");
+    // v7 adds access metadata only. Legacy creator is unknown; no account is auto-enrolled.
+    db.exec(MEMBERSHIP_TABLES);
+    if(old<7){
+      for(const row of db.prepare("SELECT id,data FROM trips").all()){
+        db.prepare("INSERT OR IGNORE INTO trip_access VALUES(?,NULL,1)").run(row.id);
+        for(const pathname of localPhotoPaths(JSON.parse(row.data),origin))db.prepare("INSERT OR IGNORE INTO trip_media VALUES(?,?)").run(row.id,pathname);
+      }
+      db.exec("PRAGMA user_version=7");
+    }
     db.exec("COMMIT");
   } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
   return db;
@@ -139,6 +153,7 @@ export function validateSnapshot(filename) {
     }
     if (version >= 5) validateOAuthTables(db);
     if (version >= 6) validateTombstones(db);
+    if(version>=7)validateMembership(db);
   } finally { db.close(); }
 }
 
@@ -158,7 +173,7 @@ function validateTombstones(db) {
     let result = null;
     try { result = JSON.parse(row.result); } catch { throw new Error("Invalid retry record in snapshot."); }
     if (result?.deletedTrip) continue;
-    const tripId = row.scope.startsWith("trip:") ? row.scope.slice(5) : (row.scope === "create" || row.scope === "import") ? result?.trip?.id : null;
+    const tripId = row.scope.startsWith("trip:") ? (result?.trip?.id??row.scope.slice(5)) : (row.scope === "create" || row.scope.startsWith("create:") || row.scope === "import") ? result?.trip?.id : null;
     if (tripId && deleted.has(tripId)) throw new Error("Unredacted retry record for a deleted trip in snapshot.");
   }
 }
@@ -166,6 +181,20 @@ function validateTombstones(db) {
 const isTime = (value) => typeof value === "string" && Number.isFinite(Date.parse(value));
 const isOptionalTime = (value) => value === null || isTime(value);
 const isDigest = (value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+
+function validateMembership(db){
+  if(db.prepare("PRAGMA foreign_key_check").all().length)throw new Error("Invalid membership references.");
+  const trips=new Set(db.prepare("SELECT id FROM trips").all().map(r=>r.id));
+  const users=new Set(db.prepare("SELECT id FROM users").all().map(r=>r.id));
+  const members=db.prepare("SELECT * FROM trip_members").all();
+  for(const row of members)if(!trips.has(row.trip_id)||!users.has(row.user_id)||!isTime(row.joined_at))throw new Error("Invalid trip member.");
+  const access=db.prepare("SELECT * FROM trip_access").all();
+  if(access.length!==trips.size)throw new Error("Missing trip access state.");
+  for(const r of access)if(!trips.has(r.trip_id)||!Number.isSafeInteger(r.revision)||r.revision<1||(r.creator!==null&&r.creator!=="owner"&&(!users.has(r.creator)||!members.some(m=>m.trip_id===r.trip_id&&m.user_id===r.creator))))throw new Error("Invalid trip access state.");
+  for(const r of db.prepare("SELECT * FROM trip_invitations").all())if(!TRIP_INVITE_ID.test(r.id)||!trips.has(r.trip_id)||!isDigest(r.token_hash)||(r.issuer!=="owner"&&!users.has(r.issuer))||!isTime(r.created_at)||!Number.isSafeInteger(r.expires_at)||!isOptionalTime(r.used_at)||!isOptionalTime(r.revoked_at)||(r.used_by!==null&&!users.has(r.used_by))||Boolean(r.used_by)!==Boolean(r.used_at))throw new Error("Invalid trip invitation.");
+  for(const r of db.prepare("SELECT * FROM trip_media").all())if(!trips.has(r.trip_id)||!PRIVATE_PHOTO.test(r.pathname))throw new Error("Invalid trip media binding.");
+  for(const r of db.prepare("SELECT * FROM trip_join_attempts").all())if(!users.has(r.user_id)||!Number.isSafeInteger(r.started_at)||!Number.isSafeInteger(r.attempts)||r.attempts<1)throw new Error("Invalid join attempt state.");
+}
 
 // Schema v5: every OAuth row must reference existing clients, grants and accounts, store only
 // digests, and use the fixed scope/kind/reason vocabularies.

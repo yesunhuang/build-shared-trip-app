@@ -1,7 +1,8 @@
 // Server-side role policy. The owner (admin bearer token or an owner browser session) may do
 // everything, including permanent trip deletion (DELETE /api/trips/<id>, owner-only and never
-// on any allowlist below); MCP additionally requires a bearer credential. Approved viewers get an explicit
-// allowlist of read-only routes. Approved content managers get the viewer allowlist plus trip
+// on any allowlist below); MCP additionally requires a bearer credential. Ordinary accounts get an
+// explicit route allowlist, followed by fresh trip membership/creator checks in ContentGateway.
+// Approved content managers keep their prior all-trip content authority plus trip
 // creation, import and trip changes (edit, delete content, replace content, archive/unarchive) for
 // all current and future trips. Everything not on an allowlist is refused, so a new owner route is
 // never accidentally exposed to viewers or content managers.
@@ -38,6 +39,7 @@ export function capabilitiesFor(principal) {
   return {
     readTrips: Boolean(principal), exportTrips: Boolean(principal),
     editTrips: editor, importTrips: editor, manageAccounts: owner,
+    createTrips: Boolean(principal),
     mcp: (owner && principal.via === "bearer") || isMcpOnlyPrincipal(principal)
   };
 }
@@ -45,9 +47,9 @@ export function capabilitiesFor(principal) {
 // /api/google-places/config is the optional, protected, no-store browser configuration for the
 // Google Places UI Kit. Viewers may display a saved association, so it is a read route; it contains
 // no trip data and never any MCP token or other server credential.
-const VIEWER_READ_ROUTES = [/^\/api\/session$/, /^\/api\/trips$/, /^\/api\/trips\/[^/]+$/, /^\/api\/trips\/[^/]+\/export$/, /^\/api\/google-places\/config$/];
+const VIEWER_READ_ROUTES = [/^\/api\/session$/, /^\/api\/trips$/, /^\/api\/trips\/[^/]+$/, /^\/api\/trips\/[^/]+\/export$/, /^\/api\/trips\/[^/]+\/invitations$/, /^\/api\/google-places\/config$/];
 // The opt-in public place/photo lookups (POST .../places/search and .../photos/search) are editing
-// aids, so they are content-manager routes and never viewer routes.
+// aids; admission is followed by a current owner/manager/trip-creator check, never a read-only member.
 export const LOOKUP_ROUTE = /^\/api\/trips\/([^/]+)\/(places|photos)\/search$/;
 // Google allowance reservations (google-allowance.mjs). An approved viewer may POST here, but the
 // handler grants viewers only "details" reservations for a saved, current association; "search" and
@@ -58,6 +60,8 @@ const MANAGER_WRITE_ROUTES = [/^\/api\/trips$/, /^\/api\/import$/, /^\/api\/trip
 
 export function viewerMayAccess(method, pathname) {
   if (method === "POST" && pathname === "/api/logout") return true;
+  // Route admission only: membership/creator checks are authoritative in the shared gateway.
+  if(method==="POST"&&(pathname==="/api/trips"||pathname==="/api/join-trip"||/^\/api\/trips\/[^/]+\/(?:changes|invitations|members)$/.test(pathname)||/^\/api\/trips\/[^/]+\/invitations\/[^/]+\/revoke$/.test(pathname)||LOOKUP_ROUTE.test(pathname)))return true;
   if (method === "POST" && GOOGLE_RESERVATION_ROUTE.test(pathname)) return true;
   if (isProtectedMediaPath(pathname)) return method === "GET" || method === "HEAD";
   return method === "GET" && VIEWER_READ_ROUTES.some((route) => route.test(pathname));

@@ -7,6 +7,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { readConfig, startServer } from "../server/app.mjs";
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "shared-trip-accounts-home-"));
 const token = crypto.randomBytes(32).toString("base64url");
@@ -89,6 +90,7 @@ try {
   assert.deepEqual([...row.querySelectorAll("button")].map((b) => b.textContent), ["Approve", "Revoke"]);
   row.querySelector("button").click();
   await until(() => runtime.accounts.listAccounts().accounts[0].status === "approved" && byId("account-list").querySelector('[data-status="approved"]'), "approved");
+  for(const trip of runtime.service.listTrips().trips)grantFixtureMembership(runtime,trip.id,runtime.accounts.listAccounts().accounts[0].id);
   assert.ok(!bodyText().includes(code), "the one-time invitation code is not redisplayed after leaving that session");
 
   // Approved viewer: read/export only.
@@ -96,12 +98,10 @@ try {
   viewerForm.elements.username.value = "orchard.viewer"; viewerForm.elements.password.value = viewerSecret; submit(viewerForm);
   await until(() => window.document.querySelectorAll(".trip-card").length === 2, "viewer trip list");
   assert.equal(viewerForm.elements.password.value, "");
-  assert.ok(byId("create").hidden && byId("import-control").hidden && byId("import").disabled, "no create/import controls");
+  assert.ok(!byId("create").hidden && byId("import-control").hidden && byId("import").disabled, "ordinary accounts may create their own trips; import remains privileged");
   assert.ok(!byId("read-only-note").hidden && byId("read-only-note").textContent.includes("Read-only"));
   assert.ok(byId("accounts").hidden && !byId("account-list").children.length, "no account management");
-  for (const card of window.document.querySelectorAll(".trip-card")) assert.deepEqual([...card.querySelectorAll("button")].map((b) => b.textContent), ["Export"]);
-  byId("create").click(); await new Promise((r) => nativeTimeout(r, 30));
-  assert.equal(window.document.querySelector("dialog"), null, "hidden create control is inert");
+  for (const card of window.document.querySelectorAll(".trip-card")) assert.deepEqual([...card.querySelectorAll("button")].map((b) => b.textContent), ["Export","Participants"]);
   for (const value of [viewerSecret, code, token]) assert.ok(!storageText().includes(value) && !bodyText().includes(value), "no credential in page or storage");
 
   // Revocation: the next refresh clears protected content.
@@ -118,7 +118,7 @@ try {
   }
   for (const url of requested) for (const value of [token, code, viewerSecret]) assert.ok(!url.includes(value), "credentials never appear in request URLs");
   assert.deepEqual(errors, []);
-  console.log("Account home DOM simulation passed: owner token sign-in, one-time invitation display, form-based redemption into a pending account, generic pending refusal, owner approval, read-only viewer list/export without create/import/edit/archive/account controls, revocation clearing, four languages, and no credentials in URLs or storage. No browser layout claim.");
+  console.log("Account home DOM simulation passed: owner token sign-in, one-time invitation display, form-based redemption into a pending account, generic pending refusal, owner approval, assigned-member list/export and own-trip creation, without editing joined trips or import/account controls, revocation clearing, four languages, and no credentials in URLs or storage. No browser layout claim.");
 } finally {
   timers.forEach(clearTimeout); window.close(); globalThis.fetch = nativeFetch; globalThis.setTimeout = nativeTimeout; await runtime.close(); fs.rmSync(directory, { recursive: true, force: true });
 }
