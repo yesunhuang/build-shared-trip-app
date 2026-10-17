@@ -1,5 +1,5 @@
-import {prepareLogoFile} from "./branding-editor.js?v=v-4b1b12ffbd8e";
-import {PLAN_PHOTO_BYTES_MAX,PLAN_PHOTO_EDGE_MAX,uploadedPhotoProblems,uploadedPhotoSource,planPhotoText} from "./plan-photo.js?v=v-4b1b12ffbd8e";
+import {prepareLogoFile} from "./branding-editor.js?v=v-1b17bacdae34";
+import {PLAN_PHOTO_BYTES_MAX,PLAN_PHOTO_EDGE_MAX,uploadedPhotoProblems,uploadedPhotoSource,planPhotoText} from "./plan-photo.js?v=v-1b17bacdae34";
 export const preparePlanPhotoFile=(file,options)=>prepareLogoFile(file,{...options,edges:[PLAN_PHOTO_EDGE_MAX,768,512,384,256,192,128],bytesMax:PLAN_PHOTO_BYTES_MAX});
 // A draft-only fieldset inside the ordinary version-aware plan editor. No API or provider calls.
 export function createPlanPhotoFields({doc,plan,language="en",onBusy=()=>{},prepareFile=preparePlanPhotoFile}){

@@ -1,4 +1,4 @@
-@import url("./trip-members.css?v=v-4b1b12ffbd8e");
+@import url("./trip-members.css?v=v-1b17bacdae34");
 :root {
   color-scheme: light;
   --ink: #17362f;
@@ -29,6 +29,7 @@
 }
 
 .plan-photo-editor { min-width:0; margin:1rem 0; padding:1rem; border:1px solid var(--line); border-radius:12px; }
+.plan-photo-editor .field { display:grid; grid-template-columns:minmax(0,1fr); gap:.35rem; margin:.65rem 0; }
 .plan-photo-editor input { max-width:100%; min-width:0; min-height:44px; }
 .plan-photo-editor button { min-height:44px; white-space:normal; }
 .plan-photo-preview { display:block; width:100%; max-width:320px; height:180px; object-fit:contain; background:var(--paper); border-radius:10px; margin:.75rem 0; }

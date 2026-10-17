@@ -27,7 +27,7 @@ try{
   await open();assert.equal(await fields.locator("input[type=file]").getAttribute("accept"),"image/png,image/jpeg,image/webp");
   await upload(png);await fields.locator("input[type=text]").fill("Fictional harbor photograph <literal>");
   assert((await fields.locator("img").getAttribute("src")).startsWith("data:image/png;base64,"));assert.equal(runtime.service.getTrip(trip.id).trip.version,trip.version,"preview has no write");
-  const bounds=await dialog.evaluate(n=>({scroll:n.scrollWidth,client:n.clientWidth,rect:n.getBoundingClientRect().toJSON()}));assert(bounds.scroll<=bounds.client+1);assert(bounds.rect.x>=0&&bounds.rect.right<=width+1);assert((await fields.locator("input[type=file]").boundingBox()).height>=44);
+  const bounds=await dialog.evaluate(n=>({scroll:n.scrollWidth,client:n.clientWidth,rect:n.getBoundingClientRect().toJSON()}));assert(bounds.scroll<=bounds.client+1);assert(bounds.rect.x>=0&&bounds.rect.right<=width+1);assert((await fields.locator("input[type=file]").boundingBox()).height>=44);for(const row of await fields.locator(".field").all()){const label=await row.locator("span").boundingBox(),control=await row.locator("input").boundingBox();assert(control.y>=label.y+label.height,"photo label stacks above its control");}
   await cancel();assert.equal(runtime.service.getTrip(trip.id).trip.version,trip.version);
   await editAgain();assert.equal(await fields.locator("img").getAttribute("src"),null);await upload(png);await fields.locator("input[type=text]").fill("Fictional first image");await save();
   let saved=runtime.service.getTrip(trip.id).trip;assert.equal(saved.days[0].slots[0].uploadedPhoto.alt,"Fictional first image");assert.deepEqual(saved.days[0].slots[0].photo,trip.days[0].slots[0].photo);assert.deepEqual(saved.branding,trip.branding);assert.deepEqual(saved.cover,trip.cover);assert.deepEqual(saved.weather,trip.weather);assert.equal(saved.googlePlacePhotosEnabled,true);
@@ -50,7 +50,7 @@ try{
   await editAgain();await fields.locator("[data-plan-photo-clear]").click();await save();saved=runtime.service.getTrip(trip.id).trip;assert(!saved.days[0].slots[0].uploadedPhoto);assert.deepEqual(saved.days[0].slots[0].photo,trip.days[0].slots[0].photo);assert.equal(saved.days[0].slots[0].notes,"Concurrent fictional note");assert.equal(saved.days[0].slots[0].photoSourceId,trip.days[0].slots[0].photoSourceId);await item.locator(".location-photo img").waitFor();assert(!(await item.locator(".location-photo img").getAttribute("src")).startsWith("data:"),"clear displays preserved Commons/legacy source");
   // Upload on an added plan uses the same ordinary Save/Cancel path.
   if(width===390&&language==="en"){
-   await editAgain();await upload(png);await fields.locator("input[type=text]").fill("Fictional preview image");await page.screenshot({path:path.join(output,"fictional-phone-upload.png"),fullPage:true});await cancel();
+   await editAgain();await upload(png);await fields.locator("input[type=text]").fill("Fictional preview image");await dialog.screenshot({path:path.join(output,"fictional-phone-upload.png")});await cancel();
    await page.locator(".day-heading__actions .button").first().click();await fields.waitFor();await dialog.locator('[name="name"]').fill("Fictional newly added plan");await upload(png);await fields.locator("input[type=text]").fill("Fictional new plan image");await save();assert(runtime.service.getTrip(trip.id).trip.days[0].slots.some(p=>p.name==="Fictional newly added plan"&&p.uploadedPhoto?.alt==="Fictional new plan image"));
   }
   checks++;await context.close();
