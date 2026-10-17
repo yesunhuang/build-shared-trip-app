@@ -7,10 +7,11 @@ import { applyContentRules } from "./domain/content-rules.mjs";
 import { USERNAME_PATTERN } from "./auth/passwords.mjs";
 import { ACCOUNT_ID_PATTERN, ACCOUNT_ROLES, ACCOUNT_STATUSES } from "./auth/accounts.mjs";
 import { MCP_TOKEN_ID_PATTERN } from "./auth/mcp-tokens.mjs";
-import { OAUTH_CLIENT_ID_PATTERN, OAUTH_GRANT_ID_PATTERN, OAUTH_REVOKE_REASONS, OAUTH_SCOPE, OAUTH_TOKEN_KINDS, PKCE_CHALLENGE_PATTERN } from "./auth/oauth.mjs";
+import { OAUTH_CLIENT_ID_PATTERN, OAUTH_GRANT_ID_PATTERN, OAUTH_REVOKE_REASONS, OAUTH_TOKEN_KINDS, PKCE_CHALLENGE_PATTERN } from "./auth/oauth.mjs";
 import { AUDIT_ACTIONS, AUDIT_CHANNELS, AUDIT_OUTCOMES } from "./audit.mjs";
 import { MEMBERSHIP_TABLES, TRIP_INVITE_ID } from "./trip-membership.mjs";
 import { localPhotoPaths, PRIVATE_PHOTO } from "./domain/media.mjs";
+import { validGrantScope, OAUTH_SCOPE } from "./auth/oauth-scopes.mjs";
 
 // Schema history:
 //   v1 trips + request_log (days used "plans")
@@ -27,7 +28,9 @@ import { localPhotoPaths, PRIVATE_PHOTO } from "./domain/media.mjs";
 //   v7 trip access, account memberships, digest-only join invitations, media bindings and bounded
 //      join attempts. Existing trips get unknown creator metadata, no inferred members. Auth,
 //      roles, credentials, OAuth, content versions and the separate Google ledger are unchanged.
-export const SCHEMA_VERSION = 7;
+// v8 expands OAuth grant/code validation to independently bound read/manage scopes. No rows,
+// roles, grants or access assignments are rewritten. Compatible rollback must retain this policy.
+export const SCHEMA_VERSION = 8;
 const BASE_TABLES = "CREATE TABLE IF NOT EXISTS trips (id TEXT PRIMARY KEY, version INTEGER NOT NULL, archived INTEGER NOT NULL, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS request_log (scope TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(scope,request_id));";
 const ACCOUNT_TABLES = "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('pending','approved','revoked')), session_epoch INTEGER NOT NULL DEFAULT 0, invitation_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); " +
   "CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at TEXT, used_by TEXT);";
@@ -104,6 +107,7 @@ export function openDatabase(filename, { origin } = {}) {
       }
       db.exec("PRAGMA user_version=7");
     }
+    if(old<8)db.exec("PRAGMA user_version=8");
     db.exec("COMMIT");
   } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
   return db;
@@ -151,7 +155,7 @@ export function validateSnapshot(filename) {
           !AUDIT_ACTIONS.includes(row.action) || !AUDIT_OUTCOMES.includes(row.outcome)) throw new Error("Invalid audit event in snapshot.");
       }
     }
-    if (version >= 5) validateOAuthTables(db);
+    if (version >= 5) validateOAuthTables(db,version);
     if (version >= 6) validateTombstones(db);
     if(version>=7)validateMembership(db);
   } finally { db.close(); }
@@ -198,7 +202,8 @@ function validateMembership(db){
 
 // Schema v5: every OAuth row must reference existing clients, grants and accounts, store only
 // digests, and use the fixed scope/kind/reason vocabularies.
-function validateOAuthTables(db) {
+function validateOAuthTables(db,version) {
+  const validScope=scope=>validGrantScope(scope)&&(version>=8||scope===OAUTH_SCOPE);
   const users = new Set(db.prepare("SELECT id FROM users").all().map((row) => row.id));
   const clients = new Set();
   for (const row of db.prepare("SELECT id,client_name,redirect_uris,created_at,authorized_at FROM oauth_clients").all()) {
@@ -210,13 +215,13 @@ function validateOAuthTables(db) {
   }
   const grants = new Set();
   for (const row of db.prepare("SELECT id,client_id,user_id,account_epoch,scope,resource,redirect_uri,created_at,expires_at,revoked_at,revoked_reason,last_used_at FROM oauth_grants").all()) {
-    if (!OAUTH_GRANT_ID_PATTERN.test(row.id) || !clients.has(row.client_id) || !users.has(row.user_id) || !Number.isInteger(row.account_epoch) || row.scope !== OAUTH_SCOPE ||
+    if (!OAUTH_GRANT_ID_PATTERN.test(row.id) || !clients.has(row.client_id) || !users.has(row.user_id) || !Number.isInteger(row.account_epoch) || !validScope(row.scope) ||
       typeof row.resource !== "string" || !row.resource.endsWith("/mcp") || typeof row.redirect_uri !== "string" || !isTime(row.created_at) || !Number.isInteger(row.expires_at) ||
       !isOptionalTime(row.revoked_at) || (row.revoked_at === null ? row.revoked_reason !== null : !OAUTH_REVOKE_REASONS.includes(row.revoked_reason)) || !isOptionalTime(row.last_used_at)) throw new Error("Invalid OAuth grant in snapshot.");
     grants.add(row.id);
   }
   for (const row of db.prepare("SELECT code_hash,client_id,user_id,account_epoch,redirect_uri,resource,scope,code_challenge,created_at,expires_at,grant_expires_at,used_at,grant_id FROM oauth_codes").all()) {
-    if (!isDigest(row.code_hash) || !clients.has(row.client_id) || !users.has(row.user_id) || !Number.isInteger(row.account_epoch) || row.scope !== OAUTH_SCOPE ||
+    if (!isDigest(row.code_hash) || !clients.has(row.client_id) || !users.has(row.user_id) || !Number.isInteger(row.account_epoch) || !validScope(row.scope) ||
       !PKCE_CHALLENGE_PATTERN.test(row.code_challenge) || !isTime(row.created_at) || !Number.isInteger(row.expires_at) || !Number.isInteger(row.grant_expires_at) ||
       !isOptionalTime(row.used_at) || (row.grant_id !== null && !grants.has(row.grant_id))) throw new Error("Invalid OAuth code in snapshot.");
   }

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { DomainError, conflict, validationError } from "./domain/errors.mjs";
 import { isValidId } from "./domain/validate.mjs";
-import { OWNER, canEditContent } from "./auth/policy.mjs";
+import { OWNER, canEditContent, isMcpOnlyPrincipal, isReadOnlyMcpPrincipal } from "./auth/policy.mjs";
 import { ACCOUNT_ID_PATTERN } from "./auth/accounts.mjs";
 import { localPhotoPaths } from "./domain/media.mjs";
 
@@ -32,8 +32,8 @@ export class TripMembership {
   state(id){return isValidId(id)?this.db.prepare("SELECT creator,revision FROM trip_access WHERE trip_id=?").get(id):null;}
   member(p,id){return Boolean(p.userId&&this.db.prepare("SELECT 1 FROM trip_members WHERE trip_id=? AND user_id=?").get(id,p.userId));}
   canRead(p,id){return p.role===OWNER||this.member(p,id);}
-  canEdit(p,id){return p.role===OWNER||(this.member(p,id)&&(canEditContent(p)||this.state(id)?.creator===p.userId));}
-  canInvite(p,id){const state=this.state(id);return p.role===OWNER||Boolean(state&&state.creator===actor(p)&&(p.role===OWNER||this.member(p,id)));}
+  canEdit(p,id){return !isReadOnlyMcpPrincipal(p)&&(p.role===OWNER||(this.member(p,id)&&(canEditContent(p)||this.state(id)?.creator===p.userId)));}
+  canInvite(p,id){if(isMcpOnlyPrincipal(p))return false;const state=this.state(id);return p.role===OWNER||Boolean(state&&state.creator===actor(p)&&(p.role===OWNER||this.member(p,id)));}
   require(p,id,edit=false){this.authenticated(p);if(!this.canRead(p,id))throw denied();if(edit&&!this.canEdit(p,id))throw forbidden();return this.service.getTrip(id).trip;}
   projection(p,id){
     this.require(p,id);const state=this.state(id);

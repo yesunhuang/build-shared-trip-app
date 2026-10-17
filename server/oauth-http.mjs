@@ -20,7 +20,8 @@ import crypto from "node:crypto";
 import { DomainError } from "./domain/errors.mjs";
 import { boundedPassword, dummyVerify, normalizeUsername, verifyPassword } from "./auth/passwords.mjs";
 import { AttemptLimiter } from "./auth/sessions.mjs";
-import { OAUTH_SCOPE, PKCE_CHALLENGE_PATTERN, GRANT_LIFETIME_MS } from "./auth/oauth.mjs";
+import { PKCE_CHALLENGE_PATTERN, GRANT_LIFETIME_MS } from "./auth/oauth.mjs";
+import { OAUTH_SCOPES, OAUTH_READ_SCOPE, requestedScopes, consentScope } from "./auth/oauth-scopes.mjs";
 
 export const PRODUCTION_REDIRECT_URIS = Object.freeze(["https://chatgpt.com/connector_platform_oauth_redirect"]);
 export const OAUTH_TRANSACTION_COOKIE = "shared_trip_oauth";
@@ -76,7 +77,7 @@ const STYLE = ":root{color-scheme:light dark;font-family:system-ui,-apple-system
   ".mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.88rem;overflow-wrap:anywhere;word-break:break-all}" +
   "ul{padding-left:1.25rem;margin:.25rem 0}li{margin:.2rem 0}" +
   "label{display:block;font-weight:600;margin-top:.9rem}" +
-  "input{display:block;width:100%;box-sizing:border-box;font-size:1rem;padding:.7rem;margin-top:.3rem;border:1px solid #7d8a85;border-radius:8px;background:#fff;color:#1d2a26}" +
+  "input{display:block;width:100%;min-height:44px;box-sizing:border-box;font-size:1rem;padding:.7rem;margin-top:.3rem;border:1px solid #7d8a85;border-radius:8px;background:#fff;color:#1d2a26}" +
   ".actions{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1.25rem}.actions form{flex:1 1 11rem;margin:0}" +
   "button{display:block;width:100%;min-height:3rem;font-size:1rem;font-weight:600;border-radius:10px;padding:.65rem 1rem;cursor:pointer;border:2px solid #17362f}" +
   ".primary{background:#17362f;color:#fff}.secondary{background:#fff;color:#17362f}" +
@@ -110,7 +111,7 @@ const denyForm = (csrf, label) => "<form method=\"post\" action=\"/oauth/authori
 function loginPage({ client, redirectUri, csrf, notice = "" }) {
   return page("Sign in to connect an application",
     "<h1>Sign in to connect an application</h1>" + (notice ? "<p class=\"notice\" role=\"alert\">" + escapeHtml(notice) + "</p>" : "") +
-    "<p>An application is asking to manage trips with your Shared Trips account. Check that you started this connection yourself.</p>" +
+    "<p>An application is asking to access trips with your Shared Trips account. Check that you started this connection yourself.</p>" +
     clientSummary(client, redirectUri) +
     "<form method=\"post\" action=\"/oauth/authorize/login\">" + hidden("csrf", csrf) +
     "<label for=\"oauth-username\">Username</label><input id=\"oauth-username\" name=\"username\" type=\"text\" autocomplete=\"username\" autocapitalize=\"none\" spellcheck=\"false\" maxlength=\"64\" required>" +
@@ -120,23 +121,20 @@ function loginPage({ client, redirectUri, csrf, notice = "" }) {
     "<p class=\"fine\">Signing in here only continues this request. It does not sign you in to the Shared Trips website and does not approve anything yet.</p>");
 }
 
-function consentPage({ client, redirectUri, csrf, username }) {
+function consentPage({ client, redirectUri, csrf, username, role, scope }) {
+  const readOnly = scope === OAUTH_READ_SCOPE;
   return page("Allow access to your trips?",
-    "<h1>Allow this application to manage trips?</h1>" +
-    "<p>Signed in as <strong>" + escapeHtml(username) + "</strong> (content manager).</p>" + clientSummary(client, redirectUri) +
-    "<h2>It will be able to</h2><ul>" +
-    "<li>List and read only trips you belong to, including archived trips. New trips created by others do not automatically grant access.</li>" +
-    "<li>Create, import and export trips.</li>" +
-    "<li>Edit trip content: days, plans and reminders, including deleting or replacing content and archiving or unarchiving trips.</li></ul>" +
-    "<h2>It will not be able to</h2><ul>" +
-    "<li>Use owner access or anything only the owner can do.</li>" +
-    "<li>Manage accounts, invitations, roles, MCP credentials, connected applications or the audit log.</li>" +
-    "<li>Change passwords or any security setting.</li>" +
-    "<li>Use the Shared Trips website, its web API or protected photos. It only gets the six MCP trip tools.</li></ul>" +
-    "<h2>How long</h2><p>Scope <span class=\"mono\">" + OAUTH_SCOPE + "</span>, for at most " + Math.round(GRANT_LIFETIME_MS / 86_400_000) + " days. After that you must sign in and approve again. " +
-    "The owner can revoke this access at any time, and revoking your account or changing its role ends it.</p>" +
-    "<div class=\"actions\"><form method=\"post\" action=\"/oauth/authorize/decision\">" + hidden("csrf", csrf) + hidden("decision", "allow") +
-    "<button class=\"primary\" type=\"submit\">Allow</button></form>" + denyForm(csrf, "Deny") + "</div>");
+    "<h1>Allow this application to " + (readOnly ? "read your trips?" : "manage trips?") + "</h1>" +
+    "<p>Signed in as <strong>" + escapeHtml(username) + "</strong> (" + (role === "viewer" ? "Member" : "content manager") + ").</p>" + clientSummary(client, redirectUri) +
+    "<h2>It will be able to</h2><ul><li>List and read only trips you belong to, including archived trips. New trips created by others do not automatically grant access.</li>" +
+    (readOnly ? "<li>Export those trips. This is read-only access: it cannot create, import or edit anything, including trips you created.</li></ul>" :
+      "<li>Create, import and export trips.</li><li>Edit trip content: days, plans and reminders, including deleting or replacing content and archiving or unarchiving trips.</li></ul>") +
+    "<h2>It will not be able to</h2><ul><li>Use owner access or anything only the owner can do.</li>" +
+    "<li>Manage accounts, invitations, roles, MCP credentials, connected applications or the audit log.</li><li>Change passwords or any security setting.</li>" +
+    "<li>Use the Shared Trips website, its web API or protected photos. It only gets " + (readOnly ? "three read-only MCP tools" : "the six MCP trip tools") + ".</li></ul>" +
+    '<h2>How long</h2><p>Scope <span class="mono">' + escapeHtml(scope) + "</span>, for at most " + Math.round(GRANT_LIFETIME_MS / 86_400_000) + " days. After that you must sign in and approve again. The owner can revoke this access at any time, and revoking your account or changing its role ends it.</p>" +
+    '<div class="actions"><form method="post" action="/oauth/authorize/decision">' + hidden("csrf", csrf) + hidden("decision", "allow") +
+    '<button class="primary" type="submit">Allow</button></form>' + denyForm(csrf, "Deny") + "</div>");
 }
 
 function errorPage(title, message) {
@@ -265,7 +263,7 @@ export function createOAuth({ store, accounts, audit, loginLimiter, clock = Date
   const refuse = (event) => audit.safeRecord({ channel: "http", outcome: "refused", actor: "anonymous", ...event });
 
   function protectedResourceMetadata(origin) {
-    return { resource: resourceFor(origin), authorization_servers: [origin], scopes_supported: [OAUTH_SCOPE], bearer_methods_supported: ["header"], resource_name: "Shared Trips" };
+    return { resource: resourceFor(origin), authorization_servers: [origin], scopes_supported: [...OAUTH_SCOPES], bearer_methods_supported: ["header"], resource_name: "Shared Trips" };
   }
   function authorizationServerMetadata(origin) {
     return {
@@ -274,7 +272,7 @@ export function createOAuth({ store, accounts, audit, loginLimiter, clock = Date
       token_endpoint: origin + "/oauth/token",
       registration_endpoint: origin + "/oauth/register",
       revocation_endpoint: origin + "/oauth/revoke",
-      scopes_supported: [OAUTH_SCOPE],
+      scopes_supported: [...OAUTH_SCOPES],
       response_types_supported: ["code"],
       response_modes_supported: ["query"],
       grant_types_supported: [...GRANT_TYPES],
@@ -332,13 +330,13 @@ export function createOAuth({ store, accounts, audit, loginLimiter, clock = Date
     }
     const responses = body.response_types;
     if (responses !== undefined && !(Array.isArray(responses) && responses.length === 1 && responses[0] === "code")) return bad("response_types must be [\"code\"].");
-    if (body.scope !== undefined && body.scope !== OAUTH_SCOPE) return bad("The only supported scope is " + OAUTH_SCOPE + ".");
+    if (body.scope !== undefined && !requestedScopes(body.scope)) return bad("Supported scopes are " + OAUTH_SCOPES.join(" ") + ".");
     let clientName = "Unnamed application";
     if (body.client_name !== undefined) {
       if (typeof body.client_name !== "string" || CONTROL.test(body.client_name) || !body.client_name.trim() || body.client_name.trim().length > 100) return bad("client_name must contain 1 to 100 visible characters.");
       clientName = body.client_name.trim();
     }
-    return { ok: true, clientName, redirectUris: [...uris] };
+    return { ok: true, clientName, redirectUris: [...uris], scope: body.scope === undefined ? OAUTH_SCOPES.join(" ") : requestedScopes(body.scope) };
   }
 
   async function register(req, res, ctx) {
@@ -363,7 +361,7 @@ export function createOAuth({ store, accounts, audit, loginLimiter, clock = Date
     if (!client) { refuse({ action: "oauth.register", reason: "capacity" }); oauthError(res, 503, "temporarily_unavailable", "Registration capacity is exhausted."); return; }
     sendJson(res, 201, {
       client_id: client.id, client_id_issued_at: Math.floor(Date.parse(client.createdAt) / 1000), client_name: client.clientName, redirect_uris: client.redirectUris,
-      grant_types: [...GRANT_TYPES], response_types: ["code"], token_endpoint_auth_method: "none", scope: OAUTH_SCOPE
+      grant_types: [...GRANT_TYPES], response_types: ["code"], token_endpoint_auth_method: "none", scope: checked.scope
     });
   }
 
@@ -409,7 +407,7 @@ export function createOAuth({ store, accounts, audit, loginLimiter, clock = Date
     };
     if (fields.grant_type === "authorization_code") {
       if (["code", "redirect_uri", "code_verifier", "resource"].some((name) => typeof fields[name] !== "string" || !fields[name])) { request.fail(400, "invalid_request", "missing_parameter", "code, redirect_uri, code_verifier, client_id and resource are required."); return; }
-      if (fields.scope !== undefined && fields.scope !== OAUTH_SCOPE) { request.fail(400, "invalid_scope", "invalid_scope", "The only supported scope is " + OAUTH_SCOPE + "."); return; }
+      if (fields.scope !== undefined && !requestedScopes(fields.scope)) { request.fail(400, "invalid_scope", "invalid_scope", "Unsupported scope."); return; }
       respond(store.exchangeCode({ code: fields.code, clientId: client.id, redirectUri: fields.redirect_uri, resource: fields.resource, codeVerifier: fields.code_verifier }, clock()), "oauth.token");
       return;
     }
@@ -476,12 +474,13 @@ export function createOAuth({ store, accounts, audit, loginLimiter, clock = Date
     if (typeof codeChallenge !== "string" || !PKCE_CHALLENGE_PATTERN.test(codeChallenge)) return fail("invalid_request", "A valid S256 code_challenge is required.");
     const resource = resourceFor(ctx.allowedOrigin);
     if (single("resource") !== resource) return fail("invalid_target", "resource must identify this server's MCP endpoint.");
-    if (single("scope") !== OAUTH_SCOPE) return fail("invalid_scope", "The only supported scope is " + OAUTH_SCOPE + ".");
+    const scope = requestedScopes(single("scope"));
+    if (!scope) return fail("invalid_scope", "Supported scopes are " + OAUTH_SCOPES.join(" ") + ".");
     const now = Date.now();
     try { authorizeLimiter.check(ctx.client, now); }
     catch { sendHtml(res, 429, errorPage("Too many requests", "Too many connection attempts. Wait a few minutes and try again.")); return; }
     authorizeLimiter.fail(ctx.client, now);
-    const created = transactions.create({ clientId: client.id, redirectUri, state, codeChallenge, resource, scope: OAUTH_SCOPE, stage: "login" });
+    const created = transactions.create({ clientId: client.id, redirectUri, state, codeChallenge, resource, scope, stage: "login" });
     res.setHeader("Set-Cookie", cookieFor(created.key, ctx.secure));
     sendHtml(res, 200, loginPage({ client, redirectUri, csrf: created.csrf }), formTargets(redirectUri));
   }
@@ -530,8 +529,9 @@ export function createOAuth({ store, accounts, audit, loginLimiter, clock = Date
     catch { again(429, "Too many sign-in attempts. Try again later."); return; }
     const username = normalizeUsername(fields.username);
     const secret = boundedPassword(fields.password);
-    // Only the configured account can sign in here; any other name costs the same hashing time.
-    const record = store.username && username === store.username && secret !== null ? accounts.loginRecord(username) : undefined;
+    // Each person signs in explicitly; a website cookie never skips this step.
+    // Legacy singleton selection remains active unless multiuser mode is enabled.
+    const record = (store.multiuser || (store.username && username === store.username)) && secret !== null ? accounts.loginRecord(username) : undefined;
     let valid;
     try { valid = record ? await verifyPassword(secret, record.password_hash) : await dummyVerify(); }
     catch (error) {
@@ -542,7 +542,7 @@ export function createOAuth({ store, accounts, audit, loginLimiter, clock = Date
     if (!valid) {
       loginLimiter.fail(ctx.client, Date.now());
       refuse({ action: "oauth.login", reason: "sign_in_failed" });
-      again(401, "Sign-in failed. Only the account set up for connected applications can sign in here.");
+      again(401, "Sign-in failed. Use your own approved account configured for connected applications.");
       return;
     }
     // Re-read after the asynchronous hash so that a concurrent revocation or role change wins.
@@ -553,10 +553,12 @@ export function createOAuth({ store, accounts, audit, loginLimiter, clock = Date
       again(403, "This account cannot approve connected applications.");
       return;
     }
-    const next = transactions.rotate(key, { stage: "consent", userId: current.id, epoch: current.session_epoch, username: current.username });
+    const scope = consentScope(current.role, entry.scope);
+    if (!scope) { again(403, "This account cannot approve the requested access."); return; }
+    const next = transactions.rotate(key, { stage: "consent", userId: current.id, epoch: current.session_epoch, username: current.username, role: current.role, scope });
     try { audit.record({ actor: current.id, channel: "http", action: "oauth.login", outcome: "accepted", target: client.id }); } catch { /* best effort */ }
     res.setHeader("Set-Cookie", cookieFor(next.key, ctx.secure));
-    sendHtml(res, 200, consentPage({ client, redirectUri: entry.redirectUri, csrf: next.csrf, username: current.username }), formTargets(entry.redirectUri));
+    sendHtml(res, 200, consentPage({ client, redirectUri: entry.redirectUri, csrf: next.csrf, username: current.username, role: current.role, scope }), formTargets(entry.redirectUri));
   }
 
   async function decision(req, res, ctx) {
@@ -627,7 +629,7 @@ export function createOAuth({ store, accounts, audit, loginLimiter, clock = Date
     },
     /** RFC 9728 / RFC 6750 challenge for /mcp 401 responses. */
     challenge(allowedOrigin, invalidToken) {
-      return "Bearer " + (invalidToken ? "error=\"invalid_token\", " : "") + "resource_metadata=\"" + allowedOrigin + PRM_PATH + "/mcp\", scope=\"" + OAUTH_SCOPE + "\"";
+      return "Bearer " + (invalidToken ? "error=\"invalid_token\", " : "") + "resource_metadata=\"" + allowedOrigin + PRM_PATH + "/mcp\", scope=\"" + OAUTH_SCOPES.join(" ") + "\"";
     }
   };
 }

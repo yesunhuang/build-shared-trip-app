@@ -65,7 +65,8 @@ export function readConfig(env = process.env) {
   // The explicit monthly allowance and headroom for that feature (see google-allowance.mjs). Never
   // throws: missing or malformed values only keep Google work disabled; the app itself still runs.
   const googleAllowance = readAllowanceConfig(env);
-  return { token, dataDir, host, port, origin, oauthUsername, lookups, googlePlaces, googleAllowance };
+  const oauthMultiuser = env.SHARED_TRIP_OAUTH_MULTIUSER === "1";
+  return { token, dataDir, host, port, origin, oauthUsername, oauthMultiuser, lookups, googlePlaces, googleAllowance };
 }
 function sameSecret(a,b) {
   const hash = (s) => crypto.createHash("sha256").update(String(s || "")).digest();
@@ -120,7 +121,7 @@ export async function startServer(config) {
   const loginLimiter = new AttemptLimiter({ limit: 10, windowMs: 60_000, message: "Try signing in again later." });
   const inviteLimiter = new AttemptLimiter({ limit: 10, windowMs: 15 * 60_000, message: "Try again later." });
   const tripJoinLimiter = new AttemptLimiter({limit:20,windowMs:15*60_000,message:"Try joining again later."});
-  const oauthStore = new OAuthStore(db, { audit, username: oauthUsername });
+  const oauthStore = new OAuthStore(db, { audit, username: oauthUsername, multiuser: config.oauthMultiuser === true });
   let oauth; let lookups;
   try {
     oauth = createOAuth({ store: oauthStore, accounts, audit, loginLimiter, clock, redirectUris: config.oauthRedirectUris });
@@ -155,7 +156,7 @@ export async function startServer(config) {
   // Owner bearer first (unchanged and compatible). Any other bearer is tried as a content-manager MCP
   // credential, which yields a principal only at /mcp. A presented but unusable bearer never falls
   // back to a cookie session.
-  // OAuth access tokens are likewise accepted only at /mcp, with content-manager permissions, and
+  // OAuth access tokens are likewise accepted only at /mcp, with current role and granted scope, and
   // are re-checked against grant, resource, scope and the account on every request.
   function principalFromBearer(value, pathname, protectedPath, allowedOrigin) {
     if (value && sameSecret(value, config.token)) return { role: OWNER, via: "bearer" };
@@ -166,7 +167,7 @@ export async function startServer(config) {
     const refuse = (reason) => { if (protectedPath) audit.safeRecord({ actor: credential.userId, channel: atMcp ? "mcp" : "http", action: "auth.refused", outcome: "refused", reason }); return null; };
     if (!credential.ok) return refuse(credential.reason);
     if (!atMcp) return refuse(isOAuth ? "oauth_token_wrong_route" : "mcp_token_wrong_route");
-    if (isOAuth) return { role: CONTENT_MANAGER, via: "oauth", userId: credential.userId, username: credential.username, grantId: credential.grantId };
+    if (isOAuth) return { role: credential.role, scope: credential.scope, via: "oauth", userId: credential.userId, username: credential.username, grantId: credential.grantId };
     return { role: CONTENT_MANAGER, via: "mcp-token", userId: credential.userId, username: credential.username, tokenId: credential.tokenId };
   }
 

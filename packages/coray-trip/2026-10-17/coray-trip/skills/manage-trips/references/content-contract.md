@@ -3,7 +3,7 @@
 Contract checked against installed tool declarations and current service source on 2026-10-17. The recipient's actual tool schema remains authoritative.
 
 ## Versioned editing
-- Six tools only: list_trips, get_trip, create_trip, apply_trip_changes, import_trip, export_trip.
+- Read scope: list_trips, get_trip, export_trip. Manager manage scope retains six tools, also create_trip, apply_trip_changes, import_trip. All content fields below apply only when the actual tool/schema and role/scope allow the operation.
 - get_trip gives current trip/version and read-only planLocationBindings, members and access metadata. Resolve IDs from reads, never from guesses.
 - apply_trip_changes needs tripId, expectedVersion, requestId and changes. Invalid batches are atomic. delete_day, delete_plan, delete_reminder and replace_content are destructive.
 - Prefer narrow update_trip or upsert_plan operations. Do not use replace_content to evade a stale or missing client schema.

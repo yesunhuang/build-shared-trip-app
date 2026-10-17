@@ -12,7 +12,7 @@
 // owner bearer over HTTP, or the offline host-operator CLI (channel "operator"). It is never
 // reachable through MCP and is not a change operation, so content managers cannot delete trips.
 import { DomainError, conflict, validationError } from "./domain/errors.mjs";
-import { OPERATOR, OWNER, canDeleteTrips, canEditContent } from "./auth/policy.mjs";
+import { OPERATOR, OWNER, canDeleteTrips, canEditContent, isReadOnlyMcpPrincipal } from "./auth/policy.mjs";
 import { TripMembership } from "./trip-membership.mjs";
 import { localPhotoPaths } from "./domain/media.mjs";
 import {assertSafePayload} from "./domain/validate.mjs";
@@ -94,6 +94,7 @@ export class ContentGateway {
     try {
       if (!principal) throw unauthorized();
       this.read({principal});
+      if (isReadOnlyMcpPrincipal(principal)) throw forbidden();
       if (!allowed(principal, channel)) throw forbidden();
       if (!isObject(input)) throw validationError("The request body must be a JSON object.");
       if(input.tripId&&action!=="trip.delete"&&principal.role!==OWNER)this.membership.require(principal,input.tripId);

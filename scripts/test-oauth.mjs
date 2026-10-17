@@ -266,7 +266,7 @@ try {
   pass("fictional owner trips and content-manager/viewer accounts prepared");
 
   // 3. Metadata, CORS and Host guard.
-  const expectedResource = { resource: base + "/mcp", authorization_servers: [base], scopes_supported: [SCOPE], bearer_methods_supported: ["header"], resource_name: "Shared Trips" };
+  const expectedResource = { resource: base + "/mcp", authorization_servers: [base], scopes_supported: ["trips:read", SCOPE], bearer_methods_supported: ["header"], resource_name: "Shared Trips" };
   for (const route of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"]) {
     const response = expect(await call(base, route), 200, "protected resource metadata");
     assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
@@ -276,7 +276,7 @@ try {
   assert.equal(asResponse.headers.get("content-type"), "application/json; charset=utf-8");
   assert.deepEqual(asResponse.data, {
     issuer: base, authorization_endpoint: base + "/oauth/authorize", token_endpoint: base + "/oauth/token", registration_endpoint: base + "/oauth/register", revocation_endpoint: base + "/oauth/revoke",
-    scopes_supported: [SCOPE], response_types_supported: ["code"], response_modes_supported: ["query"], grant_types_supported: ["authorization_code", "refresh_token"],
+    scopes_supported: ["trips:read", SCOPE], response_types_supported: ["code"], response_modes_supported: ["query"], grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["none"], revocation_endpoint_auth_methods_supported: ["none"], code_challenge_methods_supported: ["S256"], authorization_response_iss_parameter_supported: true
   }, "metadata: S256 only, public clients only, iss parameter supported, no client ID metadata documents");
   const foreign = "https://browser-client.fictional.invalid";
@@ -290,7 +290,7 @@ try {
   // 4. /mcp challenge.
   const challenge = await call(base, "/mcp", { method: "POST", json: initialize, headers: mcpAccept });
   expect(challenge, 401, "anonymous MCP");
-  assert.equal(challenge.headers.get("www-authenticate"), "Bearer resource_metadata=\"" + base + "/.well-known/oauth-protected-resource/mcp\", scope=\"" + SCOPE + "\"");
+  assert.equal(challenge.headers.get("www-authenticate"), "Bearer resource_metadata=\"" + base + "/.well-known/oauth-protected-resource/mcp\", scope=\"" + "trips:read " + SCOPE + "\"");
   const badBearer = await call(base, "/mcp", { method: "POST", json: initialize, headers: { ...mcpAccept, Authorization: "Bearer sta_" + crypto.randomBytes(32).toString("base64url") } });
   expect(badBearer, 401, "unknown access token");
   assert.ok(badBearer.headers.get("www-authenticate").startsWith("Bearer error=\"invalid_token\", resource_metadata="), "invalid token challenge");
@@ -744,7 +744,7 @@ try {
   assert.ok(PATTERNS.client.test(memory.client?.client_id ?? ""), "SDK registered a public client");
   const sdkUrl = new URL(memory.authorizationUrl);
   assert.ok(sdkUrl.origin + sdkUrl.pathname === base + "/oauth/authorize" && sdkUrl.searchParams.get("code_challenge_method") === "S256" && sdkUrl.searchParams.get("resource") === base + "/mcp" &&
-    sdkUrl.searchParams.get("scope") === SCOPE && sdkUrl.searchParams.get("state") === sdkState, "SDK authorization request uses S256, resource and the advertised scope");
+    sdkUrl.searchParams.get("scope") === "trips:read " + SCOPE && sdkUrl.searchParams.get("state") === sdkState, "SDK authorization request uses S256, resource and the advertised scope");
   const sdkStart = await call(base, sdkUrl.pathname + sdkUrl.search);
   expect(sdkStart, 200, "SDK authorization page");
   const sdkSigned = await signIn(base, { cookie: transactionCookie(sdkStart), csrf: csrfOf(sdkStart.text) }, manager.username, manager.password);

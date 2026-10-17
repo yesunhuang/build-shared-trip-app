@@ -8,7 +8,7 @@
 // never accidentally exposed to viewers or content managers.
 //
 // A content manager's per-account MCP credential (principal.via "mcp-token") and an OAuth access
-// token (principal.via "oauth", content-manager permissions only) are accepted only at /mcp;
+// token (principal.via "oauth", current account role plus granted read/manage scope) are accepted only at /mcp;
 // app.mjs never builds such a principal for any other route. A browser session (via "cookie")
 // never authorizes /mcp.
 
@@ -16,7 +16,9 @@ export const OWNER = "owner";
 export const VIEWER = "viewer";
 export const CONTENT_MANAGER = "content-manager";
 
-export const canEditContent = (principal) => principal?.role === OWNER || principal?.role === CONTENT_MANAGER;
+import { OAUTH_SCOPE, validGrantScope } from "./oauth-scopes.mjs";
+export const isReadOnlyMcpPrincipal = principal => principal?.via === "oauth" && principal.scope !== OAUTH_SCOPE;
+export const canEditContent = (principal) => !isReadOnlyMcpPrincipal(principal) && (principal?.role === OWNER || principal?.role === CONTENT_MANAGER);
 /**
  * Permanent trip deletion (schema v6) is owner-only: the owner browser session or owner admin bearer
  * over HTTP, or the offline host-operator CLI (server/cli/delete-trip.mjs, channel "operator").
@@ -31,7 +33,8 @@ export function canDeleteTrips(principal, channel) {
   return false;
 }
 /** Non-owner bearer principals that exist only at /mcp. */
-export const isMcpOnlyPrincipal = (principal) => principal?.role === CONTENT_MANAGER && (principal.via === "mcp-token" || principal.via === "oauth");
+export const isMcpOnlyPrincipal = (principal) => (principal?.role === CONTENT_MANAGER && principal.via === "mcp-token") ||
+  ([VIEWER, CONTENT_MANAGER].includes(principal?.role) && principal.via === "oauth" && validGrantScope(principal.scope));
 
 export function capabilitiesFor(principal) {
   const owner = principal?.role === OWNER;
@@ -39,7 +42,7 @@ export function capabilitiesFor(principal) {
   return {
     readTrips: Boolean(principal), exportTrips: Boolean(principal),
     editTrips: editor, importTrips: editor, manageAccounts: owner,
-    createTrips: Boolean(principal),
+    createTrips: Boolean(principal) && !isReadOnlyMcpPrincipal(principal),
     mcp: (owner && principal.via === "bearer") || isMcpOnlyPrincipal(principal)
   };
 }

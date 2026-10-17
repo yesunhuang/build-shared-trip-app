@@ -20,12 +20,13 @@ Generate a secret with a password manager or Node crypto.randomBytes(32).toStrin
 | SHARED_TRIP_HOST | 127.0.0.1 | Listen interface; a non-loopback value requires SHARED_TRIP_ORIGIN |
 | SHARED_TRIP_PORT | 4173 | Choose an unused listen port |
 | SHARED_TRIP_ORIGIN | Local listen origin | External HTTPS origin behind a proxy; no credentials, path, query, or fragment. It is also the OAuth issuer. |
-| SHARED_TRIP_OAUTH_USERNAME | Unset (OAuth denied) | Username of the one approved content manager who may approve OAuth grants for MCP clients that cannot send custom headers (schema v5 release). See [mcp.md § OAuth](mcp.md#oauth-for-clients-without-custom-headers). |
+| SHARED_TRIP_OAUTH_USERNAME | Unset (legacy OAuth denied) | Legacy singleton approved content manager. Kept unchanged in multiuser mode. |
+| SHARED_TRIP_OAUTH_MULTIUSER | `0` (legacy mode) | Exactly `1` enables independent OAuth consent for approved accounts, capped to their role and member trips. See [MCP](mcp.md#oauth-for-clients-without-custom-headers). |
 | SHARED_TRIP_LOOKUPS_ENABLED | Unset (off) | `1` enables explicit public place (OpenStreetMap/Nominatim) and photo (Wikimedia Commons) search in the plan editor. See [Place and photo lookups](#place-and-photo-lookups-opt-in). |
 | SHARED_TRIP_LOOKUP_USER_AGENT | None | Required when lookups are enabled: application name and version plus the owner's contact email or URL |
 | SHARED_TRIP_NOMINATIM_URL | `https://nominatim.openstreetmap.org/search` when enabled | Optional HTTPS Nominatim-compatible search endpoint |
 
-All trips share the manifest identity, start URL, and scope /. Trip pages are /trips/&lt;id&gt;. Protected trip content requires sign-in and trip membership, or owner administration. Anonymous sharing and self-registration that grants access are not implemented. OAuth remains the existing scoped MCP path for one configured content manager. Schema-v7 [membership and login landing](trip-membership.md) require reviewed migration and rollout confirmation before upgrading an existing service.
+All trips share the manifest identity, start URL, and scope /. Trip pages are /trips/&lt;id&gt;. Protected trip content requires sign-in and trip membership, or owner administration. Anonymous sharing and self-registration that grants access are not implemented. Schema-v8 OAuth adds opt-in independent account consent with read/manage scopes, preserving existing clients and grants. Each MCP operation still checks current trip membership. Schema-v7 [membership and login landing](trip-membership.md) require reviewed migration and rollout confirmation before upgrading an existing service.
 
 ## Accounts and access
 

@@ -37,8 +37,9 @@ services:
       SHARED_TRIP_HOST: "0.0.0.0"
       SHARED_TRIP_PORT: "4173"
       SHARED_TRIP_DATA_DIR: "/data"
-      # An existing approved content manager; empty disables OAuth grants.
+      # Legacy singleton selection; multiuser mode keeps this value unchanged.
       SHARED_TRIP_OAUTH_USERNAME: "${SHARED_TRIP_OAUTH_USERNAME:-}"
+      SHARED_TRIP_OAUTH_MULTIUSER: "${SHARED_TRIP_OAUTH_MULTIUSER:-0}"
       # Explicit place/photo searches only; review provider policies before enabling.
       SHARED_TRIP_LOOKUPS_ENABLED: "${SHARED_TRIP_LOOKUPS_ENABLED:-0}"
       SHARED_TRIP_LOOKUP_USER_AGENT: "${SHARED_TRIP_LOOKUP_USER_AGENT:-}"

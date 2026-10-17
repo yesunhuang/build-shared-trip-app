@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "coray-trip",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Connect to Coray Trip to review and manage authorized trip content through the existing remote MCP service.",
   "extensions": {
     "com.openai": {

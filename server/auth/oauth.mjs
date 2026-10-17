@@ -1,8 +1,8 @@
 // Durable OAuth 2.1 state for the self-hosted MCP resource (schema v5 tables in db.mjs).
 //
-// Scope of what OAuth can grant: exactly the existing content-manager permissions (the six MCP
-// content tools on accessible member trips) for one explicitly configured account
-// (SHARED_TRIP_OAUTH_USERNAME). OAuth never grants owner, account, invitation, credential, audit,
+// OAuth grants three read-only tools or six manager content tools on current member trips.
+// Multiuser mode permits independent approved accounts; legacy singleton selection remains.
+// OAuth never grants owner, account, invitation, credential, audit,
 // media or other administration, and OAuth access tokens are honoured only at /mcp.
 //
 // - Registered clients (RFC 7591, public, token_endpoint_auth_method "none") persist. Only clients
@@ -18,12 +18,13 @@
 //   token ends the whole grant, including every access token.
 // - Access tokens live ACCESS_TTL_MS (never beyond the grant) and are checked on every request
 //   against token, grant, resource, scope and the account's current status, role, epoch and the
-//   configured username, so revocation and role changes apply immediately.
+//   eligibility mode, so revocation and role changes apply immediately.
 import crypto from "node:crypto";
 import { notFound } from "../domain/errors.mjs";
 import { ACCOUNT_ID_PATTERN } from "./accounts.mjs";
 
-export const OAUTH_SCOPE = "trips:manage";
+export { OAUTH_SCOPE } from "./oauth-scopes.mjs";
+import { scopeAllowedForRole } from "./oauth-scopes.mjs";
 export const OAUTH_CLIENT_ID_PATTERN = /^ocl_[A-Za-z0-9_-]{22}$/;
 export const OAUTH_GRANT_ID_PATTERN = /^oag_[A-Za-z0-9_-]{16}$/;
 export const OAUTH_ACCESS_PATTERN = /^sta_[A-Za-z0-9_-]{43}$/;
@@ -71,9 +72,9 @@ function grantMetadata(row, now) {
 export class OAuthStore {
   /**
    * audit: AuditLog (accepted events are recorded inside the same transaction).
-   * username: the normalized configured OAuth username, or "" when no account is eligible.
+   * username: normalized legacy singleton selector; multiuser explicitly enables independent account consent.
    */
-  constructor(db, { audit, username = "" } = {}) { this.db = db; this.audit = audit; this.username = username; }
+  constructor(db, { audit, username = "", multiuser = false } = {}) { this.db = db; this.audit = audit; this.username = username; this.multiuser = multiuser === true; }
 
   atomically(action) {
     this.db.exec("BEGIN IMMEDIATE");
@@ -83,8 +84,9 @@ export class OAuthStore {
 
   /** The single eligibility rule for consent, exchange, refresh and every /mcp request. */
   eligible(account, epoch) {
-    return Boolean(this.username) && Boolean(account) && account.username === this.username && account.status === "approved" &&
-      account.role === "content-manager" && (epoch === undefined || account.session_epoch === epoch);
+    return Boolean(account) && account.status === "approved" &&
+      (this.multiuser ? ["viewer", "content-manager"].includes(account.role) : Boolean(this.username) && account.username === this.username && account.role === "content-manager") &&
+      (epoch === undefined || account.session_epoch === epoch);
   }
 
   // ----------------------------------------------------------------------------------------------
@@ -125,7 +127,7 @@ export class OAuthStore {
   issueCode({ clientId, userId, epoch, redirectUri, resource, scope, codeChallenge }, now) {
     return this.atomically(() => {
       const account = this.db.prepare("SELECT id,username,status,role,session_epoch FROM users WHERE id=?").get(userId);
-      if (!this.eligible(account, epoch) || !this.getClient(clientId)) return null;
+      if (!this.eligible(account, epoch) || !scopeAllowedForRole(account.role, scope) || !this.getClient(clientId)) return null;
       const code = "stc_" + random(32);
       this.db.prepare("INSERT INTO oauth_codes (code_hash,client_id,user_id,account_epoch,redirect_uri,resource,scope,code_challenge,created_at,expires_at,grant_expires_at,used_at,grant_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,NULL)")
         .run(digest(code), clientId, userId, epoch, redirectUri, resource, scope, codeChallenge, iso(now), now + CODE_TTL_MS, now + GRANT_LIFETIME_MS);
@@ -162,6 +164,11 @@ export class OAuthStore {
       const row = this.db.prepare("SELECT * FROM oauth_codes WHERE code_hash=?").get(digest(code));
       if (!row) return failure("invalid_grant", "code_unknown");
       if (row.used_at) {
+        // A different client or a stolen code without its verifier cannot revoke another family.
+        if (row.client_id !== clientId) return failure("invalid_grant", "client_mismatch");
+        if (row.redirect_uri !== redirectUri) return failure("invalid_grant", "redirect_mismatch");
+        if (row.resource !== resource) return failure("invalid_target", "resource_mismatch");
+        if (!pkceMatches(codeVerifier, row.code_challenge)) return failure("invalid_grant", "pkce_failed");
         if (row.grant_id && this.endGrant(row.grant_id, "code_replay", now)) {
           this.audit?.record({ actor: row.user_id, channel: "http", action: "oauth.grant.revoke", outcome: "accepted", reason: "code_replay", target: row.grant_id });
         }
@@ -175,7 +182,7 @@ export class OAuthStore {
       if (row.resource !== resource) return failure("invalid_target", "resource_mismatch");
       if (!pkceMatches(codeVerifier, row.code_challenge)) return failure("invalid_grant", "pkce_failed");
       const account = this.db.prepare("SELECT id,username,status,role,session_epoch FROM users WHERE id=?").get(row.user_id);
-      if (!this.eligible(account, row.account_epoch)) return failure("invalid_grant", "account_inactive");
+      if (!this.eligible(account, row.account_epoch) || !scopeAllowedForRole(account.role, row.scope)) return failure("invalid_grant", "account_inactive");
       // Bounded number of concurrently active grants per account: the oldest one is ended.
       const active = this.db.prepare("SELECT id FROM oauth_grants WHERE user_id=? AND revoked_at IS NULL AND expires_at > ? ORDER BY created_at, id").all(row.user_id, now);
       for (const old of active.slice(0, Math.max(0, active.length - MAX_ACTIVE_GRANTS_PER_ACCOUNT + 1))) {
@@ -211,7 +218,7 @@ export class OAuthStore {
       if (row.revoked_at || row.grant_revoked_at) return { ...failure("invalid_grant", "grant_revoked"), ...base };
       if (!(row.grant_expires_at > now) || !(row.expires_at > now)) return { ...failure("invalid_grant", "grant_expired"), ...base };
       const account = this.db.prepare("SELECT id,username,status,role,session_epoch FROM users WHERE id=?").get(row.user_id);
-      if (!this.eligible(account, row.account_epoch)) return { ...failure("invalid_grant", "account_inactive"), ...base };
+      if (!this.eligible(account, row.account_epoch) || !scopeAllowedForRole(account.role, row.scope)) return { ...failure("invalid_grant", "account_inactive"), ...base };
       if (this.db.prepare("UPDATE oauth_tokens SET used_at=? WHERE token_hash=? AND used_at IS NULL").run(now, row.token_hash).changes !== 1) return { ...failure("invalid_grant", "refresh_reuse"), ...base };
       const minted = this.mint({ id: row.grant_id, user_id: row.user_id, scope: row.scope, expires_at: row.grant_expires_at }, now);
       this.db.prepare("UPDATE oauth_grants SET last_used_at=? WHERE id=?").run(iso(now), row.grant_id);
@@ -245,11 +252,11 @@ export class OAuthStore {
     const row = this.db.prepare("SELECT t.expires_at,t.revoked_at,g.id AS grant_id,g.user_id,g.account_epoch,g.scope,g.resource,g.expires_at AS grant_expires_at,g.revoked_at AS grant_revoked_at,g.last_used_at," +
       "u.username,u.status,u.role,u.session_epoch FROM oauth_tokens t JOIN oauth_grants g ON g.id=t.grant_id JOIN users u ON u.id=g.user_id WHERE t.token_hash=? AND t.kind='access'").get(digest(token));
     if (!row) return null;
-    const base = { userId: row.user_id, username: row.username, grantId: row.grant_id };
+    const base = { userId: row.user_id, username: row.username, grantId: row.grant_id, role: row.role, scope: row.scope };
     let reason = "";
     if (row.revoked_at || row.grant_revoked_at) reason = "oauth_token_revoked";
     else if (!(row.expires_at > now) || !(row.grant_expires_at > now)) reason = "oauth_token_expired";
-    else if (row.resource !== resource || row.scope !== OAUTH_SCOPE) reason = "oauth_audience_mismatch";
+    else if (row.resource !== resource || !scopeAllowedForRole(row.role, row.scope)) reason = "oauth_audience_mismatch";
     else if (!this.eligible(row, row.account_epoch)) reason = "account_inactive";
     if (reason) return { ok: false, reason, ...base };
     if (touch && (!row.last_used_at || !(Date.parse(row.last_used_at) > now - LAST_USED_RESOLUTION_MS))) {

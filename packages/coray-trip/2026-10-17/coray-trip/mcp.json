@@ -3,13 +3,17 @@
   "mcpServers": {
     "coray-trip": {
       "type": "streamable-http",
-      "url": "https://trip.coray.app/mcp",
+      "url": "https://trips.example.org/mcp",
       "extensions": {
         "com.openai": {
           "auth": {
             "type": "oauth",
-            "client": { "mode": "dcr" },
-            "baseScopes": ["trips:manage"]
+            "client": {
+              "mode": "dcr"
+            },
+            "baseScopes": [
+              "trips:manage"
+            ]
           }
         }
       }
