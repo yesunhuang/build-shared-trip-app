@@ -1,4 +1,4 @@
-import { getGooglePlaceLinks } from "./google-place-links.js?v=v-a658691789ff";
+import { getGooglePlaceLinks } from "./google-place-links.js?v=v-a8561e8c5fe7";
 import {
   GOOGLE_PLACE_PHOTOS_FIELD,
   buildGooglePlacePhotosField,
@@ -21,7 +21,7 @@ import {
   toRenderTrip,
   tripHasGooglePlacePhotos,
   tripIdFromPath
-} from "./hosted-client.js?v=v-a658691789ff";
+} from "./hosted-client.js?v=v-a8561e8c5fe7";
 import {
   GOOGLE_PLACE_ASSOCIATION_FIELD,
   associationForPlan,
@@ -29,7 +29,7 @@ import {
   locationBindingForPlan,
   normalizeGooglePlaceAssociation,
   placeIdFromUserInput
-} from "./google-place-association.js?v=v-a658691789ff";
+} from "./google-place-association.js?v=v-a8561e8c5fe7";
 import {
   VENUE_QUERY_MAX,
   checkVenueQuery,
@@ -40,19 +40,19 @@ import {
   createPlacePreviewSession,
   createPlaceSearchSession,
   googleText
-} from "./google-places-ui-kit.js?v=v-a658691789ff";
-import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-a658691789ff";
-import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=v-a658691789ff";
-import { linkedTextElement, locationTextNode } from "./text-links.js?v=v-a658691789ff";
-import { projectCardLinks, renderCardLinkGroup, cardLinkIcon } from "./card-link-presentation.js?v=v-a658691789ff";
-import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=v-a658691789ff";
-import { applyTripBranding } from "./trip-branding.js?v=v-a658691789ff";
-import { createBrandingEditor, brandingText } from "./branding-editor.js?v=v-a658691789ff";
-import { applyTripCover, cardCategory, categoryBadge, presentationText } from "./trip-presentation.js?v=v-a658691789ff";
-import { createCoverEditor } from "./cover-editor.js?v=v-a658691789ff";
-import { optimizedPhotoUrl } from "./photo-assets.js?v=v-a658691789ff";
-import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-a658691789ff";
-import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-a658691789ff";
+} from "./google-places-ui-kit.js?v=v-a8561e8c5fe7";
+import { buildGoogleMapsUrl, normalizeGoogleMapsUrl } from "./map-links.js?v=v-a8561e8c5fe7";
+import { createLinkActivationGuard, isPlainPrimaryActivation, safeLinkUrl, startsOnInteractive } from "./link-activation.js?v=v-a8561e8c5fe7";
+import { linkedTextElement, locationTextNode } from "./text-links.js?v=v-a8561e8c5fe7";
+import { projectCardLinks, renderCardLinkGroup, cardLinkIcon } from "./card-link-presentation.js?v=v-a8561e8c5fe7";
+import { createRelatedLinksEditor, relatedLinksProblems, RELATED_LINK_WORDS } from "./related-links.js?v=v-a8561e8c5fe7";
+import { applyTripBranding } from "./trip-branding.js?v=v-a8561e8c5fe7";
+import { createBrandingEditor, brandingText } from "./branding-editor.js?v=v-a8561e8c5fe7";
+import { applyTripCover, cardCategory, categoryBadge, presentationText } from "./trip-presentation.js?v=v-a8561e8c5fe7";
+import { createCoverEditor } from "./cover-editor.js?v=v-a8561e8c5fe7";
+import { optimizedPhotoUrl } from "./photo-assets.js?v=v-a8561e8c5fe7";
+import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=v-a8561e8c5fe7";
+import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=v-a8561e8c5fe7";
 import {
   getInitialLanguage,
   languageStorageKey,
@@ -60,23 +60,23 @@ import {
   localizeTrip,
   saveLanguage,
   ui
-} from "./i18n.js?v=v-a658691789ff";
+} from "./i18n.js?v=v-a8561e8c5fe7";
 import {
   createWeatherForecastController,
   localizeForecastLocation,
   weatherCodeIcon,
   weatherCodeKey
-} from "./weather-forecast.js?v=v-a658691789ff";
+} from "./weather-forecast.js?v=v-a8561e8c5fe7";
 import {
   applyDayWeatherChangesLocally,
   buildDayWeatherChanges,
   isValidCoordinate as isValidWeatherCoordinate,
   pointKey as weatherPointKey,
   resolveDayWeather
-} from "./weather-association.js?v=v-a658691789ff";
-import { createDayWeatherEditor, weatherEditorText } from "./weather-editor.js?v=v-a658691789ff";
-import { getFlightBookings } from "./flight-bookings.js?v=v-a658691789ff";
-import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-a658691789ff";
+} from "./weather-association.js?v=v-a8561e8c5fe7";
+import { createDayWeatherEditor, weatherEditorText } from "./weather-editor.js?v=v-a8561e8c5fe7";
+import { getFlightBookings } from "./flight-bookings.js?v=v-a8561e8c5fe7";
+import { getDayArea, getDayGuide, getPlacePhoto, setGuideTrip } from "./daily-guide.js?v=v-a8561e8c5fe7";
 import {
   OSM_COPYRIGHT_URL,
   coordinateGoogleMapsUrl,
@@ -90,7 +90,7 @@ import {
   placeForSaving,
   readSavedPhoto,
   readSavedPlace
-} from "./place-picker.js?v=v-a658691789ff";
+} from "./place-picker.js?v=v-a8561e8c5fe7";
 
 const FIREBASE_SDK_VERSION = "12.15.0";
 // Self-hosted mode is decided before any Firebase code path. It never loads the
@@ -102,7 +102,7 @@ let firebaseConfig = {};
 let tripDocumentPath = "";
 const firebaseConfigPromise = HOSTED
   ? Promise.resolve()
-  : import("./firebase-config.js?v=v-a658691789ff")
+  : import("./firebase-config.js?v=v-a8561e8c5fe7")
     .then((module) => {
       firebaseConfig = module.firebaseConfig || {};
       tripDocumentPath = module.tripDocumentPath || "";

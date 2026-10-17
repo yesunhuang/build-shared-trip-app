@@ -4,9 +4,9 @@ import {
   languageMeta,
   saveLanguage,
   ui
-} from "./i18n.js?v=v-a658691789ff";
-import { getTripResources } from "./trip-resources.js?v=v-a658691789ff";
-import { applyTripBranding } from "./trip-branding.js?v=v-a658691789ff";
+} from "./i18n.js?v=v-a8561e8c5fe7";
+import { getTripResources } from "./trip-resources.js?v=v-a8561e8c5fe7";
+import { applyTripBranding } from "./trip-branding.js?v=v-a8561e8c5fe7";
 
 const languageSelect = document.getElementById("language-select");
 const paymentContent = document.getElementById("payment-page-content");

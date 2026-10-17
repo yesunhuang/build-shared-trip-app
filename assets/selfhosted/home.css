@@ -33,4 +33,6 @@ form label.field--checkbox {grid-template-columns:auto minmax(0,1fr);align-items
 .delete-dialog .actions button {min-height:44px;} .delete-dialog .secondary {background:#e5dbcc;color:#17362f;} .delete-dialog .danger {background:#a53325;color:white;}
 [hidden] {display:none!important;} @media(max-width:500px) {header {padding:12px;gap:6px;flex-wrap:wrap;}.brand {font-size:20px;} .brand img {width:38px;height:38px;} header button,header select {padding:8px;font-size:13px;}main {padding:24px 16px;} .account-row {padding:12px;} .account-status {margin-right:0;} .role-control {flex-basis:100%;} .role-control select {flex:1 1 100%;} .token-panel {padding:12px;} .token-issue-form button,.token-output .actions button {flex:1 1 auto;} .grant-row {padding:10px;} .grant-row button {flex:1 1 100%;} .grant-retry {width:100%;} .delete-dialog {padding:20px;} .delete-dialog h2 {font-size:20px;} .delete-dialog .actions {flex-direction:column;align-items:stretch;} .delete-dialog .actions button {width:100%;}}
 
-.trip-card-cover { display:block; width:calc(100% + 48px); max-width:none; height:180px; object-fit:cover; margin:-24px -24px 18px; border-radius:17px 17px 0 0; background:#fff; }
+.trip-card { min-width:0; }
+.trip-card h2,.trip-card p { overflow-wrap:anywhere; }
+.trip-card-cover { display:block; width:100%; max-width:100%; min-width:0; height:180px; object-fit:cover; margin:0 0 18px; border-radius:12px; background:#fff; }

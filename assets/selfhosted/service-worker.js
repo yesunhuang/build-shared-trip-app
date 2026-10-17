@@ -11,7 +11,10 @@ self.addEventListener("fetch",(event)=>{
     event.respondWith(fetch(event.request,{cache:"no-store"}).catch(()=>caches.match("/offline.html")));return;
   }
   if(SHELL.includes(url.pathname))event.respondWith(caches.open(CACHE).then(async(cache)=>{
-    const cached=await cache.match(url.pathname);if(cached)return cached;
-    const response=await fetch(event.request);if(response.ok)await cache.put(url.pathname,response.clone());return response;
+    // A build query is part of the resource identity. An older worker must not answer a new
+    // page's versioned stylesheet with the unversioned bytes it installed for its own shell.
+    const key=url.search?event.request.url:url.pathname;
+    const cached=await cache.match(key);if(cached)return cached;
+    const response=await fetch(event.request);if(response.ok)await cache.put(key,response.clone());return response;
   }));
 });

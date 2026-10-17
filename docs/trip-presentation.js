@@ -27,6 +27,9 @@ export function coverSource(cover){return cover&&!coverProblems(cover).length?"d
 export function coverImage(doc,cover,className="trip-cover"){
  const source=coverSource(cover);if(!source)return null;
  const image=doc.createElement("img");image.className=className;image.src=source;image.alt=cover.alt;image.decoding="async";
+ // Critical sizing travels with the image: an older controlling worker can serve pre-cover CSS
+ // during an upgrade. Never let a private artwork's intrinsic width determine the page width.
+ image.style.width="100%";image.style.maxWidth="100%";image.style.minWidth="0";
  image.style.objectPosition=`${cover.focusX??50}% ${cover.focusY??50}%`;return image;
 }
 export function applyTripCover(doc,trip){

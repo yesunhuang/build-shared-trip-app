@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";import {JSDOM} from "jsdom";
 import {createCoverEditor,prepareCoverFile} from "../assets/app-template/public/cover-editor.js";
-import {applyTripCover,categoryBadge,coverProblems,presentationText} from "../assets/app-template/public/trip-presentation.js";
+import {applyTripCover,categoryBadge,coverImage,coverProblems,presentationText} from "../assets/app-template/public/trip-presentation.js";
 import {brandingText} from "../assets/app-template/public/branding-editor.js";
 import {fictionalLogo} from "./fixtures/branding.mjs";
 import {localizeTrip} from "../assets/app-template/public/i18n.js";
 const cover={mimeType:"image/png",data:fictionalLogo().toString("base64"),alt:"Fictional cover",focusX:25,focusY:70};
 const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
+{
+ const document=new JSDOM("<!doctype html><body>").window.document;
+ for(const className of ["trip-card-cover","trip-cover"]){
+  const image=coverImage(document,cover,className);
+  assert.equal(image.style.width,"100%","critical cover sizing does not depend on upgraded CSS");
+  assert.equal(image.style.maxWidth,"100%");assert.equal(Number.parseFloat(image.style.minWidth),0);
+  assert.equal(image.style.objectPosition,"25% 70%","saved crop focus unchanged");
+ }
+ document.defaultView.close();
+}
 assert.deepEqual(localizeTrip({cover,days:[{slots:[{cardCategory:"neutral",i18n:{ja:{cardCategory:"hotel"}}}]}],i18n:{ja:{cover:null}}},"ja"),{cover,days:[{slots:[{cardCategory:"neutral"}]}]},"legacy translation patches cannot change artwork or classification");
 function dom(){const d=new JSDOM('<!doctype html><html><body><div class="hero"><img class="hero-title-icon" src="/fictional-logo.png"><h1>Fictional trip</h1></div></body></html>',{url:"http://fictional-cover.test"});d.window.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new d.window.Event("close"));};return d;}
 for(const language of ["en","zh-Hans","zh-Hant","ja"]){
