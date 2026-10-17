@@ -1,7 +1,7 @@
 // Durable OAuth 2.1 state for the self-hosted MCP resource (schema v5 tables in db.mjs).
 //
 // Scope of what OAuth can grant: exactly the existing content-manager permissions (the six MCP
-// content tools on all current and future trips) for one explicitly configured account
+// content tools on accessible member trips, with only a separately configured stable exception) for one explicitly configured account
 // (SHARED_TRIP_OAUTH_USERNAME). OAuth never grants owner, account, invitation, credential, audit,
 // media or other administration, and OAuth access tokens are honoured only at /mcp.
 //

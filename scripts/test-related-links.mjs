@@ -1,3 +1,4 @@
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -51,6 +52,7 @@ try {
   ok(await write(trip, [], { cookie: viewerCookie }), 403);
   ok(await write(trip, [], { anonymous: true }), 401);
   ok(await api(`/api/users/${account.id}/role`, { role: "content-manager" }));
+  grantFixtureMembership(runtime,trip.id,account.id);
   login = await api("/api/login", { username: "sample-link-reader", password }, { anonymous: true }); ok(login);
   const managerCookie = login.headers.get("set-cookie").split(";")[0];
   const request = { requestId: "related-retry", expectedVersion: trip.version, changes: [{ type: "upsert_plan", dayId: "day-one", plan: { id: "plan-one", relatedLinks: [links[0]] } }] };

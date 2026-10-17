@@ -30,10 +30,10 @@ const keys = ["signin","token","yourTrips","create","archived","import","retry",
 // Content-manager roles and owner-only assistant access controls.
 const more = {
   en: {
-    managerNote: "Content manager access: you can create, edit, import, export, archive and restore every trip. Account and security settings stay with the owner.",
-    accountsNote: "Invited people start as pending viewers. Choose an access level, then approve. Content managers can edit every trip, including trips added later, but cannot manage accounts or security.",
+    managerNote: "Content manager access: you can create, edit, import, export, archive and restore joined trips. Account and security settings stay with the owner.",
+    accountsNote: "Invited people start as pending viewers. Choose an access level, then approve. Content managers can edit joined trips, including trips added later, but cannot manage accounts or security.",
     accessLevel: "Access level", accessLevelFor: "Access level for {name}",
-    "role-viewer": "Viewer (view and export)", "role-content-manager": "Content manager (edit all trips)",
+    "role-viewer": "Viewer (view and export)", "role-content-manager": "Content manager (edit joined trips)",
     saveRole: "Save access level", saveRoleFor: "Save access level for {name}",
     roleHint: "Saving signs this account out everywhere and ends its assistant access tokens.",
     roleSaved: "Access level saved.",
@@ -76,10 +76,10 @@ const more = {
     deleteOwnerOnly: "Only the owner can delete trips."
   },
   "zh-Hans": {
-    managerNote: "内容管理者权限：你可以创建、编辑、导入、导出、归档和恢复所有旅行。账户和安全设置仍由所有者管理。",
-    accountsNote: "受邀者最初是待批准的访客。请选择访问级别，然后批准。内容管理者可以编辑所有旅行（包括以后添加的旅行），但不能管理账户或安全设置。",
+    managerNote: "内容管理者权限：你可以创建、编辑、导入、导出、归档和恢复已加入的旅行。账户和安全设置仍由所有者管理。",
+    accountsNote: "受邀者最初是待批准的访客。请选择访问级别，然后批准。内容管理者可以编辑已加入的旅行，但不能管理账户或安全设置。",
     accessLevel: "访问级别", accessLevelFor: "{name} 的访问级别",
-    "role-viewer": "访客（查看和导出）", "role-content-manager": "内容管理者（编辑所有旅行）",
+    "role-viewer": "访客（查看和导出）", "role-content-manager": "内容管理者（编辑已加入的旅行）",
     saveRole: "保存访问级别", saveRoleFor: "保存 {name} 的访问级别",
     roleHint: "保存后，此账户会在所有设备上退出，其助手访问令牌也会失效。",
     roleSaved: "访问级别已保存。",
@@ -122,10 +122,10 @@ const more = {
     deleteOwnerOnly: "只有所有者可以删除旅行。"
   },
   "zh-Hant": {
-    managerNote: "內容管理者權限：你可以建立、編輯、匯入、匯出、封存和還原所有旅行。帳戶和安全設定仍由擁有者管理。",
-    accountsNote: "受邀者一開始是待核准的訪客。請選擇存取層級，然後核准。內容管理者可以編輯所有旅行（包括日後新增的旅行），但無法管理帳戶或安全設定。",
+    managerNote: "內容管理者權限：你可以建立、編輯、匯入、匯出、封存和還原已加入的旅行。帳戶和安全設定仍由擁有者管理。",
+    accountsNote: "受邀者一開始是待核准的訪客。請選擇存取層級，然後核准。內容管理者可以編輯已加入的旅行，但無法管理帳戶或安全設定。",
     accessLevel: "存取層級", accessLevelFor: "{name} 的存取層級",
-    "role-viewer": "訪客（檢視和匯出）", "role-content-manager": "內容管理者（編輯所有旅行）",
+    "role-viewer": "訪客（檢視和匯出）", "role-content-manager": "內容管理者（編輯已加入的旅行）",
     saveRole: "儲存存取層級", saveRoleFor: "儲存 {name} 的存取層級",
     roleHint: "儲存後，此帳戶會在所有裝置上登出，其助理存取權杖也會失效。",
     roleSaved: "存取層級已儲存。",
@@ -168,10 +168,10 @@ const more = {
     deleteOwnerOnly: "只有擁有者可以刪除旅行。"
   },
   ja: {
-    managerNote: "コンテンツ管理者：すべての旅行の作成・編集・インポート・エクスポート・アーカイブ・復元ができます。アカウントとセキュリティの設定はオーナーが管理します。",
-    accountsNote: "招待された人は承認待ちの閲覧者として始まります。アクセスレベルを選んでから承認してください。コンテンツ管理者は後から追加される旅行を含むすべての旅行を編集できますが、アカウントやセキュリティは管理できません。",
+    managerNote: "コンテンツ管理者：参加している旅行の作成・編集・インポート・エクスポート・アーカイブ・復元ができます。アカウントとセキュリティの設定はオーナーが管理します。",
+    accountsNote: "招待された人は承認待ちの閲覧者として始まります。アクセスレベルを選んでから承認してください。コンテンツ管理者は参加している旅行を編集できますが、アカウントやセキュリティは管理できません。",
     accessLevel: "アクセスレベル", accessLevelFor: "{name} のアクセスレベル",
-    "role-viewer": "閲覧者（表示とエクスポート）", "role-content-manager": "コンテンツ管理者（すべての旅行を編集）",
+    "role-viewer": "閲覧者（表示とエクスポート）", "role-content-manager": "コンテンツ管理者（参加している旅行を編集）",
     saveRole: "アクセスレベルを保存", saveRoleFor: "{name} のアクセスレベルを保存",
     roleHint: "保存すると、このアカウントはすべての端末でサインアウトされ、アシスタント用アクセストークンも無効になります。",
     roleSaved: "アクセスレベルを保存しました。",
@@ -216,10 +216,10 @@ const more = {
 };
 // The persisted ordinary role remains "viewer" for compatibility; its trip rights are scoped.
 const membershipLabels={
- en:{readOnly:"Read-only in joined trips. You can create and manage your own trips.",role:"Member (joined trips)",note:"Approve an account, then assign trips in Participants or share a trip join code. Content managers can edit all current and future trips; account and security settings remain owner-only."},
- "zh-Hans":{readOnly:"只读访问：你可以查看和导出加入的旅行，也可以创建和管理自己的旅行。",role:"成员（已加入的旅行）",note:"批准账户后，可在参与者中分配旅行，或分享旅行加入码。内容管理者可编辑当前和未来的所有旅行；账户和安全设置仍仅限所有者。"},
- "zh-Hant":{readOnly:"唯讀存取：你可以檢視和匯出加入的旅行，也可以建立和管理自己的旅行。",role:"成員（已加入的旅行）",note:"批准帳戶後，可在參與者中分配旅行，或分享旅行加入碼。內容管理者可編輯目前及未來的所有旅行；帳戶和安全設定仍僅限擁有者。"},
- ja:{readOnly:"閲覧のみ：参加した旅行の閲覧・書き出しができます。自分の旅行は作成・編集できます。",role:"メンバー（参加した旅行）",note:"アカウント承認後、参加者から旅行を割り当てるか、旅行の参加コードを共有してください。コンテンツ管理者は現在と将来の全旅行を編集できます。アカウントとセキュリティの設定はオーナー専用です。"}
+ en:{readOnly:"Read-only in joined trips. You can create and manage your own trips.",role:"Member (joined trips)",note:"Approve an account, then assign trips in Participants or share a trip join code. Content managers can edit joined trips; account and security settings remain owner-only."},
+ "zh-Hans":{readOnly:"只读访问：你可以查看和导出加入的旅行，也可以创建和管理自己的旅行。",role:"成员（已加入的旅行）",note:"批准账户后，可在参与者中分配旅行，或分享旅行加入码。内容管理者可编辑已加入的旅行；账户和安全设置仍仅限所有者。"},
+ "zh-Hant":{readOnly:"唯讀存取：你可以檢視和匯出加入的旅行，也可以建立和管理自己的旅行。",role:"成員（已加入的旅行）",note:"批准帳戶後，可在參與者中分配旅行，或分享旅行加入碼。內容管理者可編輯已加入的旅行；帳戶和安全設定仍僅限擁有者。"},
+ ja:{readOnly:"閲覧のみ：参加した旅行の閲覧・書き出しができます。自分の旅行は作成・編集できます。",role:"メンバー（参加した旅行）",note:"アカウント承認後、参加者から旅行を割り当てるか、旅行の参加コードを共有してください。コンテンツ管理者は参加している旅行を編集できます。アカウントとセキュリティの設定はオーナー専用です。"}
 };
 for(const [locale,labels] of Object.entries(membershipLabels))Object.assign(more[locale],{readOnly:labels.readOnly,"role-viewer":labels.role,accountsNote:labels.note});
 const LABEL_MAX = 60;
@@ -242,7 +242,7 @@ const when = (value) => { const date = new Date(value); return Number.isNaN(date
 const roleOf = (account) => ACCOUNT_ROLES.includes(account?.role) ? account.role : "viewer";
 const isApprovedManager = (account) => account?.status === "approved" && account?.role === "content-manager";
 // Owner-only whole-trip deletion. The card control and its confirmation exist only while the
-// current session role is "owner": content managers can edit every trip but never delete one, and
+// current session role is "owner": content managers can edit joined trips but never delete one, and
 // the server enforces the same rule independently. The owner role is checked again with a fresh
 // session read right before anything is sent. A confirmed deletion sends the version shown on the
 // card when the confirmation opened plus one request id kept in page memory only, so an explicit

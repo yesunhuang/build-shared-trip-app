@@ -1,7 +1,8 @@
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 // Content-manager accounts and per-account MCP credentials: real HTTP and MCP requests against the
 // actual service with fictional data only.
 //
-// Covers: all-trip (current and future) read/write over HTTP and MCP in both directions, including
+// Covers: explicit member-trip read/write over HTTP and MCP in both directions, including
 // create, import, export, edit, delete, replace_content, archive/unarchive and protected media; the
 // denial matrix (anonymous, viewer, pending, revoked, manager cookie at MCP, manager credential at
 // HTTP routes and owner login, account/credential/audit administration); 90-day expiry with an
@@ -186,7 +187,7 @@ try {
   let alpha = check(await api.owner("/api/trips", { method: "POST", body: { requestId: "cm-alpha", trip: { title: TITLES[0] } } }), 201, "owner create alpha").trip;
   alpha = check(await api.owner("/api/trips/" + alpha.id + "/changes", { method: "POST", body: { requestId: "cm-alpha-seed", expectedVersion: 1, changes: [
     { type: "upsert_day", day: { id: "cm-day", date: "2032-03-04", slots: [
-      { id: "cm-plan-a", name: "Invented harbor walk", time: "11:00", review: "Invented notes", i18n: { ja: { name: "架空の散歩" } } },
+      { id: "cm-plan-a", photo:{url:"/photos/"+photoName}, name: "Invented harbor walk", time: "11:00", review: "Invented notes", i18n: { ja: { name: "架空の散歩" } } },
       { id: "cm-plan-b", name: "Invented bakery", time: "09:00" }] } },
     { type: "upsert_reminder", reminder: { id: "cm-todo", item: "Invented ferry ticket", dueDate: "2032-03-01", done: false } }] } }), 200, "seed alpha").trip;
   assert.deepEqual(alpha.days[0].slots.map((slot) => slot.id), ["cm-plan-b", "cm-plan-a"], "plans sorted by time");
@@ -196,6 +197,7 @@ try {
   // ---------------------------------------------------------------------------------------------
   // Accounts and roles.
   const manager = await api.makeAccount("fictional.manager", { role: "content-manager" });
+  for(const trip of [alpha,beta])grantFixtureMembership(runtime,trip.id,manager.id);
   const viewer = await api.makeAccount("fictional.reader");
   const pending = await api.makeAccount("fictional.pending", { role: "content-manager", approve: false });
   const retired = await api.makeAccount("fictional.retired", { role: "content-manager" });
@@ -275,13 +277,15 @@ try {
   assert.equal(media.status, 200); assert.equal(media.headers.get("content-type"), "image/webp"); assert.ok(media.text === photoBytes.toString(), "manager reads protected media");
   assert.equal((await api.as(managerCookie, "/photos/" + photoName, { method: "HEAD" })).status, 200);
   let delta = check(await api.owner("/api/trips", { method: "POST", body: { requestId: "cm-delta", trip: { title: TITLES[3] } } }), 201, "owner creates a later trip").trip;
+  assert.equal((await api.as(managerCookie,"/api/trips/"+delta.id)).status,404,"future trips require membership too");
+  grantFixtureMembership(runtime,delta.id,manager.id);
   delta = check(await api.as(managerCookie, "/api/trips/" + delta.id + "/changes", { method: "POST", body: { requestId: "cm-web-future", expectedVersion: 1, changes: [{ type: "update_trip", fields: { shortName: "Delta" } }] } }), 200, "manager edits a trip created after the role assignment").trip;
   const managerList = check(await api.as(managerCookie, "/api/trips"), 200, "manager list").trips.map((trip) => trip.id);
-  for (const id of [alpha.id, beta.id, gamma.id, delta.id, importedWeb.trip.id]) assert.ok(managerList.includes(id), "manager lists every trip, including archived");
+  for (const id of [alpha.id, beta.id, gamma.id, delta.id, importedWeb.trip.id]) assert.ok(managerList.includes(id), "manager lists explicitly assigned trips, including archived");
   for (const [route, body] of [["/api/import", { requestId: "viewer-import", data: exported }], ["/api/trips/" + delta.id + "/changes", { requestId: "viewer-edit", expectedVersion: delta.version, changes: [{ type: "archive_trip", archived: true }] }]]) {
     assert.equal((await api.as(viewerCookie, route, { method: "POST", body })).status, 403, "viewer stays read-only");
   }
-  console.log("Manager HTTP: edit/delete/replace/archive/unarchive/create/import/export/media on current and future trips, conflicts, atomic rollback and durable retries passed; viewers stay read-only.");
+  console.log("Manager HTTP: edit/delete/replace/archive/unarchive/create/import/export/media on assigned current and future trips, conflicts, atomic rollback and durable retries passed; viewers stay read-only.");
 
   // ---------------------------------------------------------------------------------------------
   // Administration is owner-only.
@@ -341,7 +345,7 @@ try {
   assert.deepEqual(hints.export_trip, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
   assert.deepEqual(hints.import_trip, { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false });
   const mcpList = (await mgr.tool("list_trips", {})).data.trips.map((trip) => trip.id);
-  for (const id of [alpha.id, beta.id, gamma.id, delta.id]) assert.ok(mcpList.includes(id), "MCP lists every trip");
+  for (const id of [alpha.id, beta.id, gamma.id, delta.id]) assert.ok(mcpList.includes(id), "MCP lists explicitly assigned trips");
   assert.equal((await mgr.tool("get_trip", { tripId: alpha.id })).data.trip.version, alpha.version, "MCP reads the HTTP-written version");
   const mcpEdit = await mgr.tool("apply_trip_changes", { tripId: delta.id, requestId: "cm-mcp-edit", expectedVersion: delta.version, changes: [
     { type: "upsert_day", day: { id: "cm-mcp-day", date: "2032-05-06", slots: [{ id: "cm-mcp-plan", name: "Invented museum", time: "14:00" }] } },
@@ -655,6 +659,8 @@ try {
   check(await now4.owner("/api/users/" + legacyReturning.id + "/role", { method: "POST", body: { role: "content-manager" } }), 200, "promote a migrated account");
   const legacyManagerCookie = await now4.login(legacyReturning);
   const legacyCurrent = await now4.trip(legacyTrip.id);
+  assert.equal((await now4.as(legacyManagerCookie,"/api/trips/"+legacyTrip.id)).status,404,"promotion grants no legacy trip membership");
+  grantFixtureMembership(upgraded,legacyTrip.id,legacyReturning.id);
   check(await now4.as(legacyManagerCookie, "/api/trips/" + legacyTrip.id + "/changes", { method: "POST", body: { requestId: "upgraded-manager-edit", expectedVersion: legacyCurrent.version, changes: [{ type: "update_trip", fields: { shortName: "Legacy" } }] } }), 200, "migrated manager edits a pre-upgrade trip");
   const upgradedToken = await now4.issue(legacyReturning.id, "Fictional upgraded");
   assert.equal(await now4.mcpStatus({ Authorization: "Bearer " + upgradedToken.secret }), 200, "credentials work after upgrade");

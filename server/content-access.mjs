@@ -2,7 +2,8 @@
 //
 // Every content operation goes through here with { principal, channel }. Ordinary accounts read
 // only joined trips, may create their own, and edit only trips they currently own as creator.
-// Owner/content-manager global rights remain intact; import stays privileged. Successful writes and replays are
+// Content managers edit only joined trips. Only the owner or one configured stable assistant has
+// all-trip access; import remains a content-manager capability. Successful writes and replays are
 // audited inside the domain transaction (TripService.transact), so the audit never reports a write
 // that did not commit. Refusals are audited best effort after the rollback. Audit events never
 // contain bodies, titles or credentials; see audit.mjs.
@@ -40,20 +41,38 @@ export class ContentGateway {
   getTrip(context, tripId) { this.membership.require(context.principal,tripId); return {...this.service.getTrip(tripId),...this.membership.projection(context.principal,tripId)}; }
   exportTrip(context, tripId) { this.membership.require(context.principal,tripId); return this.service.exportTrip(tripId); }
 
+  retryScope(principal,base,requestId){
+    if(principal.role===OWNER)return base;
+    const scoped=base.startsWith("trip:")?base+":user:"+principal.userId:base+":"+principal.userId;
+    if(typeof requestId!=="string"||this.service.db.prepare("SELECT 1 FROM request_log WHERE scope=? AND request_id=?").get(scoped,requestId))return scoped;
+    const old=this.service.db.prepare("SELECT result FROM request_log WHERE scope=? AND request_id=?").get(base,requestId);
+    if(!old)return scoped;
+    const result=JSON.parse(old.result),tripId=result.trip?.id??result.deletedTrip?.tripId;
+    const actions=base==="create"?["trip.create"]:base==="import"?["trip.import"]:["trip.change","trip.replace_content","trip.archive","trip.unarchive"];
+    const proofs=this.service.db.prepare("SELECT actor,action,version FROM audit_log WHERE trip_id=? AND request_id=? AND outcome='accepted'").all(tripId??null,requestId).filter(r=>actions.includes(r.action)&&r.version===result.trip?.version);
+    if(proofs.length&&proofs.every(r=>r.actor===principal.userId))return base;
+    if(!proofs.length)throw conflict("request_id_conflict","An older retry cannot be attributed safely. Reconcile the current trip before using a new request ID.");
+    throw conflict("request_id_conflict","This older request belongs to another actor. Use a new request ID for a new operation.");
+  }
+
   createTrip(context, input) {
     return this.write(context, "trip.create", input, (record) => {
       assertSafePayload(input);
-      if(!canEditContent(context.principal)&&localPhotoPaths(input?.trip,this.membership.origin).size)throw forbidden();
-      const scope=canEditContent(context.principal)?"create":"create:"+context.principal.userId;
+      if(context.principal.role!==OWNER)for(const pathname of localPhotoPaths(input?.trip,this.membership.origin))if(!this.membership.canReadMedia(context.principal,pathname))throw forbidden();
+      const scope=this.retryScope(context.principal,"create",input.requestId);
       return this.service.createTrip(input,(result,replayed)=>{if(!replayed){this.membership.created(context.principal,result.trip);this.membership.checkMedia(context.principal,result.trip);}else this.membership.require(context.principal,result.trip.id);record(result,replayed);},scope);
     },()=>true);
   }
   importTrip(context, input) {
-    return this.write(context, "trip.import", input, (record) => this.service.importTrip(input,(result,replayed)=>{if(!replayed){this.membership.created(context.principal,result.trip);this.membership.checkMedia(context.principal,result.trip);}record(result,replayed);}));
+    return this.write(context, "trip.import", input, (record) => {
+      assertSafePayload(input);
+      if(context.principal.role!==OWNER)for(const pathname of localPhotoPaths(input?.data,this.membership.origin))if(!this.membership.canReadMedia(context.principal,pathname))throw forbidden();
+      return this.service.importTrip(input,(result,replayed)=>{if(!replayed){this.membership.created(context.principal,result.trip);this.membership.checkMedia(context.principal,result.trip);}else this.membership.require(context.principal,result.trip.id);record(result,replayed);},this.retryScope(context.principal,"import",input.requestId));
+    });
   }
   /** input: { tripId, requestId, expectedVersion, changes } */
   applyTripChanges(context, input) {
-    return this.write(context, changeAction(input?.changes), input, (record) => this.service.applyTripChanges(input,(result,replayed)=>{if(!replayed)this.membership.checkMedia(context.principal,result.trip);record(result,replayed);},canEditContent(context.principal)?undefined:"trip:"+input.tripId+":user:"+context.principal.userId),p=>this.membership.canEdit(p,input?.tripId));
+    return this.write(context, changeAction(input?.changes), input, (record) => this.service.applyTripChanges(input,(result,replayed)=>{if(!replayed)this.membership.checkMedia(context.principal,result.trip);record(result,replayed);},this.retryScope(context.principal,"trip:"+input.tripId,input.requestId)),p=>this.membership.canEdit(p,input?.tripId));
   }
   /**
    * Target check for HTTP-only place/photo lookups: a current owner/manager/trip creator
@@ -77,7 +96,7 @@ export class ContentGateway {
       this.read({principal});
       if (!allowed(principal, channel)) throw forbidden();
       if (!isObject(input)) throw validationError("The request body must be a JSON object.");
-      if(input.tripId&&action!=="trip.delete"&&!canEditContent(principal))this.membership.require(principal,input.tripId);
+      if(input.tripId&&action!=="trip.delete"&&principal.role!==OWNER)this.membership.require(principal,input.tripId);
       return run((result, replayed) => this.audit.record({ ...base, tripId: result?.trip?.id ?? result?.tripId ?? base.tripId,
         version: result?.trip?.version ?? result?.version, outcome: replayed ? "replayed" : "accepted" }));
     } catch (error) {

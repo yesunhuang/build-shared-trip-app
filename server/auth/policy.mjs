@@ -2,9 +2,9 @@
 // everything, including permanent trip deletion (DELETE /api/trips/<id>, owner-only and never
 // on any allowlist below); MCP additionally requires a bearer credential. Ordinary accounts get an
 // explicit route allowlist, followed by fresh trip membership/creator checks in ContentGateway.
-// Approved content managers keep their prior all-trip content authority plus trip
-// creation, import and trip changes (edit, delete content, replace content, archive/unarchive) for
-// all current and future trips. Everything not on an allowlist is refused, so a new owner route is
+// Approved content managers retain editing/import capabilities but require membership of each
+// target trip. All-trip access is owner-only except one explicitly configured stable assistant.
+// Everything not on an allowlist is refused, so a new owner route is
 // never accidentally exposed to viewers or content managers.
 //
 // A content manager's per-account MCP credential (principal.via "mcp-token") and an OAuth access

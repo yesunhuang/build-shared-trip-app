@@ -1,3 +1,4 @@
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 // OAuth 2.1 for the self-hosted MCP resource: real HTTP requests against the actual service, the
 // official MCP SDK client (header transport and its OAuth provider flow), fictional data only.
 //
@@ -261,6 +262,7 @@ try {
   const TITLES = ["Fictional OAuth Alpha", "Fictional OAuth Beta", "Fictional OAuth Created"];
   let alpha = expect(await owner(base, "/api/trips", { method: "POST", json: { requestId: "oa-alpha", trip: { title: TITLES[0] } } }), 201, "owner trip").data.trip;
   const beta = expect(await owner(base, "/api/trips", { method: "POST", json: { requestId: "oa-beta", trip: { title: TITLES[1] } } }), 201, "owner trip").data.trip;
+  for(const trip of [alpha,beta])grantFixtureMembership(runtime,trip.id,manager.id);
   pass("fictional owner trips and content-manager/viewer accounts prepared");
 
   // 3. Metadata, CORS and Host guard.
@@ -530,7 +532,7 @@ try {
   const session = await mcpSession(base, g1.access);
   assert.deepEqual((await session.sdk.listTools()).tools.map((tool) => tool.name).sort(), SIX_TOOLS, "exactly the six content tools");
   const listed = (await session.tool("list_trips", {})).data.trips.map((trip) => trip.id);
-  assert.ok(listed.includes(alpha.id) && listed.includes(beta.id), "all current trips");
+  assert.ok(listed.includes(alpha.id) && listed.includes(beta.id), "explicit member trips");
   assert.equal((await session.tool("get_trip", { tripId: alpha.id })).data.trip.title, TITLES[0]);
   const created = await session.tool("create_trip", { requestId: "oa-mcp-create", trip: { title: TITLES[2] } });
   assert.ok(!created.isError, "OAuth MCP create");
@@ -542,9 +544,11 @@ try {
   const imported = await session.tool("import_trip", { requestId: "oa-mcp-import", data: exported.data });
   assert.ok(!exported.isError && !imported.isError && imported.data.trip.id !== alpha.id, "export/import");
   const later = expect(await owner(base, "/api/trips", { method: "POST", json: { requestId: "oa-later", trip: { title: "Fictional OAuth Later" } } }), 201, "later owner trip").data.trip;
-  assert.ok(!(await session.tool("apply_trip_changes", { tripId: later.id, requestId: "oa-mcp-future", expectedVersion: 1, changes: [{ type: "update_trip", fields: { shortName: "Later" } }] })).isError, "future trips are covered");
+  assert.equal((await session.tool("get_trip",{tripId:later.id})).isError,true,"later trips are not automatically granted");
+  grantFixtureMembership(runtime,later.id,manager.id);
+  assert.ok(!(await session.tool("apply_trip_changes", { tripId: later.id, requestId: "oa-mcp-future", expectedVersion: 1, changes: [{ type: "update_trip", fields: { shortName: "Later" } }] })).isError, "an explicitly assigned future trip is editable");
   await session.close();
-  pass("official MCP SDK with an OAuth token: six tools, list/get/create/edit/export/import on current and future trips, visible over HTTP");
+  pass("official MCP SDK with an OAuth token: six tools, list/get/create/edit/export/import on assigned current and future trips, visible over HTTP");
 
   // 18. OAuth tokens are never web, admin or media credentials; cookies never authorize MCP.
   const managerSite = await siteCookie(base, manager);
@@ -970,6 +974,8 @@ try {
   const v4Client = expect(await register(upgraded.url, { redirect_uris: [TEST_CALLBACK] }), 201, "register on upgraded").data.client_id;
   const v4Grant = await grantFor(upgraded.url, v4Client, v4Manager);
   const v4Session = await mcpSession(upgraded.url, v4Grant.access);
+  assert.equal((await v4Session.tool("get_trip",{tripId:v4Trip.id})).isError,true,"migration never grants managers legacy membership");
+  grantFixtureMembership(upgraded,v4Trip.id,v4Manager.id);
   assert.equal((await v4Session.tool("get_trip", { tripId: v4Trip.id })).data.trip.days[0].slots[0].name, "Invented quay", "migrated account reads migrated trip through OAuth");
   await v4Session.close();
   await stop(upgraded);

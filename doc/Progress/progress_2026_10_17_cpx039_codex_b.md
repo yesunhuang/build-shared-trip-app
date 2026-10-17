@@ -1,5 +1,7 @@
 # CP039 — Trip membership and login landing ready for rollout review
 
+Correction: do not roll out this checkpoint's broad content-manager access rule. CP040 supersedes it with membership for every non-administrator role and one separately configured stable assistant exception; see the current [membership contract](../../references/trip-membership.md).
+
 - Date: 2026-10-17 UTC
 - Agent: Codex B
 - Status: complete — authorized implementation, fictional acceptance and migration proposal; production rollout awaits confirmation

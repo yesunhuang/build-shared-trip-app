@@ -298,6 +298,7 @@ try {
   }
   // Allowance unconfigured (the default): a reservation is refused, so no key is handed out either.
   const unconfiguredTrip = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "gp-unconfigured-trip", trip: { ...fixtureTrip(), googlePlacePhotosEnabled: true } } }), 201, "opted-in trip").trip;
+  grantFixtureMembership(runtime,unconfiguredTrip.id,manager.id);
   const denied = await api.as(manager.cookie, `/api/trips/${unconfiguredTrip.id}/google-places/reservations`, { method: "POST", body: { requestId: "fictional-unconfigured-0001", kind: "search" } });
   expect(denied, 503, "no allowance configured", "google_allowance_unconfigured");
   assert.ok(!denied.text.includes(FAKE_BROWSER_KEY), "a refused reservation never carries the key");
@@ -323,6 +324,7 @@ try {
 
   // -------------------------------------------------------------------------------------------
   // 5. Association writes through HTTP.
+  grantFixtureMembership(runtime,created.id,manager.id);
   let trip = created;
   const hall = planOf(trip, "plan-hall");
   const cafe = planOf(trip, "plan-cafe");

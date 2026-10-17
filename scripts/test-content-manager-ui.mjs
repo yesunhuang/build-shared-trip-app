@@ -119,7 +119,7 @@ async function issue(name, label) {
 async function signIn(username, password) {
   jar = new Map(); refresh(); await until(signedOutView, "signed-out device");
   const form = byId("viewer-login-form"); form.elements.username.value = username; form.elements.password.value = password; submit(form);
-  await until(() => !byId("trips").hidden && doc.querySelectorAll(".trip-card").length >= 2 && idle(), "signed in as " + username);
+  await until(() => !byId("trips").hidden && idle(), "signed in as " + username);
   assert.equal(form.elements.password.value, "", "password field cleared");
 }
 
@@ -243,6 +243,9 @@ try {
   // C. Content manager: owner-like trip editing, no account/security controls.
   ownerJar = new Map(jar);
   await signIn(EDITOR, editorPassword);
+  assert.equal(doc.querySelectorAll(".trip-card").length,0,"an unassigned manager sees no other trips");
+  for(const trip of runtime.service.listTrips().trips)grantFixtureMembership(runtime,trip.id,editorId);
+  refresh();await until(()=>doc.querySelectorAll(".trip-card").length===2&&idle(),"explicit manager memberships visible");
   const editorJar = new Map(jar);
   for (const secret of secrets) assertContained(secret, false);
   assert.ok(!byId("create").hidden && !byId("import-control").hidden && !byId("import").disabled, "create and import available");

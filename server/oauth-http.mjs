@@ -125,7 +125,7 @@ function consentPage({ client, redirectUri, csrf, username }) {
     "<h1>Allow this application to manage trips?</h1>" +
     "<p>Signed in as <strong>" + escapeHtml(username) + "</strong> (content manager).</p>" + clientSummary(client, redirectUri) +
     "<h2>It will be able to</h2><ul>" +
-    "<li>List and read every trip, including archived trips, now and in the future.</li>" +
+    "<li>List and read trips available to your account, including archived trips. Content managers normally require membership; only a separately approved stable assistant account has an all-trip exception.</li>" +
     "<li>Create, import and export trips.</li>" +
     "<li>Edit trip content: days, plans and reminders, including deleting or replacing content and archiving or unarchiving trips.</li></ul>" +
     "<h2>It will not be able to</h2><ul>" +

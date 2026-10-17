@@ -9,7 +9,7 @@
 // Account rows returned from public methods never include password hashes or invitation digests.
 //
 // Schema v4 adds a durable role per account: "viewer" (default, also for every migrated account) or
-// "content-manager" (permanent edit/import/archive access to all current and future trips, never
+// "content-manager" (edit/import/archive capability within member trips, never
 // account administration). The owner is not an account and can never be granted via setRole.
 // A role change bumps session_epoch and revokes every per-account MCP credential; revocation does the
 // same, so neither re-approval nor a later role change can revive an older session or credential.

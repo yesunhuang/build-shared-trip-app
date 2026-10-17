@@ -209,7 +209,9 @@ try {
 
   let alpha = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "gp-alpha", trip: fixtureTrip() } }), 201, "create alpha").trip;
   grantFixtureMembership(runtime,alpha.id,viewer.id);
+  grantFixtureMembership(runtime,alpha.id,manager.id);
   let beta = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "gp-beta", trip: { ...fixtureTrip(), title: "Fictional Ferry Weekend" } } }), 201, "create beta").trip;
+  grantFixtureMembership(runtime,beta.id,manager.id);
   assert.equal(alpha[FIELD], false, "default off for a new trip");
   assert.equal(beta[FIELD], false);
   const originalPlans = plansOf(alpha);

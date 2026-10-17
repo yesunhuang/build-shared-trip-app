@@ -868,7 +868,7 @@ try {
   let tripA = await createLinkedTrip(api, "allowance-trip-a", "Fictional Allowance Trip A", true, [["plan-hall", PLACE_A], ["plan-cafe", PLACE_B]]);
   const tripB = await createLinkedTrip(api, "allowance-trip-b", "Fictional Allowance Trip B", true, [["plan-hall", PLACE_C]]);
   const tripC = await createLinkedTrip(api, "allowance-trip-c", "Fictional Allowance Trip C", false, [["plan-hall", PLACE_A]]);
-  for(const trip of [tripA,tripB,tripC])for(const user of [viewer,viewer2])grantFixtureMembership(runtime,trip.id,user.id);
+  for(const trip of [tripA,tripB,tripC])for(const user of [viewer,viewer2,manager])grantFixtureMembership(runtime,trip.id,user.id);
   const versionA = tripA.version;
   assert.deepEqual(expect(await api.as(viewer.cookie, "/api/session"), 200, "session").features, { googlePlacesUiKit: true });
 

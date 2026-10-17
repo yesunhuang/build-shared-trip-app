@@ -227,6 +227,7 @@ try {
   const manager = await makeAccount(base, MANAGER_USER, { role: "content-manager" });
   const viewer = await makeAccount(base, "fictional.reader");
   grantFixtureMembership(runtime,gamma.id,viewer.id);
+  for(const trip of [alpha,beta,gamma])grantFixtureMembership(runtime,trip.id,manager.id);
   const waiting = await makeAccount(base, "fictional.waiting", { approve: false });
   const former = await makeAccount(base, "fictional.former");
   const managerSite = await siteCookie(base, manager);
@@ -344,10 +345,10 @@ try {
   assert.equal(expect(await owner(base, "/api/trips/" + gamma.id), 200, "gamma untouched by the conflicting reuse").data.trip.version, 3);
   expect(await asOwner(base, alpha.id, { requestId: "fx-delete-alpha-again", expectedVersion: 2 }), 410, "new deletion of a deleted trip", "trip_deleted");
   expect(await change(base, alpha.id, { requestId: "fx-late-edit", expectedVersion: 2, changes: [{ type: "update_trip", fields: { shortName: "Late" } }] }), 410, "stale edit after deletion", "trip_deleted");
-  expect(await change(base, alpha.id, { requestId: "fx-late-edit-mgr", expectedVersion: 2, changes: [{ type: "update_trip", fields: { shortName: "Late" } }] }, managerHeaders), 410, "manager edit after deletion", "trip_deleted");
+  expect(await change(base, alpha.id, { requestId: "fx-late-edit-mgr", expectedVersion: 2, changes: [{ type: "update_trip", fields: { shortName: "Late" } }] }, managerHeaders), 403, "manager edit after deletion has no current membership", "forbidden");
   const tripCount = expect(await owner(base, "/api/trips"), 200, "list").data.trips.length;
   expect(await owner(base, "/api/trips", { method: "POST", json: { requestId: "fx-create-alpha", trip: { title: TITLES.alpha } } }), 410, "prior create replay", "trip_deleted");
-  expect(await call(base, "/api/trips", { method: "POST", json: { requestId: "fx-create-alpha", trip: { title: TITLES.alpha } }, headers: managerHeaders }), 410, "prior create replay by a manager", "trip_deleted");
+  expect(await call(base, "/api/trips", { method: "POST", json: { requestId: "fx-create-alpha", trip: { title: TITLES.alpha } }, headers: managerHeaders }), 409, "another actor cannot replay the owner create result", "request_id_conflict");
   expect(await owner(base, "/api/trips", { method: "POST", json: { requestId: "fx-create-alpha", trip: { title: "Fictional Different" } } }), 409, "prior create ID with a different payload", "request_id_conflict");
   expect(await change(base, alpha.id, alphaEdit), 410, "prior change replay", "trip_deleted");
   expect(await change(base, alpha.id, { ...alphaEdit, expectedVersion: 5 }), 409, "prior change ID with a different payload", "request_id_conflict");

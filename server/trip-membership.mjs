@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS trip_join_attempts (user_id TEXT PRIMARY KEY REFERENC
 
 // Rights are account membership, separate from itinerary groups/content and trip content versions.
 export class TripMembership {
-  constructor(service,audit,{clock=Date.now,origin}={}){this.service=service;this.db=service.db;this.audit=audit;this.clock=clock;this.origin=origin;}
+  constructor(service,audit,{clock=Date.now,origin,allTripAssistantUserId="",channel="http"}={}){this.service=service;this.db=service.db;this.audit=audit;this.clock=clock;this.origin=origin;this.allTripAssistantUserId=ACCOUNT_ID_PATTERN.test(allTripAssistantUserId)?allTripAssistantUserId:"";this.channel=channel==="operator"?"operator":"http";}
   authenticated(principal){
     if(!principal)throw new DomainError("unauthorized",401,"Authentication required.");
     if(principal.role===OWNER)return;
@@ -31,8 +31,9 @@ export class TripMembership {
   }
   state(id){return isValidId(id)?this.db.prepare("SELECT creator,revision FROM trip_access WHERE trip_id=?").get(id):null;}
   member(p,id){return Boolean(p.userId&&this.db.prepare("SELECT 1 FROM trip_members WHERE trip_id=? AND user_id=?").get(id,p.userId));}
-  canRead(p,id){return canEditContent(p)||this.member(p,id);}
-  canEdit(p,id){return canEditContent(p)||(this.state(id)?.creator===p.userId&&this.member(p,id));}
+  allTrips(p){return p.role===OWNER||Boolean(this.allTripAssistantUserId&&p.role==="content-manager"&&p.userId===this.allTripAssistantUserId);}
+  canRead(p,id){return this.allTrips(p)||this.member(p,id);}
+  canEdit(p,id){return this.allTrips(p)||(this.member(p,id)&&(canEditContent(p)||this.state(id)?.creator===p.userId));}
   canInvite(p,id){const state=this.state(id);return p.role===OWNER||Boolean(state&&state.creator===actor(p)&&(p.role===OWNER||this.member(p,id)));}
   require(p,id,edit=false){this.authenticated(p);if(!this.canRead(p,id))throw denied();if(edit&&!this.canEdit(p,id))throw forbidden();return this.service.getTrip(id).trip;}
   projection(p,id){
@@ -46,12 +47,13 @@ export class TripMembership {
   }
   checkMedia(p,trip){
     const paths=localPhotoPaths(trip,this.origin);
-    if(!canEditContent(p))for(const pathname of paths)if(!this.db.prepare("SELECT 1 FROM trip_media WHERE trip_id=? AND pathname=?").get(trip.id,pathname))throw forbidden();
+    if(p.role!==OWNER)for(const pathname of paths)if(!this.canReadMedia(p,pathname))throw forbidden();
     this.db.prepare("DELETE FROM trip_media WHERE trip_id=?").run(trip.id);
     for(const pathname of paths)this.db.prepare("INSERT INTO trip_media VALUES(?,?)").run(trip.id,pathname);
   }
   canReadMedia(p,pathname){
-    this.authenticated(p);if(canEditContent(p))return true;
+    this.authenticated(p);if(p.role===OWNER)return true;
+    if(this.allTrips(p))return Boolean(this.db.prepare("SELECT 1 FROM trip_media WHERE pathname=? LIMIT 1").get(pathname));
     return Boolean(this.db.prepare("SELECT 1 FROM trip_media f JOIN trip_members m ON f.trip_id=m.trip_id WHERE f.pathname=? AND m.user_id=? LIMIT 1").get(pathname,p.userId));
   }
   list(p){this.authenticated(p);return {trips:this.service.listTrips().trips.filter(t=>this.canRead(p,t.id)).map(t=>({...t,access:{canEdit:this.canEdit(p,t.id)}}))};}
@@ -71,7 +73,7 @@ export class TripMembership {
   }
   transaction(work){this.db.exec("BEGIN IMMEDIATE");try{const value=work();this.db.exec("COMMIT");return value;}catch(e){this.db.exec("ROLLBACK");throw e;}}
   changed(id){this.db.prepare("UPDATE trip_access SET revision=revision+1 WHERE trip_id=?").run(id);}
-  record(p,action,id,requestId,outcome="accepted",target){this.audit.record({actor:actor(p),channel:"http",action,tripId:id,requestId,outcome,target});}
+  record(p,action,id,requestId,outcome="accepted",target){this.audit.record({actor:this.channel==="operator"?"operator":actor(p),channel:this.channel,action,tripId:id,requestId,outcome,target});}
   assign(p,id,input){
     this.require(p,id);if(p.role!==OWNER)throw forbidden();
     if(!object(input)||typeof input.userId!=="string"||!ACCOUNT_ID_PATTERN.test(input.userId)||!["member","creator","remove"].includes(input.role))throw validationError("Choose an account and member, creator or remove.");

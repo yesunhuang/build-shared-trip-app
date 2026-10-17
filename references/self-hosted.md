@@ -25,7 +25,7 @@ Generate a secret with a password manager or Node crypto.randomBytes(32).toStrin
 | SHARED_TRIP_LOOKUP_USER_AGENT | None | Required when lookups are enabled: application name and version plus the owner's contact email or URL |
 | SHARED_TRIP_NOMINATIM_URL | `https://nominatim.openstreetmap.org/search` when enabled | Optional HTTPS Nominatim-compatible search endpoint |
 
-All trips share the manifest identity, start URL, and scope /. Trip pages are /trips/&lt;id&gt;. Protected trip content requires sign-in and trip membership, or existing owner/content-manager all-trip authority. Anonymous sharing and self-registration that grants access are not implemented. OAuth remains the existing scoped MCP path for one configured content manager. Schema-v7 [membership and login landing](trip-membership.md) require reviewed migration and rollout confirmation before upgrading an existing service.
+All trips share the manifest identity, start URL, and scope /. Trip pages are /trips/&lt;id&gt;. Protected trip content requires sign-in and trip membership, or owner administration or one explicitly configured stable assistant exception. Anonymous sharing and self-registration that grants access are not implemented. OAuth remains the existing scoped MCP path for one configured content manager. Schema-v7 [membership and login landing](trip-membership.md) require reviewed migration and rollout confirmation before upgrading an existing service.
 
 ## Accounts and access
 
@@ -34,7 +34,7 @@ Every account has one role, `viewer` or `content-manager`. The owner is not an a
 | Principal | How it authenticates | May do |
 | --- | --- | --- |
 | Owner | `Authorization: Bearer <admin secret>`, or browser **Owner sign-in** with that secret | Everything: trip content, permanent trip deletion (HTTP only), invitations, approve/revoke, role changes, access tokens, audit. MCP accepts the admin secret **only** as a bearer header, not an owner cookie. |
-| Approved content manager | Browser username/password sign-in; for MCP, a separate owner-issued access token, or an OAuth grant if this account is the one named by `SHARED_TRIP_OAUTH_USERNAME` | Existing all-trip content work: read/media/export/create/edit/import/archive/restore. No account-enrollment invitation, role, credential, OAuth-grant, security or infrastructure administration. Trip codes are allowed only when this account is that trip's creator. |
+| Approved content manager | Browser username/password sign-in; for MCP, a separate owner-issued access token, or an OAuth grant if this account is the one named by `SHARED_TRIP_OAUTH_USERNAME` | Read/media/edit/export/archive/restore on member trips only; creating/importing enrolls the account in its new trip. No content-manager role implies global access. No account-enrollment invitation, role, credential, OAuth-grant, security or infrastructure administration. Trip codes are allowed only when this account is that trip's creator. |
 | Approved ordinary account (stored `viewer`, labelled Member) | Browser username/password sign-in | Read/export joined trips and bound photos. Create a trip, then edit/archive/restore it as creator. No import, account/security administration, permanent deletion or new MCP authority. |
 | Pending or revoked account | Cannot sign in (403 access_denied) | Nothing |
 
@@ -76,7 +76,7 @@ Onboarding is owner-controlled:
 2. The owner shares **only the invitation code**, privately. Never share the admin secret. Invitations are typed into a form; there is no invitation URL.
 3. The invitee opens the home page, chooses *Have an invitation?*, and enters the code with a username and a password that they choose privately. This creates a **pending viewer** account and consumes the code. The owner never needs to know the password.
 4. Optionally, the owner selects **Content manager** as the account's access level and saves it (`POST /api/users/<id>/role`). Invitations always start as viewers; only the owner can change a role.
-5. The owner approves the account. An ordinary account then joins specific trips by owner assignment or a creator's trip code; approval alone grants no legacy trip membership. Content managers retain all-trip content authority.
+5. The owner approves the account. An ordinary account then joins specific trips by owner assignment or a creator's trip code; approval alone grants no legacy trip membership. Content managers also require membership, retaining edit capability only within member trips. The separately approved assistant exception uses one stable ID in private configuration, never a role or OAuth username.
 6. The owner can revoke an account or change its role at any time. Both immediately invalidate every active session of that account, every MCP access token issued for it, and every OAuth grant it approved. Reapproving a revoked account allows new sign-ins but never revives older sessions, tokens, or grants.
 
 ### MCP access tokens for content managers

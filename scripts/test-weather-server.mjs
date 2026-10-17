@@ -208,6 +208,7 @@ try {
   assert.deepEqual(dayOf(alpha, "day-off").weatherLocationIds, [], "create: [] preserved");
   assert.deepEqual(dayOf(alpha, "day-manual").weatherLocationIds, ["loc-harbour"]);
   assert.deepEqual(alpha.weather.locations, [HARBOUR, HILL], "locations and localized names kept");
+  grantFixtureMembership(runtime,alpha.id,manager.id);
   const betaBefore = structuredClone(beta);
 
   // Plan edits (upsert_plan, coordinates changed) and a web-style full snapshot keep every choice.
@@ -318,6 +319,7 @@ try {
 
   // Previously valid explicit partial points and (0,0) survive actual HTTP and MCP writes/imports.
   let legacy = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "wx-legacy-create", trip: legacyWeatherTrip() } }), 201, "create old explicit entries").trip;
+  grantFixtureMembership(runtime,legacy.id,manager.id);
   legacy = expect(await post(manager, legacy, "wx-legacy-replace", [{ type: "replace_content", trip: structuredClone(legacy) }]), 200, "replace old explicit entries").trip;
   const legacyMcp = await mcp.tool("apply_trip_changes", { tripId: legacy.id, requestId: "wx-legacy-mcp", expectedVersion: legacy.version,
     changes: [{ type: "update_trip", fields: { weather: structuredClone(legacy.weather) } }] });

@@ -8,7 +8,7 @@ import { DomainError, errorBody, errorStatus, conflict, validationError } from "
 import { handleMcp } from "./mcp.mjs";
 import { acquireDataLock } from "./data-lock.mjs";
 import { serveStatic } from "./static.mjs";
-import { AccountStore, INVITATION_TOKEN_PATTERN, invitationInvalid } from "./auth/accounts.mjs";
+import { AccountStore, ACCOUNT_ID_PATTERN, INVITATION_TOKEN_PATTERN, invitationInvalid } from "./auth/accounts.mjs";
 import { boundedPassword, dummyVerify, hashPassword, normalizeUsername, passwordProblem, verifyPassword } from "./auth/passwords.mjs";
 import { AttemptLimiter, SESSION_COOKIE, SESSION_TTL_MS, SessionStore } from "./auth/sessions.mjs";
 import { CONTENT_MANAGER, GOOGLE_RESERVATION_ROUTE, LOOKUP_ROUTE, OWNER, canEditContent, capabilitiesFor, isMcpOnlyPrincipal, isProtectedMediaPath, mayAccess } from "./auth/policy.mjs";
@@ -55,6 +55,9 @@ export function readConfig(env = process.env) {
     oauthUsername = normalizeUsername(env.SHARED_TRIP_OAUTH_USERNAME);
     if (!oauthUsername) throw new Error("SHARED_TRIP_OAUTH_USERNAME must be an existing account's username (3-32 lowercase letters, digits, dots, hyphens or underscores).");
   }
+  // A single explicitly reviewed stable principal exception; never derived from a role or username.
+  const allTripAssistantUserId=env.SHARED_TRIP_ALL_TRIP_ASSISTANT_USER_ID??"";
+  if(allTripAssistantUserId&&!ACCOUNT_ID_PATTERN.test(allTripAssistantUserId))throw new Error("SHARED_TRIP_ALL_TRIP_ASSISTANT_USER_ID must be one stable account ID, or unset.");
   // Public place/photo lookups: disabled unless SHARED_TRIP_LOOKUPS_ENABLED=1 with an identifying
   // SHARED_TRIP_LOOKUP_USER_AGENT (see lookups.mjs). Disabled => no provider is ever contacted.
   const lookups = readLookupConfig(env);
@@ -65,7 +68,7 @@ export function readConfig(env = process.env) {
   // The explicit monthly allowance and headroom for that feature (see google-allowance.mjs). Never
   // throws: missing or malformed values only keep Google work disabled; the app itself still runs.
   const googleAllowance = readAllowanceConfig(env);
-  return { token, dataDir, host, port, origin, oauthUsername, lookups, googlePlaces, googleAllowance };
+  return { token, dataDir, host, port, origin, oauthUsername, allTripAssistantUserId, lookups, googlePlaces, googleAllowance };
 }
 function sameSecret(a,b) {
   const hash = (s) => crypto.createHash("sha256").update(String(s || "")).digest();
@@ -115,7 +118,7 @@ export async function startServer(config) {
   const audit = new AuditLog(db, { clock });
   const accounts = new AccountStore(db, { audit });
   const tokens = new McpTokenStore(db, { audit });
-  const gateway = new ContentGateway(service, audit, {clock,origin:config.origin});
+  const gateway = new ContentGateway(service, audit, {clock,origin:config.origin,allTripAssistantUserId:config.allTripAssistantUserId});
   const sessions = new SessionStore();
   const loginLimiter = new AttemptLimiter({ limit: 10, windowMs: 60_000, message: "Try signing in again later." });
   const inviteLimiter = new AttemptLimiter({ limit: 10, windowMs: 15 * 60_000, message: "Try again later." });
@@ -340,9 +343,9 @@ export async function startServer(config) {
           // current association are re-checked on every request, including idempotent replays.
           // Nothing is written to the trip and its version never changes.
           if (principal.via !== "cookie") throw forbidden();
+          const { trip } = gateway.getTrip(context, decodeSegment(reservation[1]));
           if (!googlePlaces.enabled) throw new DomainError("google_places_disabled", 503, "Google place features are not enabled on this server.");
           const input = parseReservationBody(await readJSON(req, SMALL_BODY));
-          const { trip } = gateway.getTrip(context, decodeSegment(reservation[1]));
           if (input.kind !== "details" && !gateway.membership.canEdit(principal,trip.id)) throw forbidden();
           if (!tripGooglePlacePhotosEnabled(trip)) throw conflict("google_trip_not_enabled", "Google place details are turned off for this trip.");
           if (input.kind !== "details" && trip.archived) throw conflict("trip_archived", "The trip is archived. Unarchive it before searching on Google.");

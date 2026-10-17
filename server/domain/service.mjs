@@ -122,8 +122,8 @@ export class TripService {
       return { trip: withAliases(stored), generated: next.generated };
     }, record);
   }
-  importTrip({ requestId, data }, record) {
-    return this.transact("import", requestId, { data }, () => {
+  importTrip({ requestId, data }, record, scope="import") {
+    return this.transact(scope, requestId, { data }, () => {
       const { content, preferredId, warnings } = importContent(data);
       const result = this.insert(content, preferredId, data.format ? data.trip : {});
       if (preferredId && result.trip.id !== preferredId) warnings.push("The incoming trip ID was unavailable or invalid; created a new trip instead of overwriting.");

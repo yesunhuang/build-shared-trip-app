@@ -17,6 +17,7 @@ Placeholders: `trips.example.org` is fictional. `/PRIVATE/shared-trips/...` stan
 | SHARED_TRIP_ADMIN_TOKEN | app only | Owner-only bearer secret of 32-512 characters. It is the master credential, including MCP. Content-manager MCP tokens are issued from the home page and stored in the database, not in this file. |
 | SHARED_TRIP_ORIGIN | app | `https://<public host>`. The app rejects any other Host or Origin value. It is also the exact OAuth issuer, and `<origin>/mcp` is the OAuth resource. |
 | SHARED_TRIP_OAUTH_USERNAME | app only, optional | `<approved-content-manager-username>` (for example `sample-editor`). It names the one account allowed to approve OAuth grants (schema v5 release). Leave it unset to deny all OAuth. It is not a secret, but it is deployment-specific, so keep it in the private file. |
+| SHARED_TRIP_ALL_TRIP_ASSISTANT_USER_ID | app only, optional; unset by default | One explicitly reviewed stable account ID for the existing assistant exception. It must still identify an approved content manager. Never use a username, wildcard, role list or inferred OAuth identity. This is a separate owner-approved access decision; keep its actual value private. |
 | SHARED_TRIP_LOOKUPS_ENABLED | app only, optional | `1` enables explicit place/photo search. Unset by default. See [Place and photo lookups](#place-and-photo-lookups-optional) before setting it. |
 | SHARED_TRIP_LOOKUP_USER_AGENT | app only, required if lookups are enabled | Application name and version plus your contact email or URL. Not a secret, but it identifies you, so keep it in the private file. |
 | SHARED_TRIP_NOMINATIM_URL | app only, optional | HTTPS Nominatim-compatible search endpoint. When lookups are enabled, it defaults to the public OSMF endpoint. |
@@ -130,7 +131,7 @@ Before using real data, revoke the fictional account and archive the fictional t
 1. **Create an invitation.** Signed in as owner, choose **Create invitation** under *Accounts*. The single-use code is shown once and expires after 72 hours. The API also accepts `expiresInHours` from 1 to 168.
 2. **Share the code privately.** Send only the invitation code, never the admin secret. There is no invitation URL.
 3. **The invitee redeems it.** They open the home page, choose *Have an invitation?*, and enter the code with a username (3-32 lowercase characters) and a password (10-128 characters) that they choose privately. This creates a **pending viewer** account that cannot sign in.
-4. **Choose the access level.** Leave it as **Viewer** (read and export every trip), or select **Content manager** and choose **Save access level** (create, edit, delete content in, import, export, archive and restore every trip, current and future). Only the owner can change roles.
+4. **Choose the access level.** Leave it as **Member** (read/export joined trips; create/manage its own trip), or select **Content manager** and choose **Save access level** (edit/export/archive/restore member trips; create/import enrolls its new trip). Assign legacy memberships separately in Participants. Neither role implies all-trip access. Only the owner can change roles.
 5. **Approve the account.** Approval applies the role to **every** trip. There is no per-trip membership.
 6. **Revoke or change roles when needed.** Either action immediately invalidates that account's active sessions and MCP tokens. Approving the account again lets it sign in afresh; it does not revive old sessions or tokens.
 
@@ -351,7 +352,7 @@ The proxy must:
 
 ## Access model
 
-The owner-held admin secret authorizes everything: every trip, writes, import, account, role and token management, the audit log, and MCP (bearer only). Approved accounts sign in with a username and password. Viewers can read and export every trip. Content managers can also create, edit, import, archive and restore every trip, and can use MCP only with an owner-issued, 90-day, `/mcp`-only token or, for the one account named in `SHARED_TRIP_OAUTH_USERNAME`, an explicitly consented OAuth grant with the same rights. They cannot administer accounts, security or this host. No one can access trip data anonymously.
+The owner-held admin secret authorizes everything: every trip, writes, import, account, role and token management, the audit log, and MCP (bearer only). Approved accounts sign in with a username and password. Ordinary accounts read/export joined trips and manage their own creator trips. Content managers edit/archive/restore member trips only and may create/import their own new trips, and can use MCP only with an owner-issued, 90-day, `/mcp`-only token or, for the one account named in `SHARED_TRIP_OAUTH_USERNAME`, an explicitly consented OAuth grant with the same rights. They cannot administer accounts, security or this host. No one can access trip data anonymously.
 
 Public OAuth metadata (`/.well-known/oauth-*`) contains no trip data or secrets.
 

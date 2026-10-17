@@ -1,3 +1,4 @@
+import {grantFixtureMembership} from "./fixtures/membership.mjs";
 import assert from "node:assert/strict";import fs from "node:fs";import os from "node:os";import path from "node:path";
 import {Client} from "@modelcontextprotocol/sdk/client/index.js";import {StreamableHTTPClientTransport} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {readConfig,startServer} from "../server/app.mjs";import {snapshotDatabase,validateSnapshot} from "../server/db.mjs";
@@ -35,6 +36,7 @@ try{
  const login=await fetch(runtime.url+"/api/login",{method:"POST",headers:{"Content-Type":"application/json",Origin:runtime.url},body:JSON.stringify({username,password})});assert.equal(login.status,200);const cookie=login.headers.get("set-cookie").split(";")[0];await login.body.cancel();
  ok(await patch(trip,{theme:{preset:"sage"}},"branding-viewer",{cookie}),403);
  ok(await api(`/api/users/${account.id}/role`,{role:"content-manager"}));
+ grantFixtureMembership(runtime,trip.id,account.id);
  const secret=ok(await api(`/api/users/${account.id}/mcp-tokens`,{label:"Fictional branding regression"}),201).secret;
  const connect=async()=>{client=new Client({name:"fictional-branding-client",version:"1.0.0"});await client.connect(new StreamableHTTPClientTransport(new URL(runtime.url+"/mcp"),{requestInit:{headers:{Authorization:"Bearer "+secret}}}));};await connect();
  const tools=(await client.listTools()).tools;assert.equal(tools.length,6);const operationSchema=tools.find(t=>t.name==="apply_trip_changes").inputSchema.properties.changes.items;const variants=operationSchema.anyOf||operationSchema.oneOf;

@@ -328,6 +328,7 @@ try {
   let delta = expect(await api.owner("/api/trips", { method: "POST", body: { requestId: "lk-delta", trip: { title: "Fictional Archived Trip" } } }), 201, "create delta").trip;
   delta = expect(await change(api, delta, "lk-delta-archive", [{ type: "archive_trip", archived: true }]), 200, "archive delta").trip;
   const manager = await api.makeAccount("fictional.lookup.manager", "content-manager");
+  for(const trip of [alpha,beta,delta])grantFixtureMembership(runtime,trip.id,manager.id);
   const viewer = await api.makeAccount("fictional.lookup.viewer");
   grantFixtureMembership(runtime,alpha.id,viewer.id);
   const managerToken = expect(await api.owner(`/api/users/${manager.id}/mcp-tokens`, { method: "POST", body: { label: "Fictional lookup probe" } }), 201, "issue manager MCP credential").secret;
@@ -573,6 +574,7 @@ try {
   // Per-account cap (cache hits count too); other accounts are independent; the window resets.
   freshWindow();
   const capped = await api.makeAccount("fictional.lookup.capped", "content-manager");
+  grantFixtureMembership(runtime,alpha.id,capped.id);
   const capCalls = callCount();
   for (let index = 0; index < ACCOUNT_LOOKUP_LIMIT; index += 1) {
     expect(await api.as(capped.cookie, searchRoute(alpha.id, "place"), { method: "POST", body: { query: "Fictional Harbor Lighthouse" } }), 200, "within the account cap");

@@ -32,7 +32,7 @@ try{
  assert.notEqual(alpha.id,beta.id,"ordinary create request namespaces are account-scoped");
  assert.equal(ok(await call("/api/trips",input,a.authHeaders),201).trip.id,alpha.id);
  assert.deepEqual(ok(await call("/api/trips",undefined,a.authHeaders)).trips.map(t=>t.id),[alpha.id]);
- assert.equal(ok(await call("/api/trips",undefined,manager.authHeaders)).trips.length,2,"existing managers retain all-trip rights");
+ assert.equal(ok(await call("/api/trips",undefined,manager.authHeaders)).trips.length,0,"unassigned managers have no trip visibility");
  for(const route of ["/api/trips/"+alpha.id,"/api/trips/"+alpha.id+"/export"]){assert.equal((await call(route,undefined,b.authHeaders)).status,404);assert.equal((await call(route,undefined,{})).status,401);}
  assert.equal((await call("/api/trips/"+alpha.id+"/changes",{requestId:"cross-write",expectedVersion:1,changes:[{type:"update_trip",fields:{title:"Forbidden"}}]},b.authHeaders)).status,403);
  let data=await read(alpha.id,a.authHeaders);assert.deepEqual(data.members.map(u=>u.id),[a.id]);assert.equal(data.access.canInvite,true);assert.equal(data.access.canEdit,true);assert.equal(data.trip.participantGroups.length,1,"itinerary groups are not accounts");

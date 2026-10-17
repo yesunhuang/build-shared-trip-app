@@ -173,7 +173,7 @@ function validateTombstones(db) {
     let result = null;
     try { result = JSON.parse(row.result); } catch { throw new Error("Invalid retry record in snapshot."); }
     if (result?.deletedTrip) continue;
-    const tripId = row.scope.startsWith("trip:") ? (result?.trip?.id??row.scope.slice(5)) : (row.scope === "create" || row.scope.startsWith("create:") || row.scope === "import") ? result?.trip?.id : null;
+    const tripId = row.scope.startsWith("trip:") ? (result?.trip?.id??row.scope.slice(5)) : (row.scope === "create" || row.scope.startsWith("create:") || row.scope === "import" || row.scope.startsWith("import:")) ? result?.trip?.id : null;
     if (tripId && deleted.has(tripId)) throw new Error("Unredacted retry record for a deleted trip in snapshot.");
   }
 }

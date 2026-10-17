@@ -321,7 +321,7 @@ try {
   await until(() => !dialog() && byId("status").textContent === "Only the owner can delete trips." && idle() && !byId("manager-note").hidden, "submission refused for a non-owner");
   assert.equal(deletes().length, beforeDemotion, "nothing sent once the account is no longer the owner");
   assert.equal(byId("status").dataset.error, "true");
-  // Content managers edit, archive and restore every trip, but never see a whole-trip delete, archived included.
+  // Content managers edit, archive and restore returned member trips, but never see a whole-trip delete, archived included.
   assert.ok(cardFor(CEDAR) && cardFor(SALT), "manager sees active and archived trips");
   for (const card of cards()) assert.deepEqual(labels(card), ["Edit", card === cardFor(SALT) ? "Restore" : "Archive", "Export", "Participants"], "no delete control for a content manager");
   assert.equal(doc.querySelectorAll("[data-delete-trip], dialog").length, 0);
