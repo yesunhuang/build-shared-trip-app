@@ -1,5 +1,7 @@
 # CP040 — Corrected manager membership boundary; private rollout handoff pending
 
+Superseded by CP041: do not deploy this checkpoint. The assistant global-access mechanism below was withdrawn completely; only the owner administrator has global access. Current code and the membership contract require ordinary membership for every assistant and other non-administrator. Historical test evidence below describes CP040 only.
+
 - Date: 2026-10-17 UTC
 - Agent: Codex B
 - Status: partial — implementation and fictional acceptance complete; approved assignment values await private coordinator handoff; no rollout
@@ -13,7 +15,7 @@ Processed the owner's CP039 correction after reading current instructions/contra
 Every non-administrator requires trip membership, including existing and future content managers. Managers keep editing/export/archive/restore capability within member trips; creating or importing enrolls the creating account in its own new trip. Ordinary joined members remain read-only, with editing/invitation rights on their creator trips. The owner remains the all-trip administrator.
 
 - `server/trip-membership.mjs`, `content-access.mjs`, `app.mjs`: enforce the same boundary for filtered lists, direct reads, writes, exports, bound media, HTTP/MCP, lookups, Google reservations and login landing. Guessing a photo URL cannot grant access. Unbound local images remain owner-only; the assistant exception reads bound images only.
-- `SHARED_TRIP_ALL_TRIP_ASSISTANT_USER_ID`: optional, unset by default, one privately reviewed stable account ID. Only that exact approved content-manager principal receives the separately approved all-trip content exception. There is no username, OAuth-setting or role-wide bypass. Revocation and role changes still deny access; a reused account name does not inherit the exception. No administration is added. Generic Compose/environment templates pass the empty-by-default setting without an installation-specific value.
+- Historical implementation, withdrawn by CP041: an optional private configuration switch selected one approved stable content-manager principal for global content access. CP041 removes this switch and all associated bypasses; this paragraph records prior evidence only and is not a rollout instruction.
 - All non-owner create/import/edit retry namespaces are actor-scoped. Replays reauthorize current access. A legacy global retry requires accepted audit metadata matching its original actor, trip and result version; other actors or unavailable attribution get a conflict without execution. Older attribution can expire with bounded audit retention, requiring reconciliation before a new request. Owner retries remain compatible.
 - `server/mcp.mjs`, `oauth-http.mjs`, `assets/selfhosted/home.js`: corrected discovery, consent and four-language role descriptions. The same six MCP tools, audience, scopes, connection identities and grants remain unchanged.
 - [Membership contract and rollout proposal](../../references/trip-membership.md): updated rights, private exception review, recovery restrictions and application path. Aligned README, SKILL, deployment, access, MCP and privacy contracts.

@@ -1,4 +1,4 @@
-// Offline owner-approved private matrix only. Never configures the separate assistant exception.
+// Offline owner-approved finite private membership matrix only; no role or credential changes.
 import fs from "node:fs";import path from "node:path";import crypto from "node:crypto";
 import {DatabaseSync} from "node:sqlite";
 import {openDatabase,snapshotDatabase,SCHEMA_VERSION} from "../db.mjs";
@@ -15,7 +15,7 @@ try{
  const root=fs.realpathSync(path.resolve(import.meta.dirname,"../..")),dataDir=fs.realpathSync(dataArg),planFile=fs.realpathSync(planArg),backup=target(path.resolve(backupArg));
  if([dataDir,planFile,backup].some(file=>inside(file,root))||fs.existsSync(backup)||fs.statSync(planFile).size>262144)throw Error("private_paths");
  const plan=JSON.parse(fs.readFileSync(planFile,"utf8"));
- if(plan.format!=="shared-trip-membership-dry-run"||plan.formatVersion!==2||plan.rolloutApproved!==true||!Array.isArray(plan.accounts)||!Array.isArray(plan.trips)||plan.trips.length>100)throw Error("unapproved_plan");
+ if(plan.format!=="shared-trip-membership-dry-run"||plan.formatVersion!==3||plan.rolloutApproved!==true||!Array.isArray(plan.accounts)||!Array.isArray(plan.trips)||plan.trips.length>100)throw Error("unapproved_plan");
  const actions=[],ids=new Set();
  for(const trip of plan.trips){
   if(!isValidId(trip.tripId)||ids.has(trip.tripId)||!Number.isSafeInteger(trip.tripVersion)||trip.tripVersion<1||!Number.isSafeInteger(trip.accessVersion)||trip.accessVersion<1||!Array.isArray(trip.proposedChanges)||trip.proposedChanges.length>100||!Number.isSafeInteger(trip.accessVersion+trip.proposedChanges.length))throw Error("invalid_plan");ids.add(trip.tripId);
@@ -45,6 +45,6 @@ try{
  }
  const before=JSON.stringify(db.prepare("SELECT * FROM trips ORDER BY id").all()),audit=new AuditLog(db),store=new TripMembership(new TripService(db),{record(event){if(JSON.stringify(db.prepare("SELECT * FROM trips ORDER BY id").all())!==before)throw Error("content_changed");audit.record(event);}},{channel:"operator"});
  for(const {trip,input} of actions)store.assign({role:"owner",via:"operator"},trip.tripId,input);
- console.log(JSON.stringify({applied:true,operations:actions.length,contentUnchanged:true,backupValidated:true,exceptionConfigured:false}));
-}catch(error){const code=typeof error.code==="string"&&/^[a-z_]+$/.test(error.code)?error.code:"maintenance_refused";console.error("Membership matrix refused or interrupted ("+code+"). Preserve the private plan and backup; completed operations remain durably retryable. No exception configuration is changed.");process.exitCode=1;}
+ console.log(JSON.stringify({applied:true,operations:actions.length,contentUnchanged:true,backupValidated:true}));
+}catch(error){const code=typeof error.code==="string"&&/^[a-z_]+$/.test(error.code)?error.code:"maintenance_refused";console.error("Membership matrix refused or interrupted ("+code+"). Preserve the private plan and backup; completed operations remain durably retryable. No role or credential configuration is changed.");process.exitCode=1;}
 finally{try{db?.close();}finally{lock?.release();}}

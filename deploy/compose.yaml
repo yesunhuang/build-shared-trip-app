@@ -39,7 +39,6 @@ services:
       SHARED_TRIP_DATA_DIR: "/data"
       # An existing approved content manager; empty disables OAuth grants.
       SHARED_TRIP_OAUTH_USERNAME: "${SHARED_TRIP_OAUTH_USERNAME:-}"
-      SHARED_TRIP_ALL_TRIP_ASSISTANT_USER_ID: "${SHARED_TRIP_ALL_TRIP_ASSISTANT_USER_ID:-}"
       # Explicit place/photo searches only; review provider policies before enabling.
       SHARED_TRIP_LOOKUPS_ENABLED: "${SHARED_TRIP_LOOKUPS_ENABLED:-0}"
       SHARED_TRIP_LOOKUP_USER_AGENT: "${SHARED_TRIP_LOOKUP_USER_AGENT:-}"

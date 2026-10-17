@@ -3,7 +3,7 @@
 // on any allowlist below); MCP additionally requires a bearer credential. Ordinary accounts get an
 // explicit route allowlist, followed by fresh trip membership/creator checks in ContentGateway.
 // Approved content managers retain editing/import capabilities but require membership of each
-// target trip. All-trip access is owner-only except one explicitly configured stable assistant.
+// target trip. All-trip access belongs only to the owner administrator.
 // Everything not on an allowlist is refused, so a new owner route is
 // never accidentally exposed to viewers or content managers.
 //

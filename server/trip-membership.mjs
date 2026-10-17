@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS trip_join_attempts (user_id TEXT PRIMARY KEY REFERENC
 
 // Rights are account membership, separate from itinerary groups/content and trip content versions.
 export class TripMembership {
-  constructor(service,audit,{clock=Date.now,origin,allTripAssistantUserId="",channel="http"}={}){this.service=service;this.db=service.db;this.audit=audit;this.clock=clock;this.origin=origin;this.allTripAssistantUserId=ACCOUNT_ID_PATTERN.test(allTripAssistantUserId)?allTripAssistantUserId:"";this.channel=channel==="operator"?"operator":"http";}
+  constructor(service,audit,{clock=Date.now,origin,channel="http"}={}){this.service=service;this.db=service.db;this.audit=audit;this.clock=clock;this.origin=origin;this.channel=channel==="operator"?"operator":"http";}
   authenticated(principal){
     if(!principal)throw new DomainError("unauthorized",401,"Authentication required.");
     if(principal.role===OWNER)return;
@@ -31,9 +31,8 @@ export class TripMembership {
   }
   state(id){return isValidId(id)?this.db.prepare("SELECT creator,revision FROM trip_access WHERE trip_id=?").get(id):null;}
   member(p,id){return Boolean(p.userId&&this.db.prepare("SELECT 1 FROM trip_members WHERE trip_id=? AND user_id=?").get(id,p.userId));}
-  allTrips(p){return p.role===OWNER||Boolean(this.allTripAssistantUserId&&p.role==="content-manager"&&p.userId===this.allTripAssistantUserId);}
-  canRead(p,id){return this.allTrips(p)||this.member(p,id);}
-  canEdit(p,id){return this.allTrips(p)||(this.member(p,id)&&(canEditContent(p)||this.state(id)?.creator===p.userId));}
+  canRead(p,id){return p.role===OWNER||this.member(p,id);}
+  canEdit(p,id){return p.role===OWNER||(this.member(p,id)&&(canEditContent(p)||this.state(id)?.creator===p.userId));}
   canInvite(p,id){const state=this.state(id);return p.role===OWNER||Boolean(state&&state.creator===actor(p)&&(p.role===OWNER||this.member(p,id)));}
   require(p,id,edit=false){this.authenticated(p);if(!this.canRead(p,id))throw denied();if(edit&&!this.canEdit(p,id))throw forbidden();return this.service.getTrip(id).trip;}
   projection(p,id){
@@ -53,7 +52,6 @@ export class TripMembership {
   }
   canReadMedia(p,pathname){
     this.authenticated(p);if(p.role===OWNER)return true;
-    if(this.allTrips(p))return Boolean(this.db.prepare("SELECT 1 FROM trip_media WHERE pathname=? LIMIT 1").get(pathname));
     return Boolean(this.db.prepare("SELECT 1 FROM trip_media f JOIN trip_members m ON f.trip_id=m.trip_id WHERE f.pathname=? AND m.user_id=? LIMIT 1").get(pathname,p.userId));
   }
   list(p){this.authenticated(p);return {trips:this.service.listTrips().trips.filter(t=>this.canRead(p,t.id)).map(t=>({...t,access:{canEdit:this.canEdit(p,t.id)}}))};}

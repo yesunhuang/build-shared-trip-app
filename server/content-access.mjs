@@ -2,8 +2,8 @@
 //
 // Every content operation goes through here with { principal, channel }. Ordinary accounts read
 // only joined trips, may create their own, and edit only trips they currently own as creator.
-// Content managers edit only joined trips. Only the owner or one configured stable assistant has
-// all-trip access; import remains a content-manager capability. Successful writes and replays are
+// Content managers edit only joined trips. Only the owner has all-trip access;
+// import remains a content-manager capability. Successful writes and replays are
 // audited inside the domain transaction (TripService.transact), so the audit never reports a write
 // that did not commit. Refusals are audited best effort after the rollback. Audit events never
 // contain bodies, titles or credentials; see audit.mjs.
