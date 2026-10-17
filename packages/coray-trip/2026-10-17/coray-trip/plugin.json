@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "coray-trip",
+  "version": "0.2.1",
+  "description": "Connect to Coray Trip to review and manage authorized trip content through the existing remote MCP service.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Coray Trip",
+        "shortDescription": "Manage shared trips",
+        "longDescription": "Use your own eligible account and OAuth consent to review and manage trips you can access. Account, membership and security administration are outside the MCP tools.",
+        "category": "Productivity",
+        "capabilities": [],
+        "defaultPrompt": "Help me review and manage my trips in Coray Trip."
+      }
+    }
+  }
+}
