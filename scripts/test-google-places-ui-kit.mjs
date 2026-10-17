@@ -17,6 +17,7 @@
 // This is UI/contract evidence only. It does not show how the real SDK renders, bills, caches,
 // re-requests on reconnection, or behaves on any device, and it is no browser-layout check.
 import assert from "node:assert/strict";
+import {logoObject} from "./fixtures/branding.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1633,6 +1634,24 @@ try {
       assert.equal(page.google.constructed[DETAILS], 1, "a replayed permit never becomes a second component");
       assert.deepEqual(page.errors, []);
     }
+  }
+
+  // User-uploaded images coexist with the official attributed component, and clearing the
+  // upload restores the preserved Commons photo without searching or reserving again.
+  {
+    const trip=fixtureTrip(),plan=slotOf(trip,"plan-garden"),original=clone(plan.photo);
+    plan.uploadedPhoto=logoObject();const server=createFakeServer(trip),page=await loadPage({server,phone:true});
+    assert.ok(page.item("plan-garden").querySelector(".location-photo img").src.startsWith("data:image/png;base64,"));
+    assert.equal(page.item("plan-garden").querySelector(".location-photo img").alt,plan.uploadedPhoto.alt);
+    assert.equal(page.item("plan-garden").querySelector(".photo-credit--licensed"),null);
+    await setCardOpen(page,"plan-garden",true);await until(()=>page.details("plan-garden"),"Google beside uploaded photo");
+    assert.ok(page.details("plan-garden").querySelector("gmp-place-attribution"));
+    const count=page.reservations().length;await openEditor(page,"plan-garden");
+    page.doc.querySelector("[data-plan-photo-clear]").click();await saveEditor(page);
+    assert.deepEqual(slotOf(server.trip,"plan-garden").photo,original);
+    assert.ok(page.item("plan-garden").querySelector(".photo-credit--licensed"));
+    assert.equal(page.reservations().length,count,"photo clear causes no Google work");
+    assert.deepEqual(page.errors,[]);
   }
 
   // E. Static generator page: an association in the seed is inert; no request at all.

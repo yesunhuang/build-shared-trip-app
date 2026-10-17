@@ -2,6 +2,7 @@
 import {inflateSync,deflateSync} from "node:zlib";
 import {brandingProblems,LOGO_BYTES_MAX,LOGO_EDGE_MAX} from "../../assets/app-template/public/trip-branding.js";
 import {coverProblems,COVER_BYTES_MAX,COVER_EDGE_MAX} from "../../assets/app-template/public/trip-presentation.js";
+import {uploadedPhotoProblems,PLAN_PHOTO_BYTES_MAX,PLAN_PHOTO_EDGE_MAX} from "../../assets/app-template/public/plan-photo.js";
 const signature=Buffer.from([137,80,78,71,13,10,26,10]);
 export function pngCrc(bytes) { let value=0xffffffff;for(const byte of bytes){value^=byte;for(let i=0;i<8;i++)value=(value>>>1)^((value&1)?0xedb88320:0);}return(value^0xffffffff)>>>0; }
 export function pngChunk(type,data) {const name=Buffer.from(type),out=Buffer.alloc(data.length+12);out.writeUInt32BE(data.length);name.copy(out,4);data.copy(out,8);out.writeUInt32BE(pngCrc(Buffer.concat([name,data])),data.length+8);return out;}
@@ -36,6 +37,13 @@ export function normalizeCover(raw,path,issues){
  if(problems.length)return undefined;
  try{return {mimeType:"image/png",data:sanitizeRasterData(raw.data,COVER_BYTES_MAX,COVER_EDGE_MAX),alt:raw.alt.trim(),focusX:raw.focusX??50,focusY:raw.focusY??50};}
  catch{issues.add(path+".data","use a valid non-animated 8-bit RGB/RGBA PNG, at most 256 KiB and 1024 pixels per edge; use the cover editor to convert other images");}
+}
+export function normalizeUploadedPhoto(raw,path,issues){
+ if(raw===undefined||raw===null)return undefined;
+ const problems=uploadedPhotoProblems(raw);for(const problem of problems)issues.add(path+problem.path.slice("uploadedPhoto".length),problem.message);
+ if(problems.length)return undefined;
+ try{return {mimeType:"image/png",data:sanitizeRasterData(raw.data,PLAN_PHOTO_BYTES_MAX,PLAN_PHOTO_EDGE_MAX),alt:raw.alt.trim()};}
+ catch{issues.add(path+".data","use a valid non-animated 8-bit RGB/RGBA PNG, at most 128 KiB and 1024 pixels per edge; use the photo editor to convert other images");}
 }
 export function normalizeBranding(raw,path,issues) {
   if(raw===undefined||raw===null)return undefined;

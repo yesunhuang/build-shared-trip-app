@@ -25,7 +25,7 @@ The plugin does not itself authorize bookings, purchases, external communication
 
 ## Installation and current content contract
 
-Read [setup and troubleshooting](references/setup-and-pitfalls.zh-CN.md) when installing, connecting, refreshing metadata or diagnosing access. Read [content operations](references/content-contract.md) before editing location, branding, cover or card categories.
+Read [setup and troubleshooting](references/setup-and-pitfalls.zh-CN.md) when installing, connecting, refreshing metadata or diagnosing access. Read [content operations](references/content-contract.md) before editing location, branding, cover, card categories or uploaded plan photos.
 
 The portable package connects an existing service; it does not deploy a server, copy another person's App binding, grant, account or trip membership. Use the current host-supported import/create flow, then the recipient's own eligible OAuth sign-in and consent. Never claim an installation or connection succeeded based solely on the ZIP or a successful package upload.
 

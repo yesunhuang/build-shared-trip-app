@@ -9,6 +9,7 @@ import {
 import { RELATED_LINK_LIMIT, RELATED_LINK_LABEL_MAX } from "../assets/app-template/public/related-links.js";
 import { BRANDING_SCHEMA } from "../assets/app-template/public/trip-branding.js";
 import { COVER_SCHEMA, CARD_CATEGORY_SCHEMA } from "../assets/app-template/public/trip-presentation.js";
+import { UPLOADED_PHOTO_SCHEMA } from "../assets/app-template/public/plan-photo.js";
 
 const jsonObject = z.record(z.string(), z.unknown());
 // JSON Schema metadata describes these values to generated clients without adding a second
@@ -18,6 +19,7 @@ const domainObject = (keys) => z.strictObject(Object.fromEntries([...keys].map((
   key, key === "id" ? z.string().optional().describe("Stable ID; omit only when creating a new item.") : z.unknown().optional()
 ])));
 const plan = domainObject(PLAN_KEYS).extend({
+  uploadedPhoto: documentedValue(UPLOADED_PHOTO_SCHEMA),
   cardCategory: documentedValue(CARD_CATEGORY_SCHEMA),
   googlePlaceAssociation: documentedValue({
     description: "Set only a person's explicitly confirmed public-venue Place ID. Copy the current locationBinding for this dayId/planId from get_trip.planLocationBindings. Send null to clear. Never send Google names, addresses, coordinates, ratings or photos; shared validation rejects them and mismatched/locationless bindings.",
@@ -75,7 +77,7 @@ const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, idempotentHint
 // No administrative tools exist.
 export async function handleMcp(req, res, body, gateway, principal) {
   const context = { principal, channel: "mcp" };
-  const server = new McpServer({ name: "shared-trips", version: "1.4.0" });
+  const server = new McpServer({ name: "shared-trips", version: "1.5.0" });
   const register = (name, description, inputSchema, action, annotations) => server.registerTool(name, {
     description, inputSchema,
     annotations: { ...annotations }

@@ -314,7 +314,7 @@ Share links such as `maps.app.goo.gl/...` are intentionally rejected. The genera
 
 Legacy generator input requires `photo.url`, `photo.sourceUrl`, and `photo.credit` on every plan and recommendation. Self-hosted drafts may omit photos. When a photo is present, it needs all three fields. Use an image you are licensed to reuse. Prefer official tourism media, Wikimedia Commons, or a user-supplied image. Record the creator and license. Do not scrape Google Maps, Tabelog, or commercial review photos.
 
-On the self-hosted service, a private photo can be referenced by a root-relative URL such as `"url": "/photos/harbor-walk.webp"`. The file lives in `SHARED_TRIP_DATA_DIR/photos` (flat names using `A-Z a-z 0-9 _ -`, with a `.webp`, `.png`, `.jpg`, or `.jpeg` extension). It is served only to signed-in owners and approved viewers. It still needs `sourceUrl` and `credit`. There is no upload API: the owner places the file on the server. Do not add private filenames to the public, generic `photos/manifest.js`.
+On the self-hosted service, a private photo can be referenced by a root-relative URL such as `"url": "/photos/harbor-walk.webp"`. The file lives in `SHARED_TRIP_DATA_DIR/photos` (flat names using `A-Z a-z 0-9 _ -`, with a `.webp`, `.png`, `.jpg`, or `.jpeg` extension). Existing bound-media authorization applies. It still needs `sourceUrl` and `credit`. These legacy files are placed on the server by the owner; the plan editor instead supports the independent embedded `uploadedPhoto` field described below. Do not add private filenames to the public, generic `photos/manifest.js`.
 
 Keep the original photo/source/credit fields in the authoring JSON. The runtime selects bounded remote thumbnails; `scripts/optimize-photos.mjs` can additionally build local WebP previews and a URL-to-asset manifest after generation. See [responsive-performance.md](responsive-performance.md) for budgets, cache invalidation, and testing.
 
@@ -441,6 +441,10 @@ Optional current ratings:
 ```
 
 Use `mapsUrl` as the source for a Google rating. Use a direct Tabelog page when showing a Tabelog rating. Omit unavailable ratings instead of estimating them.
+
+## Uploaded plan images
+
+Optional plan `uploadedPhoto` is a strict PNG object (`mimeType`, canonical base64 `data`, descriptive `alt`) or null. The web editor accepts PNG/JPEG/WebP and prepares PNG locally; shared validation sanitizes it to at most 128 KiB and 1024 pixels per edge. Omission preserves; null removes the uploaded override and reveals any saved Commons/legacy image. See [plan-photo-upload.md](plan-photo-upload.md) for validation, private storage, attribution, MCP, recovery and rollback requirements.
 
 ## Weather
 

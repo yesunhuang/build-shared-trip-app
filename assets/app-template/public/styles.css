@@ -28,6 +28,12 @@
   font-synthesis: none;
 }
 
+.plan-photo-editor { min-width:0; margin:1rem 0; padding:1rem; border:1px solid var(--line); border-radius:12px; }
+.plan-photo-editor input { max-width:100%; min-width:0; min-height:44px; }
+.plan-photo-editor button { min-height:44px; white-space:normal; }
+.plan-photo-preview { display:block; width:100%; max-width:320px; height:180px; object-fit:contain; background:var(--paper); border-radius:10px; margin:.75rem 0; }
+.plan-photo-preview[hidden] { display:none; }
+
 /* Trip branding editor; the app manifest, provider components and checklist palette keep their identity. */
 .branding-editor { width: min(38rem,calc(100vw - 1.5rem)); max-height: calc(100dvh - 2rem); margin: max(1rem,env(safe-area-inset-top)) auto; padding: 1.2rem; overflow: auto; overscroll-behavior: contain; color: var(--text); background: var(--card); border: 2px solid var(--ink); border-radius: 18px; }
 .branding-editor::backdrop { background: rgba(0,0,0,.55); }

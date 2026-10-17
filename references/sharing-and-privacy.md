@@ -69,3 +69,5 @@ Review author/committer metadata before sharing. Set a repository-local public o
 Deleting text in the latest commit does not delete older copies. If history must be sanitized, preserve a private local backup, audit all branches/tags, and coordinate a history rewrite with explicit branch leases. Old clones should be replaced with fresh clones, not merged back.
 
 GitHub may retain old commits in pull-request references and cached views even after a branch rewrite. Those references cannot be overwritten with a normal Git push; review [GitHub's removal guidance](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) for support eligibility and limitations. Do not promise that a source-history cleanup purges every historical copy.
+
+Uploaded plan images are embedded private trip content, subject to current trip ACL and read/manage scopes. Their bytes may appear in authorized exports, snapshots and retry records; keep those files outside public source. Replacing or clearing the current photo does not erase earlier copies. See [plan-photo-upload.md](plan-photo-upload.md).

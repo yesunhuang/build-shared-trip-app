@@ -8,6 +8,7 @@ import { relatedLinksProblems } from "../assets/app-template/public/related-link
 import { coverProblems, CARD_CATEGORIES } from "../assets/app-template/public/trip-presentation.js";
 import { sanitizeRasterData } from "../server/domain/branding.mjs";
 import { COVER_BYTES_MAX, COVER_EDGE_MAX } from "../assets/app-template/public/trip-presentation.js";
+import {uploadedPhotoProblems,PLAN_PHOTO_BYTES_MAX,PLAN_PHOTO_EDGE_MAX} from "../assets/app-template/public/plan-photo.js";
 
 export const REQUIRED_LOCALES = Object.freeze(["en", "zh-Hans", "zh-Hant", "ja"]);
 export const TRANSLATED_LOCALES = Object.freeze(REQUIRED_LOCALES.filter((locale) => locale !== "en"));
@@ -20,7 +21,7 @@ const PLAN_TYPE_SET = new Set(PLAN_TYPES);
 const FORBIDDEN_KEY = /(?:confirmation(?:number|code)?|booking(?:reference|code)|passport|ticketnumber|cardnumber|securitycode|cvv|privatekey|serviceaccount|clientemail|clientsecret|refreshtoken|accesstoken|idtoken|authtoken|bearertoken|sessiontoken|secretaccesskey|password|credential)/i;
 const FIREBASE_WEB_CONFIG_KEYS = new Set(["apiKey", "authDomain", "projectId", "storageBucket", "messagingSenderId", "appId", "measurementId"]);
 const STRUCTURAL_TRANSLATION_KEYS = new Set([
-  "id", "slug", "title", "date", "startDate", "endDate", "timezone", "period", "planType", "cardCategory", "cover",
+  "id", "slug", "title", "date", "startDate", "endDate", "timezone", "period", "planType", "cardCategory", "cover", "uploadedPhoto",
   "booked", "lat", "lng", "googleMapsUrl", "mapsUrl", "url", "sourceUrl", "participantGroupIds",
   "weatherLocationIds", "sortOrder", "sortTime"
 ]);
@@ -194,6 +195,8 @@ export function validateTrip(input, options = {}) {
 function validatePlan(plan, location, context) {
   const { error, warn, groupIds, groupCount, planIds, allowExample } = context;
   if (!isPlainObject(plan)) return error(location, "must be an object");
+  const uploadIssues=uploadedPhotoProblems(plan.uploadedPhoto);for(const problem of uploadIssues)error(`${location}.${problem.path}`,problem.message);
+  if(plan.uploadedPhoto&&!uploadIssues.length)try{sanitizeRasterData(plan.uploadedPhoto.data,PLAN_PHOTO_BYTES_MAX,PLAN_PHOTO_EDGE_MAX);}catch{error(`${location}.uploadedPhoto.data`,"must be a valid bounded RGB/RGBA PNG");}
   if(plan.cardCategory!==undefined&&!CARD_CATEGORIES.includes(plan.cardCategory))error(`${location}.cardCategory`,"must be an explicit supported card category");
   if (plan.relatedLinks !== undefined) for (const problem of relatedLinksProblems(plan.relatedLinks)) error(`${location}.relatedLinks${problem.key}`, problem.message);
   requireString(plan, "id", location, error, { max: 80 });
@@ -220,7 +223,7 @@ function validatePlan(plan, location, context) {
     if (parsed.ok && Number.isFinite(plan.lat) && Math.abs(plan.lat - parsed.lat) > 0.0001) error(`${location}.lat`, "does not match the Google Maps place URL");
     if (parsed.ok && Number.isFinite(plan.lng) && Math.abs(plan.lng - parsed.lng) > 0.0001) error(`${location}.lng`, "does not match the Google Maps place URL");
   }
-  validatePhoto(plan.photo, `${location}.photo`, error, allowExample);
+  if(plan.photo||!plan.uploadedPhoto)validatePhoto(plan.photo, `${location}.photo`, error, allowExample);
   validateTranslations(plan, ["name", "review", "notes"].filter((key) => nonEmptyString(plan[key])), location, error);
   if (plan.participantGroupIds != null && !Array.isArray(plan.participantGroupIds)) {
     error(`${location}.participantGroupIds`, "must be an array");

@@ -1,6 +1,6 @@
-# Coray Trip 安装包 0.3.0
+# Coray Trip 安装包 0.4.0
 
-此包包含 skill 与远程 MCP 配置模板，不含账号、密码、token、App ID、授权、行程数据或服务器程序。原 0.2.1 导出中的内容规则仍保留；0.3.0 增加多用户 OAuth 工作流并移除安装专用地址。
+此包包含 skill 与远程 MCP 配置模板，不含账号、密码、token、App ID、授权、行程数据或服务器程序。原 0.2.1 导出中的内容规则仍保留；0.4.0 增加多用户 OAuth 工作流并移除安装专用地址。
 
 ## 给自己的 dot 的安装口令
 
@@ -26,3 +26,7 @@
 格式说明：https://agent-plugins.org/
 
 公开包只含示例地址；不得把私有配置、密码、回调 code/state、token 或行程内容加入包或聊天。
+
+## Plan photo upload contract (0.4.0)
+
+The existing upsert_plan.plan.uploadedPhoto must be visible in the actual manager tool schema as a strict object or null. Keys: mimeType=image/png, data=canonical PNG base64 without a data URL prefix, alt=1-160 characters without controls. Limit: 128 KiB and 1024 pixels per edge, nonanimated/noninterlaced 8-bit RGB/RGBA. The web editor converts PNG/JPEG/WebP locally. Omit to preserve; null clears the upload and reveals saved Commons/legacy imagery. Read first; use fresh expectedVersion and durable requestId. Never replace a whole trip to evade missing fields. Use supported Reload tools on the SAME installed connection; do not create a new identity, grant or login just for content writes. See content-contract.md. Package installation, deployment and native client acceptance are separate.

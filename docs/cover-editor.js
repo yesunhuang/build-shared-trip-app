@@ -1,5 +1,5 @@
-import {prepareLogoFile,brandingText} from "./branding-editor.js?v=v-e9767c7cc0cf";
-import {COVER_BYTES_MAX,COVER_EDGE_MAX,coverProblems,coverImage,presentationText} from "./trip-presentation.js?v=v-e9767c7cc0cf";
+import {prepareLogoFile,brandingText} from "./branding-editor.js?v=v-4b1b12ffbd8e";
+import {COVER_BYTES_MAX,COVER_EDGE_MAX,coverProblems,coverImage,presentationText} from "./trip-presentation.js?v=v-4b1b12ffbd8e";
 export const prepareCoverFile=(file,options)=>prepareLogoFile(file,{...options,edges:[COVER_EDGE_MAX,768,512,384,256],bytesMax:COVER_BYTES_MAX});
 export function createCoverEditor({document:doc,trip,language="en",onSave,onReload,onUnauthorized,prepareFile=prepareCoverFile}){
  const text=key=>presentationText(language,key),common=key=>brandingText(language,key);

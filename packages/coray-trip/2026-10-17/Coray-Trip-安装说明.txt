@@ -1,6 +1,6 @@
-# Coray Trip 安装包 0.3.0
+# Coray Trip 安装包 0.4.0
 
-此包包含 skill 与远程 MCP 配置模板，不含账号、密码、token、App ID、授权、行程数据或服务器程序。原 0.2.1 导出中的内容规则仍保留；0.3.0 增加多用户 OAuth 工作流并移除安装专用地址。
+此包包含 skill 与远程 MCP 配置模板，不含账号、密码、token、App ID、授权、行程数据或服务器程序。原 0.2.1 导出中的内容规则仍保留；0.4.0 增加多用户 OAuth 工作流并移除安装专用地址。
 
 ## 给自己的 dot 的安装口令
 
@@ -26,3 +26,5 @@
 格式说明：https://agent-plugins.org/
 
 公开包只含示例地址；不得把私有配置、密码、回调 code/state、token 或行程内容加入包或聊天。
+
+0.4.0 adds the uploadedPhoto contract. See the packaged content and setup references; deployment and actual target-client schemas need independent verification. Same connection identity, tools and scopes.

@@ -37,6 +37,7 @@ Schema-v7 source implements [trip membership](references/trip-membership.md). Up
 
 These apply to self-hosted data and to legacy generator input.
 
+- Self-hosted [plan photo uploads](references/plan-photo-upload.md) use the ordinary plan Save/Cancel flow or typed `upsert_plan.uploadedPhoto`. Read first; omit to preserve, null to remove the uploaded override. Never copy Google component content into an upload. Keep original and exported private artwork outside this repository.
 - Self-hosted [trip branding](references/trip-branding.md) is optional trip content: use an approved bounded PNG logo and an accessible light preset/custom theme through the shared editor or typed MCP fields. Read first and retain the existing logo when replacing only its theme. Do not infer artwork, publish private branding, change the installed app identity or activate providers as part of branding.
 
 - Put flights and stays in chronological plans. They are itinerary POIs, not a separate booking page.

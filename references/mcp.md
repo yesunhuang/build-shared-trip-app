@@ -178,3 +178,7 @@ OAuth acceptance: the complete local suite, official SDK OAuth provider (includi
 ## Cover and card-category fields
 
 The existing six-tool interface exposes independent trip `cover` (bounded PNG object or null) on create and `update_trip`, and explicit `cardCategory` enum on `upsert_plan`; reads preserve both. See the [field contract and rollout gate](trip-cover-and-categories.md). Cover edits do not require replacing `branding`. A local MCP SDK discovery test is separate from actual target-client schema visibility after an approved deployment and metadata reload of the same installed App.
+
+## Uploaded plan photos
+
+The existing `upsert_plan.plan.uploadedPhoto` field is a typed strict PNG object or null, with omission-preserves semantics. `get_trip` and `export_trip` include it only for authorized trips. Read/manage scopes and current memberships apply without new tools or grants. See the [photo contract](plan-photo-upload.md), including canonical limits, fallback attribution, idempotency and actual client-schema acceptance.

@@ -31,7 +31,7 @@ Agent Plugins 格式：https://agent-plugins.org/
 ## 这次配置最容易再踩的坑
 
 ### 1. 包版本、App 版本、MCP schema 版本不是同一件事
-原始 wrapper 基线为 0.2.1。本便携包为 0.3.0，增加独立账号工作流及示例服务地址；它不是服务器更新。原来的 App-bound 包只有 App 绑定和 skill，不拥有工具参数定义。只改 wrapper 版本不会刷新 App 中已导入的 schema。
+原始 wrapper 基线为 0.2.1。本便携包为 0.4.0，增加独立账号工作流及示例服务地址；它不是服务器更新。原来的 App-bound 包只有 App 绑定和 skill，不拥有工具参数定义。只改 wrapper 版本不会刷新 App 中已导入的 schema。
 
 ### 2. “服务器已有字段”不等于“这段对话能传字段”
 SDK tools/list、App discovery、目标对话的实际工具参数是三层验收。工具名能看见或 list_trips 成功，都不能证明 branding/cover/cardCategory 写入参数已更新。
@@ -75,3 +75,7 @@ Content manager 也只能访问已加入的行程。已分配旧行程不代表�
 服务器测试涵盖双账号隔离、只读上限、独立撤销、code/refresh 重放、旧授权兼容与 schema-v8 恢复。实际宿主对 scope 缩减的支持须由收件人自己验收；SDK 通过不代表任意宿主都通过。即使 Member 在网页是行程 creator，read-only MCP 也不能创建或编辑。账号角色变化或撤销会结束授权；成员变动立即限制行程。授权的客户端/账号/资源互相绑定，不能用别人的 code 或 refresh token。
 
 原下载附件不会自动更新。更新同一已安装连接时保留其身份、scope 与 grant；由用户使用宿主支持的更新/Reload tools，不创建替代连接。未安装的收件人自行首次导入、注册和同意。
+
+## Plan photo upload contract (0.4.0)
+
+The existing upsert_plan.plan.uploadedPhoto must be visible in the actual manager tool schema as a strict object or null. Keys: mimeType=image/png, data=canonical PNG base64 without a data URL prefix, alt=1-160 characters without controls. Limit: 128 KiB and 1024 pixels per edge, nonanimated/noninterlaced 8-bit RGB/RGBA. The web editor converts PNG/JPEG/WebP locally. Omit to preserve; null clears the upload and reveals saved Commons/legacy imagery. Read first; use fresh expectedVersion and durable requestId. Never replace a whole trip to evade missing fields. Use supported Reload tools on the SAME installed connection; do not create a new identity, grant or login just for content writes. See content-contract.md. Package installation, deployment and native client acceptance are separate.

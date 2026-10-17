@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parseFullGoogleMapsPlaceUrl } from "../assets/app-template/public/google-maps-place-url.js";
 import {sanitizeRasterData} from "../server/domain/branding.mjs";
 import {COVER_BYTES_MAX,COVER_EDGE_MAX} from "../assets/app-template/public/trip-presentation.js";
+import {PLAN_PHOTO_BYTES_MAX,PLAN_PHOTO_EDGE_MAX} from "../assets/app-template/public/plan-photo.js";
 import { validateTrip } from "./validate-trip.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +48,7 @@ function copyTemplate(outputDirectory, force) {
 function normalizeTrip(input) {
   const trip = structuredClone(input.trip);
   if(trip.cover)trip.cover.data=sanitizeRasterData(trip.cover.data,COVER_BYTES_MAX,COVER_EDGE_MAX);
+  for(const day of trip.days||[])for(const plan of day.plans||day.slots||[])if(plan.uploadedPhoto)plan.uploadedPhoto.data=sanitizeRasterData(plan.uploadedPhoto.data,PLAN_PHOTO_BYTES_MAX,PLAN_PHOTO_EDGE_MAX);
   trip.title = input.app.name;
   trip.shortName = input.app.shortName;
   trip.metaDescription = input.app.metaDescription;

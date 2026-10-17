@@ -52,6 +52,8 @@ import { applyTripBranding } from "./trip-branding.js?v=__CACHE_VERSION__";
 import { createBrandingEditor, brandingText } from "./branding-editor.js?v=__CACHE_VERSION__";
 import { applyTripCover, cardCategory, categoryBadge, presentationText } from "./trip-presentation.js?v=__CACHE_VERSION__";
 import { createCoverEditor } from "./cover-editor.js?v=__CACHE_VERSION__";
+import {uploadedPhotoSource,planPhotoText} from "./plan-photo.js?v=__CACHE_VERSION__";
+import {createPlanPhotoFields} from "./plan-photo-editor.js?v=__CACHE_VERSION__";
 import { optimizedPhotoUrl } from "./photo-assets.js?v=__CACHE_VERSION__";
 import { parseFullGoogleMapsPlaceUrl } from "./google-maps-place-url.js?v=__CACHE_VERSION__";
 import { computeReminders, remindersDueOnDate } from "./reminder-dates.js?v=__CACHE_VERSION__";
@@ -263,6 +265,7 @@ let selectedMapSlotId = "";
 // One plan-editor session at a time. Place/photo lookups and choices belong to the
 // session that started them; closing or reopening the editor discards them.
 let editorSession = null;
+let planPhotoFields = null;
 // Explicit place/photo lookup is a hosted editor feature only. The static
 // generator and approved viewers never render lookup controls.
 const LOOKUP_ENABLED = HOSTED && !HOSTED_READ_ONLY;
@@ -288,7 +291,7 @@ const linkGuard = createLinkActivationGuard({ root: document });
 // A 401 is never deferred: redirectToLogin() clears the visible page at once, and any refresh
 // deferred during a held link press is dropped so it can never render or reload afterwards. No
 // Google reservation or permit can start anything after this.
-function leaveForSignIn() { endWeatherSession(); googleAllowanceGate?.dispose(); googlePlaceDetails?.dispose(); linkGuard.dispose(); redirectToLogin(); }
+function leaveForSignIn() { endEditorSession(); endWeatherSession(); googleAllowanceGate?.dispose(); googlePlaceDetails?.dispose(); linkGuard.dispose(); redirectToLogin(); }
 const WEATHER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 const FLIGHT_BOOKING_REFS = Object.freeze({});
@@ -1825,6 +1828,7 @@ function renderPlaceSource(slot) {
 
 // Visible credit, licence and source for an explicitly chosen licensed photo.
 function renderPhotoCredit(slot) {
+  if(uploadedPhotoSource(slot?.uploadedPhoto))return textElement("p","photo-credit photo-credit--uploaded",planPhotoText(currentLanguage,"credit"));
   const photo = readSavedPhoto(slot?.photo);
   if (!photo) return null;
   return photoCreditLine(photo, "photo-credit photo-credit--licensed");
@@ -2212,16 +2216,18 @@ function focusMapPoint(lat, lng, zoom = 13) {
 }
 
 function renderLocationPhoto(slot) {
+  const uploaded=uploadedPhotoSource(slot.uploadedPhoto);
   const record = getPlacePhoto(slot.photoSourceId || slot.id);
   const slotPhoto = typeof slot.photo === "string" ? slot.photo : slot.photo?.url;
-  const url = slotPhoto || record?.url;
+  const url = uploaded || slotPhoto || record?.url;
   const frame = element("div", "location-photo");
   frame.append(textElement("span", "location-photo__fallback", slot.name));
   if (!url) return frame;
 
   const image = document.createElement("img");
-  image.src = optimizedPhotoUrl(url);
-  image.alt = ui(currentLanguage, "representativePhoto", { name: slot.name });
+  image.src = uploaded || optimizedPhotoUrl(url);
+  image.alt = uploaded ? slot.uploadedPhoto.alt : ui(currentLanguage, "representativePhoto", { name: slot.name });
+  if(uploaded)image.dataset.uploadedPhoto="";
   image.loading = "lazy";
   image.decoding = "async";
   image.addEventListener("error", () => image.remove());
@@ -2361,6 +2367,7 @@ function renderCredits() {
   };
 
   orderedDaySlots(day).forEach((slot) => {
+    if(uploadedPhotoSource(slot.uploadedPhoto))return;
     addPhotoCredit(getPlacePhoto(slot.photoSourceId || slot.id), timelineSlotName(slot));
   });
 
@@ -2867,6 +2874,10 @@ function openItemDialog(dayId, slotId = "") {
   updateGoogleMapsLinkState();
   // Shows any saved place/photo from trip data only; nothing is looked up here.
   startEditorSession(dayId, slotId, slot);
+  if(HOSTED){
+    planPhotoFields=createPlanPhotoFields({doc:document,plan:slot,language:currentLanguage,onBusy:busy=>{const save=els.form.querySelector('[type="submit"]');if(save)save.disabled=busy;}});
+    (document.getElementById("photo-lookup")||els.form.elements.review.closest("label")).after(planPhotoFields.root);
+  }
   relatedLinksEditor = createRelatedLinksEditor({ doc: document,
     container: document.getElementById("related-links-editor"), links: slot?.relatedLinks || [],
     language: currentLanguage, makeId: () => uid("link") });
@@ -3100,6 +3111,7 @@ function startEditorSession(dayId, slotId, slot) {
 }
 
 function endEditorSession() {
+  if(planPhotoFields){planPhotoFields.dispose();planPhotoFields.root.remove();planPhotoFields=null;}
   const session = editorSession;
   if (!session) return;
   editorSession = null;
@@ -3264,6 +3276,7 @@ function choosePhoto(session, candidate) {
   if (editorSession !== session || !els.dialog.open) return;
   const photo = photoForSaving(candidate);
   if (!photo) return;
+  planPhotoFields?.reset();
   session.revision += 1;
   session.photo = { mode: "photo", photo, preview: candidate, revision: session.revision };
   renderLookup(session, "photo");
@@ -3282,6 +3295,7 @@ function clearChosenLocation(session) {
 
 function clearChosenPhoto(session) {
   if (editorSession !== session) return;
+  planPhotoFields?.reset();
   session.revision += 1;
   session.photo = { mode: "cleared", photo: null, preview: null, revision: session.revision };
   renderLookup(session, "photo");
@@ -3821,6 +3835,7 @@ function focusDialogFieldOnDesktop(field) {
 
 async function handleItemSubmit(event) {
   event.preventDefault();
+  if(planPhotoFields&&!planPhotoFields.validate())return;
   const relatedLinks = relatedLinksEditor?.read();
   if (!relatedLinks) return;
   const data = new FormData(els.form);
@@ -3912,6 +3927,7 @@ async function handleItemSubmit(event) {
     });
   }
   if (chosenPhoto) slotPatch.photo = clone(chosenPhoto);
+  if(planPhotoFields?.dirty)slotPatch.uploadedPhoto=clone(planPhotoFields.read());
 
   // Set by the last run of the mutator (a sync transaction may run it more than once).
   let googleRelinkNeeded = false;
@@ -4190,6 +4206,7 @@ function connectHostedSync() {
       hostedReady = false; syncReady = false;
       if (error.status === 401) { hostedPoller.stop(); leaveForSignIn(); return; }
       if([403,404,410].includes(error.status)){
+        endEditorSession();
         hostedPoller.stop();endWeatherSession();stopTripGooglePlaces();linkGuard.dispose();hostedServerTrip=null;currentTrip={days:[],reminders:[]};
         void clearProtectedBrowserState();
         const home=textElement("a","button button--light",ui(currentLanguage,"allTrips"));home.href="/";
