@@ -1,0 +1,5 @@
+# Portable package checksums cover exact LF bytes in Git and the ZIP.
+/packages/coray-trip/2026-10-17/**/*.md text eol=lf
+/packages/coray-trip/2026-10-17/**/*.json text eol=lf
+/packages/coray-trip/2026-10-17/**/*.txt text eol=lf
+/packages/coray-trip/2026-10-17/*.zip -text
