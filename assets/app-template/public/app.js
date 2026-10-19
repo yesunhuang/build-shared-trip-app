@@ -1,3 +1,4 @@
+import {installShareManagement} from "./share-management.js?v=__CACHE_VERSION__";
 import { getGooglePlaceLinks } from "./google-place-links.js?v=__CACHE_VERSION__";
 import {createTripParticipantsDialog,membershipText} from "./trip-members-editor.js?v=__CACHE_VERSION__";
 import {
@@ -201,6 +202,8 @@ let hostedReady = HOSTED;
 let hostedWriteInFlight = false;
 let hostedConflictTimer = null;
 let hostedReloadPending = false;
+let hostedShareControl = null;
+let hostedCanManageSharing = HOSTED && getBootSession()?.capabilities?.manageSharing === true;
 let currentLanguage = getInitialLanguage();
 let mapInstance = null;
 let deferredInstallPrompt = null;
@@ -230,6 +233,8 @@ const weatherForecast = createWeatherForecastController({
   onChange: () => renderWeatherAfterForecast()
 });
 function endWeatherSession() {
+  hostedShareControl?.destroy();
+  hostedShareControl = null;
   weatherSessionEnded = true;
   const session = weatherEditorSession;
   weatherEditorSession = null;
@@ -4197,6 +4202,8 @@ function connectHostedSync() {
   hostedPoller = createTripPoller({
     load: () => hostedApi.getTrip(HOSTED_TRIP_ID),
     onData: (payload) => {
+      hostedCanManageSharing = payload.access?.canInvite === true;
+      hostedShareControl?.setCanManage(hostedCanManageSharing);
       if(payload.access&&payload.access.canEdit===HOSTED_READ_ONLY){hostedReady=false;stopTripGooglePlaces();location.reload();return;}
       hostedReady = true; syncReady = true;
       if (!hostedWriteInFlight) acceptHostedTrip(expectTrip(payload, HOSTED_TRIP_ID));
@@ -4300,6 +4307,14 @@ function renderHostedControls() {
   const brandingButton=textElement("button","button button--quiet",brandingText(currentLanguage,"open"));brandingButton.type="button";brandingButton.dataset.action="edit-branding";brandingButton.disabled=Boolean(hostedServerTrip.archived);brandingButton.addEventListener("click",openBrandingDialog);controls.insertBefore(brandingButton,exportButton);
   const coverButton=textElement("button","button button--quiet",presentationText(currentLanguage,"open"));coverButton.type="button";coverButton.dataset.action="edit-cover";coverButton.disabled=Boolean(hostedServerTrip.archived);coverButton.addEventListener("click",openCoverDialog);controls.insertBefore(coverButton,exportButton);
   els.addReminder.disabled=Boolean(hostedServerTrip.archived);
+  if (!hostedShareControl) {
+    hostedShareControl=installShareManagement({tripId:HOSTED_TRIP_ID,container:controls,canManage:hostedCanManageSharing,language:()=>currentLanguage,
+      onUnauthorized:error=>{hostedCanManageSharing=false;hostedShareControl?.setCanManage(false);if(error?.status===401)leaveForSignIn();else hostedPoller?.retryNow();}});
+  } else {
+    hostedShareControl.setCanManage(hostedCanManageSharing);
+    hostedShareControl.relabel();
+    if(hostedCanManageSharing)controls.append(hostedShareControl.button);
+  }
 }
 
 function openCoverDialog(){

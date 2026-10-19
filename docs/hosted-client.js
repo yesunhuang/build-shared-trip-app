@@ -10,8 +10,8 @@
 // enforces every permission independently.
 
 // Re-exported so the home page (which imports only this module) shares the same link guard.
-export { createLinkActivationGuard } from "./link-activation.js?v=v-1b17bacdae34";
-export {createTripParticipantsDialog,createJoinTripControl,membershipText} from "./trip-members-editor.js?v=v-1b17bacdae34";
+export { createLinkActivationGuard } from "./link-activation.js?v=v-95ab054857fb";
+export {createTripParticipantsDialog,createJoinTripControl,membershipText} from "./trip-members-editor.js?v=v-95ab054857fb";
 
 export const TRIP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const LANGUAGE_STORAGE_KEY = "shared-trips-language";
@@ -422,7 +422,7 @@ export function getBootSession() { return bootSession; }
 // Fail closed: anything other than an explicit server capability is read-only.
 export function sessionCanEdit(session) { return session?.capabilities?.editTrips === true; }
 export function sessionCanCreate(session) { return session?.capabilities?.createTrips === true||sessionCanEdit(session); }
-export function sessionForTrip(session,payload){return payload?.access?{...session,capabilities:{...session?.capabilities,editTrips:payload.access.canEdit===true}}:session;}
+export function sessionForTrip(session,payload){return payload?.access?{...session,capabilities:{...session?.capabilities,editTrips:payload.access.canEdit===true,manageSharing:payload.access.canInvite===true}}:session;}
 export function sessionCanManageAccounts(session) { return session?.capabilities?.manageAccounts === true; }
 export function sessionCanImport(session) { return session?.capabilities?.importTrips === true; }
 
@@ -615,4 +615,4 @@ export function exportFilename(trip = {}, tripId = "") {
     .slice(0, 60);
   return `${base || "trip"}-${tripId || trip.id || "export"}.json`;
 }
-export {coverImage} from "./trip-presentation.js?v=v-1b17bacdae34";
+export {coverImage} from "./trip-presentation.js?v=v-95ab054857fb";

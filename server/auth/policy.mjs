@@ -59,6 +59,13 @@ export const LOOKUP_ROUTE = /^\/api\/trips\/([^/]+)\/(places|photos)\/search$/;
 // "preview" need an editor. It never writes trip content, never changes a trip version and is not a
 // security or account capability. Browser sessions only: the handler refuses the owner bearer.
 export const GOOGLE_RESERVATION_ROUTE = /^\/api\/trips\/([^/]+)\/google-places\/reservations$/;
+// Anonymous read-only link management (schema v9, trip-sharing.mjs). Admission only: TripSharing
+// then requires the owner administrator or the trip's current approved creator (member, browser
+// session). Content-manager role or membership alone is refused; MCP/OAuth principals never reach
+// /api. The X-Trip-Share guest header is never a principal for any /api, /mcp or /photos route.
+export const SHARING_ROUTE = /^\/api\/trips\/([^/]+)\/sharing(?:\/(preview|revoke))?$/;
+const SHARING_READ = /^\/api\/trips\/[^/]+\/sharing(?:\/preview)?$/;
+const SHARING_WRITE = /^\/api\/trips\/[^/]+\/sharing(?:\/revoke)?$/;
 const MANAGER_WRITE_ROUTES = [/^\/api\/trips$/, /^\/api\/import$/, /^\/api\/trips\/[^/]+\/changes$/, LOOKUP_ROUTE];
 
 export function viewerMayAccess(method, pathname) {
@@ -66,6 +73,7 @@ export function viewerMayAccess(method, pathname) {
   // Route admission only: membership/creator checks are authoritative in the shared gateway.
   if(method==="POST"&&(pathname==="/api/trips"||pathname==="/api/join-trip"||/^\/api\/trips\/[^/]+\/(?:changes|invitations|members)$/.test(pathname)||/^\/api\/trips\/[^/]+\/invitations\/[^/]+\/revoke$/.test(pathname)||LOOKUP_ROUTE.test(pathname)))return true;
   if (method === "POST" && GOOGLE_RESERVATION_ROUTE.test(pathname)) return true;
+  if ((method === "GET" && SHARING_READ.test(pathname)) || (method === "POST" && SHARING_WRITE.test(pathname))) return true;
   if (isProtectedMediaPath(pathname)) return method === "GET" || method === "HEAD";
   return method === "GET" && VIEWER_READ_ROUTES.some((route) => route.test(pathname));
 }

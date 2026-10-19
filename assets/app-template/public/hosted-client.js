@@ -422,7 +422,7 @@ export function getBootSession() { return bootSession; }
 // Fail closed: anything other than an explicit server capability is read-only.
 export function sessionCanEdit(session) { return session?.capabilities?.editTrips === true; }
 export function sessionCanCreate(session) { return session?.capabilities?.createTrips === true||sessionCanEdit(session); }
-export function sessionForTrip(session,payload){return payload?.access?{...session,capabilities:{...session?.capabilities,editTrips:payload.access.canEdit===true}}:session;}
+export function sessionForTrip(session,payload){return payload?.access?{...session,capabilities:{...session?.capabilities,editTrips:payload.access.canEdit===true,manageSharing:payload.access.canInvite===true}}:session;}
 export function sessionCanManageAccounts(session) { return session?.capabilities?.manageAccounts === true; }
 export function sessionCanImport(session) { return session?.capabilities?.importTrips === true; }
 

@@ -10,6 +10,14 @@
 # MCP (POST requests, including 202 notification responses) passes unchanged.
 
 {
+	# Runtime errors may include request headers even with access logging disabled.
+	# Redact the guest capability from the default runtime/error logger.
+	log {
+		format filter {
+			request>headers>X-Trip-Share delete
+			headers>X-Trip-Share delete
+		}
+	}
 	# The admin API keeps its default in-container localhost listener; it is
 	# not published by compose.yaml. HTTP/3 is disabled because only TCP 443
 	# is published.
@@ -25,7 +33,7 @@
 	# and /attachments/* are authenticated private media (attachments are
 	# always 404 after the access check); /resources.html and /trips/* are
 	# trip-specific shells whose data loads only after sign-in.
-	@protected path /api/* /mcp /mcp/* /oauth/* /.well-known/oauth-* /trips/* /photos/* /attachments/* /resources.html
+	@protected path /api/* /guest/* /s/* /mcp /mcp/* /oauth/* /.well-known/oauth-* /trips/* /photos/* /attachments/* /resources.html
 	header @protected {
 		Cache-Control "no-store"
 		CDN-Cache-Control "no-store"

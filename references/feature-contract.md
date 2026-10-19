@@ -12,10 +12,12 @@ Preserve these behaviors unless the user explicitly requests a design change. Th
 | --- | --- | --- |
 | Apps | One service and one PWA for all trips | One generated static app per trip |
 | Data | Server SQLite, authoritative | Embedded seed, plus local preview storage or optional Firebase |
-| Access | Owner admin token; approved ordinary accounts read joined trips and edit their own as creator; all content managers, including assistants, edit member trips only. Only the owner administrator has global access. Sign-in for every trip/API; existing MCP-only OAuth authority unchanged | Link-based trust (Firebase) or none (local) |
+| Access | Owner admin token; approved ordinary accounts read joined trips and edit their own as creator; all content managers, including assistants, edit member trips only. Only the owner administrator has global access. Sign-in for full trip/API access; optional owner/creator-managed visitor links expose a separate limited read-only projection; existing MCP-only OAuth authority unchanged | Link-based trust (Firebase) or none (local) |
 | Sync | Bounded polling and reconnect | Firestore listener, or none |
 | Offline | Generic shell only; protected data stays in page memory | Cached itinerary shell |
 | Validation | Draft structure | Complete authoring checks |
+
+[Read-only visitor links](trip-sharing.md) use a separate lightweight four-language page, explicit server projection and digest-only revocable capability. Existing trips stay private. This view omits account, editing, structured booking and administration content and starts no paid provider component.
 
 ## Self-hosted home and trip switching
 

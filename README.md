@@ -61,6 +61,8 @@ These are rendered views of an earlier single-trip implementation. The phone ima
 
 **[Full gallery & verification notes](showcase/README.md)**
 
+An owner or current trip creator can opt into [revocable read-only visitor links](references/trip-sharing.md). Recipients open a simplified itinerary without an account. Review the shared text/photos first; regular trips remain private.
+
 ### In every trip
 
 - **One timeline** for flights, stays, transport, restaurants, and sights, with optional exact Google Maps links and placeholder plans.

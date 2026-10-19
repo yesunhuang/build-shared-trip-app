@@ -11,6 +11,6 @@ for(const version of ["fictional-current","fictional-next"]){
  const path="/home.css?v="+version;assert.equal((await request(path)).marker,"https://example.test"+path,"versioned CSS never aliases the installed unversioned stylesheet");const count=network.length;assert.equal((await request(path)).marker,"https://example.test"+path);assert.equal(network.length,count,"identical warm version makes no background request");
 }
 assert.equal(new Set(puts).size,2);
-for(const path of ["/api/trips","/mcp","/oauth/token","/.well-known/oauth-protected-resource","/photos/fictional.png"]){const count=network.length;assert.equal(await request(path),undefined);assert.equal(network.length,count,"protected and non-shell requests are left to the browser, never cached");}
+for(const path of ["/api/trips","/guest/trips/fictional","/s/fictional","/mcp","/oauth/token","/.well-known/oauth-protected-resource","/photos/fictional.png"]){const count=network.length;assert.equal(await request(path),undefined);assert.equal(network.length,count,"protected and non-shell requests are left to the browser, never cached");}
 assert.equal(await request("/home.css?v=fictional-current",{method:"POST"}),undefined);
 console.log("Self-hosted shell cache regression passed: distinct versioned CSS keys, no unversioned stale substitution, warm reuse and unchanged protected-path exclusions.");

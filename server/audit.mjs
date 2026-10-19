@@ -18,7 +18,9 @@ export const AUDIT_ACTIONS = Object.freeze([
   "account.approve", "account.revoke", "account.role", "invitation.create",
   "token.issue", "token.revoke", "access.denied", "auth.refused",
   // Schema v5 OAuth lifecycle (metadata only: client/grant IDs and fixed reason codes).
-  "oauth.register", "oauth.login", "oauth.consent", "oauth.token", "oauth.refresh", "oauth.revoke", "oauth.grant.revoke"
+  "oauth.register", "oauth.login", "oauth.consent", "oauth.token", "oauth.refresh", "oauth.revoke", "oauth.grant.revoke",
+  // Schema v9 anonymous read-only links: trip ID, share version and outcome only, never a token or digest.
+  "trip.share.create", "trip.share.revoke"
 ]);
 export const AUDIT_OUTCOMES = Object.freeze(["accepted", "replayed", "unchanged", "refused"]);
 // "operator" (schema v6) marks host-operator maintenance run offline through server/cli/*, never a

@@ -12,6 +12,7 @@ import { AUDIT_ACTIONS, AUDIT_CHANNELS, AUDIT_OUTCOMES } from "./audit.mjs";
 import { MEMBERSHIP_TABLES, TRIP_INVITE_ID } from "./trip-membership.mjs";
 import { localPhotoPaths, PRIVATE_PHOTO } from "./domain/media.mjs";
 import { validGrantScope, OAUTH_SCOPE } from "./auth/oauth-scopes.mjs";
+import { SHARE_REVOKE_REASONS, SHARE_TABLES, SHARE_TRIGGERS } from "./trip-sharing.mjs";
 
 // Schema history:
 //   v1 trips + request_log (days used "plans")
@@ -30,7 +31,12 @@ import { validGrantScope, OAUTH_SCOPE } from "./auth/oauth-scopes.mjs";
 //      roles, credentials, OAuth, content versions and the separate Google ledger are unchanged.
 // v8 expands OAuth grant/code validation to independently bound read/manage scopes. No rows,
 // roles, grants or access assignments are rewritten. Compatible rollback must retain this policy.
-export const SCHEMA_VERSION = 8;
+// v9 adds trip_shares (one revocable anonymous read-only link per trip, SHA-256 digest only) and
+//    three invalidation triggers (issuer revocation/epoch change, creator reassignment, member
+//    removal). Additive only: no existing row is rewritten and every trip stays unshared. Rollback
+//    retains this schema/ACL/share backend with the prior UI and current data. A v8 backend refuses
+//    v9; restoring a historical snapshot is separate recovery and can revive older credentials.
+export const SCHEMA_VERSION = 9;
 const BASE_TABLES = "CREATE TABLE IF NOT EXISTS trips (id TEXT PRIMARY KEY, version INTEGER NOT NULL, archived INTEGER NOT NULL, data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS request_log (scope TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(scope,request_id));";
 const ACCOUNT_TABLES = "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('pending','approved','revoked')), session_epoch INTEGER NOT NULL DEFAULT 0, invitation_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL); " +
   "CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at TEXT, used_by TEXT);";
@@ -108,6 +114,9 @@ export function openDatabase(filename, { origin } = {}) {
       db.exec("PRAGMA user_version=7");
     }
     if(old<8)db.exec("PRAGMA user_version=8");
+    // v9 adds the empty share table and its invalidation triggers only (IF NOT EXISTS: idempotent).
+    db.exec(SHARE_TABLES);
+    if(old<9)db.exec("PRAGMA user_version=9");
     db.exec("COMMIT");
   } catch (error) { db.exec("ROLLBACK"); db.close(); throw error; }
   return db;
@@ -158,7 +167,24 @@ export function validateSnapshot(filename) {
     if (version >= 5) validateOAuthTables(db,version);
     if (version >= 6) validateTombstones(db);
     if(version>=7)validateMembership(db);
+    if(version>=9)validateShares(db);
   } finally { db.close(); }
+}
+
+// Schema v9: share rows reference live trips, hold only a SHA-256 digest (never a raw token), and
+// a revoked row keeps no digest, issuer or expiry. The invalidation triggers must be present, so a
+// restored copy can never silently lose fail-closed issuer invalidation.
+function validateShares(db){
+  const triggers=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all().map(r=>r.name));
+  for(const name of SHARE_TRIGGERS)if(!triggers.has(name))throw new Error("Missing share invalidation trigger in snapshot.");
+  const trips=new Set(db.prepare("SELECT id FROM trips").all().map(r=>r.id)),users=new Set(db.prepare("SELECT id FROM users").all().map(r=>r.id));
+  for(const r of db.prepare("SELECT trip_id,version,token_hash,issuer,issuer_epoch,created_at,expires_at,revoked_at,revoked_reason,updated_at FROM trip_shares").all()){
+    const base=trips.has(r.trip_id)&&Number.isSafeInteger(r.version)&&r.version>0&&isTime(r.updated_at);
+    const active=r.token_hash!==null&&isDigest(r.token_hash)&&r.revoked_at===null&&r.revoked_reason===null&&isTime(r.created_at)&&(r.expires_at===null||Number.isSafeInteger(r.expires_at))&&
+      (r.issuer==="owner"?r.issuer_epoch===null:users.has(r.issuer)&&Number.isSafeInteger(r.issuer_epoch));
+    const revoked=r.token_hash===null&&r.issuer===null&&r.issuer_epoch===null&&r.created_at===null&&r.expires_at===null&&isTime(r.revoked_at)&&SHARE_REVOKE_REASONS.includes(r.revoked_reason);
+    if(!base||!(active||revoked))throw new Error("Invalid trip share in snapshot.");
+  }
 }
 
 // Schema v6: a tombstone holds only a valid stable trip ID, a positive deleted version and a valid

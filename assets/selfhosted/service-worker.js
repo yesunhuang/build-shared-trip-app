@@ -6,7 +6,7 @@ self.addEventListener("fetch",(event)=>{
   const url=new URL(event.request.url);
   if(url.origin!==self.location.origin||event.request.method!=="GET")return;
   // Protected responses and navigation never enter Cache Storage.
-  if(/^\/(?:api|mcp|oauth)(?:\/|$)/.test(url.pathname)||url.pathname.startsWith("/.well-known/oauth-"))return;
+  if(/^\/(?:api|mcp|oauth|guest|s)(?:\/|$)/.test(url.pathname)||url.pathname.startsWith("/.well-known/oauth-"))return;
   if(event.request.mode==="navigate"){
     event.respondWith(fetch(event.request,{cache:"no-store"}).catch(()=>caches.match("/offline.html")));return;
   }

@@ -13,7 +13,7 @@ import {
   sessionForTrip,
   toRenderTrip,
   tripIdFromPath
-} from "./hosted-client.js?v=v-1b17bacdae34";
+} from "./hosted-client.js?v=v-95ab054857fb";
 
 const MAX_AUTOMATIC_ATTEMPTS = 4;
 const STRINGS = {
@@ -147,7 +147,7 @@ async function start(trip) {
   setBootTrip(trip);
   seed.textContent = scriptSafeJSON(toRenderTrip(trip));
   try {
-    await import("./app.js?v=v-1b17bacdae34");
+    await import("./app.js?v=v-95ab054857fb");
     overlay.remove();
     document.documentElement.classList.remove("hosted-booting");
   } catch (error) {

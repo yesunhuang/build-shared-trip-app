@@ -1,6 +1,6 @@
 # Trip membership and login landing (schema v7)
 
-This is implemented source, with local fictional acceptance. Existing installations require a separately confirmed migration/rollout before this changes live permissions. Publication does not deploy it.
+The approved finite membership rollout completed in [CP042](../doc/Progress/progress_2026_10_17_cpx042_codex_b.md), including live enforcement, preservation and compatible rollback checks. The procedure below applies to a new installation or a separately authorized later reassignment; it is not an outstanding task for that completed rollout. Publication alone does not deploy changes.
 
 ## Rights
 
@@ -9,7 +9,7 @@ This is implemented source, with local fictional acceptance. Existing installati
 | Owner/administrator | All trips, existing administration and owner-only permanent deletion | Assign/remove approved accounts, designate the current creator, issue/revoke trip codes |
 | Content manager (existing or future) | Read/media/edit/export/archive/restore **member trips only**. Creating/importing enrolls the account in its new trip. Existing MCP credentials use the same boundary | No account/security administration. Can issue trip codes only when the current creator |
 | Ordinary approved account (stored role `viewer`, labelled Member) | Read/export joined trips and their bound private media. May create a trip and then edit/archive/restore that trip as its creator. No import, account/security administration or permanent deletion. Schema-v8 opt-in OAuth permits read-only MCP, never editing authority | Redeem a trip code; creators issue/revoke codes for their own trips |
-| Pending/revoked/anonymous | No trip content or private media | No joining or management |
+| Pending/revoked/anonymous | No authenticated trip content or private media; a separately enabled [visitor link](trip-sharing.md) grants only its explicit read-only projection | No joining or management |
 
 The creator is a current, trip-specific responsibility, not a global account role. Removing creator responsibility ends invitation authority; an ordinary account becomes read-only, while a content manager retains editing only while still a member. Removing membership ends access. Outstanding codes from a displaced creator are revoked. Account revocation or role changes revoke issued trip codes and credentials; reapproval never revives them. Memberships persist unless separately removed. The owner can remove an inactive account without reapproving it. No existing or future content-manager role implies all-trip access. Schema-v8 opt-in multiuser OAuth preserves existing grants and the membership boundary, allowing independent read/manage consent without changing roles or assignments.
 
@@ -50,7 +50,9 @@ HTTP operations, all protected/no-store:
 
 The server returns `landingPath` at successful sign-in. It considers only accessible, nonarchived trips with a valid saved day range whose end date is today or later **in that trip's timezone**. There is no arbitrary future cutoff. Undated drafts and past/archived trips do not count. Exactly one eligible trip opens that trip; zero or multiple show the accessible list. The old `next` query no longer overrides this decision. Responses never point outside the app, and a membership removed before navigation is checked again on the actual trip read.
 
-## Exact rollout proposal — confirmation required
+<a id="exact-rollout-proposal--confirmation-required"></a>
+
+## Procedure for a new membership rollout
 
 1. Produce a private, read-only worksheet with `node server/cli/trip-membership-plan.mjs --database <outside-checkout/shared-trip.sqlite> --out <outside-checkout/new-private-plan.json>`. The CLI cannot apply changes or overwrite a plan. It refuses repository-contained paths, follows existing real paths/junctions when checking that boundary, reads only access-relevant public account columns and trip identity/title/version, and never reads credential or OAuth tables. Its fingerprint covers those access-relevant fields, not a complete backup. Keep the worksheet and actual user/trip mapping outside public Git.
 2. Transfer the owner's approved finite per-trip matrix through a private file, including content managers and optional creator choices. The v3 worksheet records reviewed account roles/statuses and explicit `{userId,role}` changes, with `rolloutApproved:false`. A requested existing-assistant assignment must enumerate only the reviewed existing trip IDs, through ordinary member rows; later trips are never selected automatically. Keep other owner-approved assignments separate from inferred traveler names. This changes no roles/grants or live access. Confirm the private matrix and rollout; no private values belong in Git or relay messages. Prior v2 plans are refused.
@@ -65,4 +67,4 @@ After rollout approval and the schema-v7 upgrade, stop the app normally and run 
 
 The command refuses a running service, stale trips/roles/statuses/ACL state, malformed assignments, obsolete plan versions, public-checkout paths and an existing backup filename. It validates a fresh backup before mutation, preflights the entire finite matrix, then calls the shared assignment operation. Each operation is atomic; a later failure preserves completed operations and supports identical durable restart/retry with a new backup. It never extracts credentials, changes roles/grants, issues codes or touches the Google ledger. Restore compatibility must be checked separately before rollout.
 
-Current gate: source, fictional tests and private inspection/preparation only. Live assignments and deployment remain unapproved; preserve existing roles, credentials and grants. An already approved private matrix should be delivered as a private file rather than requested again in a public/relay conversation.
+Completed rollout: CP042 applied and verified the approved finite matrix. Preserve current memberships, roles, credentials and grants. Any later assignment uses fresh reviewed state and applicable authorization; do not replay the completed worksheet. An already approved private matrix should be delivered as a private file rather than requested again in a public/relay conversation.

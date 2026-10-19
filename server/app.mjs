@@ -21,6 +21,8 @@ import { AuditLog } from "./audit.mjs";
 import { ContentGateway, actorOf } from "./content-access.mjs";
 import { OAUTH_ACCESS_PATTERN, OAuthStore } from "./auth/oauth.mjs";
 import { createOAuth } from "./oauth-http.mjs";
+import { TripSharing } from "./trip-sharing.mjs";
+import { SHARING_ROUTE } from "./auth/policy.mjs";
 
 // Private trip photos live in <dataDir>/photos, outside the checkout and every static directory, and
 // are served only by the authenticated media handler below.
@@ -130,6 +132,9 @@ export async function startServer(config) {
   }
   catch (error) { try { db.close(); } finally { lock.release(); } throw error; }
   const photoDir = path.resolve(config.photoDir || path.join(config.dataDir, PHOTO_SUBDIR));
+  // Anonymous read-only links (schema v9). config.guestLimits is an optional, code-only test hook
+  // for the bounded abuse counters; it is never read from the environment.
+  const sharing = new TripSharing({ service, membership: gateway.membership, audit, clock, photoDir, limits: config.guestLimits || {} });
   // Only an explicit enabled config with a key turns the browser feature on; anything else is off.
   const googlePlaces = config.googlePlaces?.enabled === true && typeof config.googlePlaces.browserKey === "string" && config.googlePlaces.browserKey
     ? { enabled: true, browserKey: config.googlePlaces.browserKey } : { enabled: false };
@@ -221,6 +226,9 @@ export async function startServer(config) {
       if (origin && origin !== allowedOrigin) throw new DomainError("forbidden_origin",403,"Origin is not allowed.");
       const pathname = url.pathname;
       if (pathname === "/health" && req.method === "GET") { send(res,200,{status:"ok"}); return; }
+      // Anonymous guest reads are handled before any cookie or bearer is looked at: the share header
+      // authorizes only these two read routes and never yields a principal, session or cookie.
+      if (pathname === "/guest" || pathname.startsWith("/guest/")) { sharing.handle(req, res, pathname, { origin: allowedOrigin, client: req.socket.remoteAddress || "local" }); return; }
       const now = Date.now();
       sessions.sweep(now);
       const secure = allowedOrigin.startsWith("https:") ? "; Secure" : "";
@@ -332,7 +340,17 @@ export async function startServer(config) {
         const reservation = GOOGLE_RESERVATION_ROUTE.exec(pathname);
         const members=/^\/api\/trips\/([^/]+)\/members$/.exec(pathname);
         const tripInvites=/^\/api\/trips\/([^/]+)\/invitations(?:\/([^/]+)\/revoke)?$/.exec(pathname);
-        if(members&&req.method==="POST")result=gateway.membership.assign(principal,decodeSegment(members[1]),await readJSON(req,SMALL_BODY));
+        const share=SHARING_ROUTE.exec(pathname);
+        if(share){
+          // Owner administrator or current creator only (TripSharing.authorize); responses are no-store.
+          // The raw token is returned only by an explicit POST create/rotate and is never logged.
+          const id=decodeSegment(share[1]);
+          if(!share[2]&&req.method==="GET")result=sharing.get(principal,id);
+          else if(share[2]==="preview"&&req.method==="GET")result=sharing.preview(principal,id,allowedOrigin);
+          else if(!share[2]&&req.method==="POST")result=sharing.create(principal,id,await readJSON(req,SMALL_BODY));
+          else if(share[2]==="revoke"&&req.method==="POST")result=sharing.revoke(principal,id,await readJSON(req,SMALL_BODY));
+        }
+        else if(members&&req.method==="POST")result=gateway.membership.assign(principal,decodeSegment(members[1]),await readJSON(req,SMALL_BODY));
         else if(tripInvites){const id=decodeSegment(tripInvites[1]);if(tripInvites[2]&&req.method==="POST")result=gateway.membership.revoke(principal,id,decodeSegment(tripInvites[2]),await readJSON(req,SMALL_BODY));else if(!tripInvites[2]&&req.method==="POST"){result=gateway.membership.issue(principal,id,await readJSON(req,SMALL_BODY));status=201;}else if(!tripInvites[2]&&req.method==="GET")result=gateway.membership.invitations(principal,id);}
         else if (reservation && req.method === "POST") {
           // One allowance reservation before one app-controlled Google action in a browser. Browser
@@ -417,7 +435,7 @@ export async function startServer(config) {
   try { await new Promise((resolve,reject) => {server.once("error",reject); server.listen(config.port,config.host,resolve);}); }
   catch (error) { try { googleAllowance.close(); db.close(); } finally { lock.release(); } throw error; }
   let closing;
-  return { server, service, accounts, tokens, audit, db, oauth: oauthStore, lookups, googleAllowance, url: config.origin || "http://" + config.host + ":" + server.address().port,
+  return { server, service, accounts, tokens, audit, db, oauth: oauthStore, lookups, googleAllowance, sharing, url: config.origin || "http://" + config.host + ":" + server.address().port,
     close: () => closing ??= (async () => {
       await new Promise((resolve) => server.close(() => resolve()));
       try { googleAllowance.close(); db.close(); } finally { lock.release(); }

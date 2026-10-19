@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Generic, content-free shell: link unfurlers and crawlers see no trip data. -->
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+  <meta name="format-detection" content="telephone=no">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: https: http:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="theme-color" content="#17362f">
+  <meta property="og:title" content="Shared itinerary">
+  <meta property="og:description" content="A read-only travel itinerary.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary">
+  <title>Shared itinerary</title>
+  <link rel="stylesheet" href="/guest.css?v=__CACHE_VERSION__">
+</head>
+<body>
+  <header class="g-header">
+    <div class="g-brand">
+      <img id="logo" class="g-logo" alt="" width="40" height="40" hidden>
+      <span id="brand-label" data-text="sharedItinerary">Shared itinerary</span>
+    </div>
+    <label class="g-lang"><span class="g-visually-hidden" data-text="language">Language</span>
+      <select id="language">
+        <option value="en" lang="en">English</option>
+        <option value="zh-Hans" lang="zh-Hans">简体中文</option>
+        <option value="zh-Hant" lang="zh-Hant">繁體中文</option>
+        <option value="ja" lang="ja">日本語</option>
+      </select>
+    </label>
+  </header>
+  <main id="main" class="g-main">
+    <p id="refresh-status" class="g-refresh" role="status" aria-live="polite"></p>
+
+    <section id="loading" class="g-panel g-loading" aria-busy="true">
+      <p data-text="loading">Loading the itinerary…</p>
+    </section>
+
+    <section id="denied" class="g-panel g-denied" hidden aria-labelledby="denied-title">
+      <h1 id="denied-title" tabindex="-1" data-text="deniedTitle">This link is not available</h1>
+      <p data-text="deniedBody">This shared link has been closed. Please contact the person who sent it to you for a new link.</p>
+      <button id="denied-retry" type="button" class="g-button g-secondary" data-text="checkAgain">Check again</button>
+    </section>
+
+    <section id="error" class="g-panel g-error" hidden aria-labelledby="error-title">
+      <h1 id="error-title" tabindex="-1" data-text="errorTitle">The itinerary could not be loaded</h1>
+      <p data-text="errorBody">Please check your internet connection and try again.</p>
+      <button id="retry" type="button" class="g-button" data-text="retry">Try again</button>
+    </section>
+
+    <article id="trip" class="g-trip" hidden>
+      <figure id="cover" class="g-cover" hidden><img id="cover-img" alt=""></figure>
+      <h1 id="trip-title" class="g-title"></h1>
+      <p id="trip-phase" class="g-phase"></p>
+
+      <div class="g-refresh-actions">
+        <button id="check-updates" type="button" class="g-button g-secondary" aria-describedby="refresh-status" data-text="checkUpdates">Check for updates</button>
+      </div>
+
+      <div id="stale" class="g-stale" role="alert" hidden>
+        <p data-text="staleBody">Could not check for updates. You are seeing the last version loaded on this page.</p>
+        <button id="stale-retry" type="button" class="g-button" data-text="retry">Try again</button>
+      </div>
+
+      <nav id="day-nav" class="g-day-nav" aria-labelledby="day-nav-title">
+        <h2 id="day-nav-title" class="g-section-title" data-text="chooseDay">Choose a day</h2>
+        <ul id="day-list" class="g-day-list"></ul>
+        <div class="g-day-steps">
+          <button id="prev-day" type="button" class="g-button g-secondary" data-text="previousDay">Previous day</button>
+          <button id="next-day" type="button" class="g-button g-secondary" data-text="nextDay">Next day</button>
+        </div>
+      </nav>
+
+      <section id="day" class="g-day" aria-labelledby="day-heading">
+        <h2 id="day-heading" class="g-day-heading" tabindex="-1"></h2>
+        <p id="day-date" class="g-day-date"></p>
+        <div id="day-info" class="g-day-info"></div>
+        <ol id="slots" class="g-slots"></ol>
+        <p id="no-slots" class="g-empty" data-text="noPlans" hidden>No plans have been added for this day.</p>
+      </section>
+
+      <section id="reminders" class="g-reminders" aria-labelledby="reminders-title" hidden>
+        <h2 id="reminders-title" class="g-section-title" data-text="reminders">Reminders</h2>
+        <ul id="reminder-list" class="g-reminder-list"></ul>
+      </section>
+
+      <section id="share-panel" class="g-share" aria-labelledby="share-title">
+        <h2 id="share-title" class="g-section-title" data-text="shareTitle">Share this itinerary</h2>
+        <p data-text="shareNote">Anyone who has this link can view this itinerary.</p>
+        <button id="share-button" type="button" class="g-button g-secondary" data-text="shareLink">Share or copy link</button>
+        <div id="share-fallback" class="g-share-fallback" hidden>
+          <label for="share-url" data-text="shareFallback">Press and hold the link below to copy it.</label>
+          <input id="share-url" type="text" readonly autocomplete="off" autocapitalize="none" spellcheck="false">
+        </div>
+        <p id="share-status" class="g-note" role="status" aria-live="polite"></p>
+      </section>
+
+      <p class="g-footnote" data-text="readOnlyNote">Read-only view. Changes made by the organizer appear while this page is open.</p>
+    </article>
+  </main>
+  <script type="module" src="/guest.js?v=__CACHE_VERSION__"></script>
+</body>
+</html>

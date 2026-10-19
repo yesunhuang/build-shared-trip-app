@@ -11,7 +11,7 @@ if(fs.existsSync(destination))throw new Error("Refusing to overwrite an existing
 const db=new DatabaseSync(database,{readOnly:true});
 try{
  db.exec("BEGIN");if(db.prepare("PRAGMA integrity_check").get().integrity_check!=="ok")throw new Error("Invalid source database.");
- const version=db.prepare("PRAGMA user_version").get().user_version;if(version<4||version>8)throw new Error("Unsupported source schema.");
+ const version=db.prepare("PRAGMA user_version").get().user_version;if(version<4||version>9)throw new Error("Unsupported source schema.");
  // Inspect access-relevant public account columns only. Never read credential or OAuth tables.
  const digest=crypto.createHash("sha256");
  const accounts=db.prepare("SELECT id,username,role,status FROM users ORDER BY username").all();
