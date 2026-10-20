@@ -33,6 +33,8 @@ The [CP003 Chrome evidence](progress_2026_10_19_cpx003_codex_a.md#evidence) stil
 
 Automatic approval review declined an additional sensitive backup transfer because its payload and destination lacked explicit approval. No transfer occurred. Fresh backups, validated recovery materials and digest evidence remain on the server; these checks do not establish a new off-host copy. Deployment and server-side backup verification are complete. An additional backup transfer requires its own destination approval.
 
+Follow-up: explicit approval subsequently authorized the database/photo backup copy. Transfer and archive/file digest verification completed; [CP005](progress_2026_10_19_cpx005_codex_a.md) records that completion and the copy's scope.
+
 The owner or current approved creator can now review the sharing preview and explicitly enable a link. The operator left sharing off. No rollout decision remains.
 
 Operational mapping, detailed logs and recovery commands remain private. Codex handled this deployment work because it required private production context; no new public development task or Claude invocation was needed. The actual outgoing report/diff, links and public-safe Git identity were reviewed, and publication privacy checks passed.
